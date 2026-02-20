@@ -1,7 +1,7 @@
 // ── Memory Visualizer ──────────────────────────────────────────────
 // React Flow component that visualizes WASM memory as an interactive graph.
 // Shows stack variables as nodes and heap allocations as connected nodes
-// with pointer arrows between them.
+// with pointer arrows between them. Supports multi-frame call stacks.
 
 import { useCallback, useMemo } from 'react'
 import {
@@ -19,22 +19,33 @@ import { readMemorySnapshot, type MemoryValue, type HeapAllocation } from '@/lib
 
 // ── Custom Node Components ─────────────────────────────────────────
 
-function StackVariableNode({ data }: { data: { label: string; variables: MemoryValue[] } }) {
+function StackFrameNode({ data }: { data: { label: string; funcName: string; isActive: boolean; variables: MemoryValue[] } }) {
+    const borderColor = data.isActive ? 'border-blue-500/60' : 'border-slate-500/30'
+    const bgColor = data.isActive ? 'bg-blue-950/60' : 'bg-slate-950/40'
+    const headerBg = data.isActive ? 'bg-blue-500/10' : 'bg-slate-500/10'
+    const headerText = data.isActive ? 'text-blue-300' : 'text-slate-400'
+    const nameText = data.isActive ? 'text-blue-200' : 'text-slate-300'
+    const valueText = data.isActive ? 'text-blue-100/70' : 'text-slate-200/50'
+    const shadow = data.isActive ? 'shadow-blue-500/10' : 'shadow-none'
+
     return (
-        <div className="rounded-lg border border-blue-500/40 bg-blue-950/60 backdrop-blur-sm min-w-[180px] shadow-lg shadow-blue-500/10">
-            <div className="px-3 py-1.5 border-b border-blue-500/30 bg-blue-500/10 rounded-t-lg">
-                <span className="text-xs font-semibold text-blue-300 uppercase tracking-wider">
+        <div className={`rounded-lg border ${borderColor} ${bgColor} backdrop-blur-sm min-w-[200px] shadow-lg ${shadow} transition-all duration-200`}>
+            <div className={`px-3 py-1.5 border-b ${borderColor} ${headerBg} rounded-t-lg flex items-center gap-2`}>
+                <span className={`text-[10px] font-bold ${headerText} uppercase tracking-wider`}>
                     {data.label}
                 </span>
+                <span className={`text-[10px] font-mono ${headerText} opacity-60`}>
+                    {data.funcName}()
+                </span>
             </div>
-            <div className="p-2 space-y-1">
+            <div className="p-2 space-y-0.5">
                 {data.variables.length === 0 ? (
-                    <div className="text-xs text-muted-foreground italic px-1">No variables</div>
+                    <div className="text-xs text-muted-foreground italic px-1">No variables yet</div>
                 ) : (
                     data.variables.map((v, i) => (
                         <div key={i} className="flex items-center justify-between text-xs px-1 py-0.5 rounded hover:bg-blue-500/10">
-                            <span className="text-blue-200 font-mono">{v.name}</span>
-                            <span className="text-blue-100/70 font-mono ml-3">
+                            <span className={`${nameText} font-mono`}>{v.name}</span>
+                            <span className={`${valueText} font-mono ml-4 tabular-nums`}>
                                 {v.isPointer ? (
                                     <span className="text-amber-400">{String(v.value)}</span>
                                 ) : (
@@ -76,7 +87,7 @@ function HeapNode({ data }: { data: { label: string; ptr: number; members: Memor
 }
 
 const nodeTypes = {
-    stackVariable: StackVariableNode,
+    stackFrame: StackFrameNode,
     heapNode: HeapNode,
 }
 
@@ -88,7 +99,7 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
     g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 80 })
 
     for (const node of nodes) {
-        g.setNode(node.id, { width: 200, height: 120 })
+        g.setNode(node.id, { width: 220, height: 140 })
     }
     for (const edge of edges) {
         g.setEdge(edge.source, edge.target)
@@ -100,7 +111,7 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
         const pos = g.node(node.id)
         return {
             ...node,
-            position: { x: pos.x - 100, y: pos.y - 60 },
+            position: { x: pos.x - 110, y: pos.y - 70 },
         }
     })
 }
@@ -108,14 +119,14 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
 // ── Main Component ─────────────────────────────────────────────────
 
 export function MemoryVisualizer() {
-    const { debugMode, dwarfInfo, memoryBuffer, stackPointer } = useDebugStore()
+    const { debugMode, dwarfInfo, memoryBuffer, stackPointer, currentLine, currentFunc } = useDebugStore()
     const { allocations } = useExecutionStore()
 
-    // Read memory snapshot using the REAL cloned buffer and stack pointer
+    // Read memory snapshot with scope + time-travel filters
     const snapshot = useMemo(() => {
         if (debugMode !== 'paused' || !memoryBuffer) return null
-        return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, stackPointer)
-    }, [debugMode, dwarfInfo, allocations, memoryBuffer, stackPointer])
+        return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, stackPointer, currentLine, currentFunc)
+    }, [debugMode, dwarfInfo, allocations, memoryBuffer, stackPointer, currentLine, currentFunc])
 
     // Build React Flow nodes + edges from memory snapshot
     const { nodes, edges } = useMemo(() => {
@@ -126,13 +137,15 @@ export function MemoryVisualizer() {
         const nodes: Node[] = []
         const edges: Edge[] = []
 
-        // Stack node
+        // Stack frame node (active function)
         nodes.push({
             id: 'stack',
-            type: 'stackVariable',
+            type: 'stackFrame',
             position: { x: 0, y: 0 },
             data: {
                 label: 'Stack Frame',
+                funcName: currentFunc ?? 'main',
+                isActive: true,
                 variables: snapshot.stackVariables,
             },
             sourcePosition: Position.Right,
@@ -172,7 +185,7 @@ export function MemoryVisualizer() {
         // Layout the graph
         const layouted = layoutGraph(nodes, edges)
         return { nodes: layouted, edges }
-    }, [snapshot])
+    }, [snapshot, currentFunc])
 
     const onNodesChange = useCallback(() => { }, [])
     const onEdgesChange = useCallback(() => { }, [])

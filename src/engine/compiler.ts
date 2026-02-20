@@ -11,6 +11,7 @@ export interface CompileResult {
     success: boolean
     errors: string[]
     wasmBinary: Uint8Array | null
+    stepMap?: Record<number, { line: number; func: string }>
 }
 
 let worker: Worker | null = null
@@ -40,11 +41,14 @@ function setupWorkerHandlers() {
                 const dwarfInfo = parseDwarf(wasmBinary)
                 useDebugStore.getState().setDwarfInfo(dwarfInfo)
                 useDebugStore.getState().setWasmBinary(wasmBinary)
+                if (e.data.stepMap) {
+                    useDebugStore.getState().setStepMap(e.data.stepMap)
+                }
             } catch (err) {
                 console.warn('[compiler] DWARF parse failed:', err)
             }
 
-            currentResolve?.({ success: true, errors: [], wasmBinary })
+            currentResolve?.({ success: true, errors: [], wasmBinary, stepMap: e.data.stepMap })
             currentResolve = null
             stderrLines = []
         } else if (type === 'COMPILE_ERROR') {

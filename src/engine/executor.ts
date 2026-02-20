@@ -32,9 +32,14 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
             const ctrl = new Int32Array(debugSab)
 
             if (Atomics.load(ctrl, 0) === 1) { // 1 = PAUSED
-                const line = Atomics.load(ctrl, 1)
+                const stepId = Atomics.load(ctrl, 1)  // Now reads step ID, not raw line
                 const sp = Atomics.load(ctrl, 2)
                 const store = useDebugStore.getState()
+
+                // Decode stepId → (line, func) via the global stepMap
+                const mapEntry = store.stepMap[stepId]
+                const line = mapEntry ? mapEntry.line : -1
+                const func = mapEntry ? mapEntry.func : null
 
                 if (store.currentLine !== line || store.debugMode !== 'paused') {
                     // Safari-safe: Use ArrayBuffer copy, NOT SharedArrayBuffer.slice()
@@ -44,6 +49,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     store.setMemoryBuffer(memCopy)
                     store.setStackPointer(sp)
                     store.setCurrentLine(line)
+                    store.setCurrentFunc(func)
                     store.setDebugMode('paused')
                 }
             }

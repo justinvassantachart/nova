@@ -86,6 +86,7 @@ self.onmessage = async (e) => {
         ]
 
         let finalWasmBytes: Uint8Array | undefined
+        let globalStepMap: Record<number, { line: number; func: string }> = {}
 
         if (isDebug) {
             // ════════════════════════════════════════════
@@ -121,6 +122,8 @@ self.onmessage = async (e) => {
             // JavaScript strings, NOT Uint8Array. Handle both types.
             self.postMessage({ type: 'COMPILE_PROGRESS', message: '🔍 Instrumenting assembly…' })
 
+            let currentStepId = 1
+
             for (const asmName of asmFiles) {
                 // Look up the .s file in the tree (may be String or Uint8Array)
                 let rawData = getTreeNode(tree, asmName)
@@ -149,8 +152,10 @@ self.onmessage = async (e) => {
                     rawAsm = String(rawData)
                 }
 
-                const result = instrumentAssemblyDetailed(rawAsm)
+                const result = instrumentAssemblyDetailed(rawAsm, currentStepId)
                 const instrumentedAsm = result.output
+                currentStepId += result.injectedCount
+                Object.assign(globalStepMap, result.stepMap)
 
                 // Log instrumentation diagnostics
                 self.postMessage({ type: 'COMPILE_PROGRESS', message: result.diagnostics })
@@ -209,7 +214,11 @@ self.onmessage = async (e) => {
 
         if (finalWasmBytes) {
             const buf = finalWasmBytes.buffer.slice(finalWasmBytes.byteOffset, finalWasmBytes.byteOffset + finalWasmBytes.byteLength)
-            self.postMessage({ type: 'COMPILE_DONE', wasmBinary: buf }, [buf])
+            self.postMessage({
+                type: 'COMPILE_DONE',
+                wasmBinary: buf,
+                stepMap: isDebug ? globalStepMap : undefined,
+            }, [buf])
         } else {
             self.postMessage({ type: 'COMPILE_ERROR', errors: ['No output produced.'] })
         }

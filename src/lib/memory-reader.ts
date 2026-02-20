@@ -1,7 +1,7 @@
 // ── Memory Reader ──────────────────────────────────────────────────
 // Reads WASM linear memory while the executor worker is paused to extract
 // stack variable values and heap allocation contents. Uses DWARF info
-// for type-aware reading.
+// for type-aware reading with scope and time-travel filtering.
 
 import type { DwarfInfo, VariableInfo } from '@/engine/dwarf-types'
 
@@ -34,12 +34,17 @@ export interface MemorySnapshot {
 /**
  * Read memory values from a WASM memory buffer using DWARF variable info.
  * Called when the executor worker is frozen (Atomics.wait) so memory is stable.
+ *
+ * Scope filter: only shows variables that belong to `currentFunc`.
+ * Time-travel filter: hides variables declared ON or AFTER `currentLine`.
  */
 export function readMemorySnapshot(
     memoryBuffer: ArrayBuffer | null,
     dwarfInfo: DwarfInfo,
     allocations: { ptr: number; size: number }[],
     stackPointer: number,
+    currentLine: number | null,
+    currentFunc: string | null,
 ): MemorySnapshot {
     const stackVariables: MemoryValue[] = []
     const heapAllocations: HeapAllocation[] = []
@@ -51,13 +56,20 @@ export function readMemorySnapshot(
     const view = new DataView(memoryBuffer)
     const bytes = new Uint8Array(memoryBuffer)
 
-    // Read stack variables using DWARF variable info
-    for (const [name, varInfo] of Object.entries(dwarfInfo.variables)) {
+    // Read stack variables using DWARF variable info (now an array!)
+    for (const varInfo of dwarfInfo.variables) {
         // Skip internal/compiler-generated variables
-        if (name.startsWith('__') || name.startsWith('.')) continue
+        if (varInfo.name.startsWith('__') || varInfo.name.startsWith('.')) continue
+
+        // SCOPE FILTER: Hide variables from other functions
+        if (currentFunc && varInfo.funcName !== currentFunc) continue
+
+        // TIME-TRAVEL FILTER: Hide variables declared ON or AFTER current line
+        // This ensures variables "pop" into the UI only AFTER their declaration
+        if (currentLine !== null && varInfo.declLine > 0 && varInfo.declLine >= currentLine) continue
 
         try {
-            const mv = readVariable(view, bytes, name, varInfo, stackPointer)
+            const mv = readVariable(view, bytes, varInfo.name, varInfo, stackPointer)
             if (mv) stackVariables.push(mv)
         } catch {
             // Variable address out of bounds — skip
@@ -110,6 +122,7 @@ function readVariable(
 ): MemoryValue | null {
     // DWARF stackOffset is relative to the stack pointer.
     // Absolute address = Stack Pointer + Offset
+    if (varInfo.stackOffset === undefined) return null
     const address = stackPointer + varInfo.stackOffset
 
     // If out of bounds, still return with "???" so the UI draws the box

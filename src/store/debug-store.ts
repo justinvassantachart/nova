@@ -18,6 +18,12 @@ export interface DebugState {
     /** Currently paused source line number */
     currentLine: number | null
 
+    /** Current function name (from stepMap) */
+    currentFunc: string | null
+
+    /** Step ID → (line, func) mapping from the asm-interceptor */
+    stepMap: Record<number, { line: number; func: string }>
+
     /** User-set breakpoints (line numbers) */
     breakpoints: Set<number>
 
@@ -37,6 +43,8 @@ export interface DebugState {
     setDwarfInfo: (info: DwarfInfo) => void
     setDebugMode: (mode: DebugMode) => void
     setCurrentLine: (line: number | null) => void
+    setCurrentFunc: (func: string | null) => void
+    setStepMap: (map: Record<number, { line: number; func: string }>) => void
     toggleBreakpoint: (line: number) => void
     setWasmBinary: (binary: Uint8Array | null) => void
     setMemoryBuffer: (buf: ArrayBuffer | null) => void
@@ -49,6 +57,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     dwarfInfo: EMPTY_DWARF,
     debugMode: 'idle',
     currentLine: null,
+    currentFunc: null,
+    stepMap: {},
     breakpoints: new Set(),
     wasmBinary: null,
     memoryBuffer: null,
@@ -58,6 +68,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     setDwarfInfo: (info) => set({ dwarfInfo: info }),
     setDebugMode: (mode) => set({ debugMode: mode }),
     setCurrentLine: (line) => set({ currentLine: line }),
+    setCurrentFunc: (func) => set({ currentFunc: func }),
+    setStepMap: (map) => set({ stepMap: map }),
 
     toggleBreakpoint: (line) =>
         set((s) => {
@@ -75,6 +87,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     reset: () => set({
         debugMode: 'idle',
         currentLine: null,
+        currentFunc: null,
+        stepMap: {},
         liveVariables: {},
         wasmBinary: null,
         memoryBuffer: null,

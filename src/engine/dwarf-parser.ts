@@ -357,6 +357,7 @@ const DW_TAG_member = 0x0d
 const DW_TAG_pointer_type = 0x0f
 const _DW_TAG_base_type = 0x24
 const DW_TAG_typedef = 0x16
+const DW_TAG_subprogram = 0x2e
 
 // DWARF attributes we care about
 const DW_AT_name = 0x03
@@ -364,6 +365,7 @@ const DW_AT_type = 0x49
 const DW_AT_byte_size = 0x0b
 const DW_AT_data_member_location = 0x38
 const DW_AT_location = 0x02
+const DW_AT_decl_line = 0x3b
 
 // DWARF forms
 const DW_FORM_addr = 0x01
@@ -534,8 +536,8 @@ function parseDebugInfo(
     debugInfo: Uint8Array,
     debugAbbrev: Uint8Array,
     debugStr?: Uint8Array,
-): { variables: Record<string, VariableInfo>; types: Record<string, StructInfo> } {
-    const variables: Record<string, VariableInfo> = {}
+): { variables: VariableInfo[]; types: Record<string, StructInfo> } {
+    const variables: VariableInfo[] = []
     const types: Record<string, StructInfo> = {}
     const view = new DataView(debugInfo.buffer, debugInfo.byteOffset, debugInfo.byteLength)
 
@@ -573,12 +575,18 @@ function parseDebugInfo(
         // Current struct context for member parsing
         let currentStructOffset: number | null = null
 
+        // 🚨 TRACK DWARF TREE DEPTH to know what function we are inside
+        const dieStack: { tag: number, name: string }[] = []
+
         // Process DIEs
         while (offset < unitEnd && offset < debugInfo.length) {
             const dieOffset = offset
 
             const { value: abbrevCode, bytesRead: acb } = readULEB128(view, offset); offset += acb
+
+            // 🚨 A null DIE (0) means the current AST node ended. Pop the tree stack!
             if (abbrevCode === 0) {
+                dieStack.pop()
                 currentStructOffset = null
                 continue
             }
@@ -596,6 +604,7 @@ function parseDebugInfo(
             let dieTypeRef: number | undefined
             let dieMemberLoc: number | undefined
             let dieStackOffset: number | undefined
+            let dieDeclLine: number | undefined
 
             for (const attr of abbrev.attrs) {
                 const attrStart = offset
@@ -615,6 +624,11 @@ function parseDebugInfo(
                 // Read byte_size
                 if (attr.name === DW_AT_byte_size) {
                     dieSize = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize) ?? undefined
+                }
+
+                // Read declaration line
+                if (attr.name === DW_AT_decl_line) {
+                    dieDeclLine = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize) ?? undefined
                 }
 
                 // Read type reference
@@ -692,18 +706,37 @@ function parseDebugInfo(
                     })
                 }
             } else if ((abbrev.tag === DW_TAG_variable || abbrev.tag === DW_TAG_formal_parameter) && dieName) {
-                const typeName = dieTypeRef ? resolveTypeName(typeMap, dieTypeRef) : 'unknown'
-                const typeSize = dieTypeRef ? resolveTypeSize(typeMap, dieTypeRef) : 0
-                const pointer = isPointerType(typeMap, dieTypeRef)
-
-                variables[dieName] = {
-                    name: dieName,
-                    type: typeName,
-                    size: typeSize,
-                    stackOffset: dieStackOffset ?? 0,
-                    isPointer: pointer,
-                    pointeeType: pointer && dieTypeRef ? resolvePointeeType(typeMap, dieTypeRef) : undefined,
+                // 🚨 Look up the AST stack to find the parent function!
+                let funcName = 'global'
+                for (let i = dieStack.length - 1; i >= 0; i--) {
+                    if (dieStack[i].tag === DW_TAG_subprogram) {
+                        funcName = dieStack[i].name || 'unknown'
+                        break
+                    }
                 }
+
+                // Push ONLY if it has an actual memory location and isn't a compiler internal
+                if (dieStackOffset !== undefined && !funcName.startsWith('__') && !dieName.startsWith('__')) {
+                    const typeName = dieTypeRef ? resolveTypeName(typeMap, dieTypeRef) : 'unknown'
+                    const typeSize = dieTypeRef ? resolveTypeSize(typeMap, dieTypeRef) : 0
+                    const pointer = isPointerType(typeMap, dieTypeRef)
+
+                    variables.push({
+                        name: dieName,
+                        type: typeName,
+                        size: typeSize,
+                        stackOffset: dieStackOffset,
+                        isPointer: pointer,
+                        pointeeType: pointer && dieTypeRef ? resolvePointeeType(typeMap, dieTypeRef) : undefined,
+                        declLine: dieDeclLine ?? 0,
+                        funcName,
+                    })
+                }
+            }
+
+            // 🚨 PUSH AST NODE to stack AFTER processing so it isn't its own parent!
+            if (abbrev.hasChildren) {
+                dieStack.push({ tag: abbrev.tag, name: dieName || '' })
             }
         }
 
@@ -830,7 +863,7 @@ export function parseDwarf(wasmBinary: Uint8Array): DwarfInfo {
         }
 
         // Parse debug info (variables + types)
-        let variables: Record<string, VariableInfo> = {}
+        let variables: VariableInfo[] = []
         let typeInfo: Record<string, StructInfo> = {}
         if (debugInfoSection && debugAbbrev) {
             const infoResult = parseDebugInfo(debugInfoSection, debugAbbrev, debugStr)
@@ -839,7 +872,7 @@ export function parseDwarf(wasmBinary: Uint8Array): DwarfInfo {
         }
 
         console.timeEnd('[dwarf] parse')
-        console.log(`[dwarf] ${Object.keys(lineMap).length} line entries, ${Object.keys(variables).length} variables, ${Object.keys(typeInfo).length} types`)
+        console.log(`[dwarf] ${Object.keys(lineMap).length} line entries, ${variables.length} variables, ${Object.keys(typeInfo).length} types`)
 
         return { lineMap, variables, types: typeInfo, sourceFiles }
     } catch (err) {

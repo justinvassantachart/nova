@@ -9,9 +9,11 @@ export interface VariableInfo {
     name: string
     type: string              // e.g. "int", "Node*", "float"
     size: number              // byte size
-    stackOffset: number       // offset from stack pointer
+    stackOffset?: number      // offset from stack pointer (optional — not all vars have locations)
     isPointer: boolean        // true for pointer types
     pointeeType?: string      // type being pointed to (for pointers)
+    funcName: string          // owning function name (for scope filtering)
+    declLine: number          // source line where declared (for time-travel filtering)
 }
 
 /** A member of a struct/class */
@@ -35,8 +37,8 @@ export interface DwarfInfo {
     /** Maps WASM byte-offset (hex, e.g. "0x01A4") → C++ source line number */
     lineMap: LineMap
 
-    /** Local variables found in function scopes */
-    variables: Record<string, VariableInfo>
+    /** Local variables found in function scopes (array, not dict) */
+    variables: VariableInfo[]
 
     /** Struct/class type definitions */
     types: Record<string, StructInfo>
@@ -48,7 +50,7 @@ export interface DwarfInfo {
 /** Empty DWARF info constant for when no debug data is available */
 export const EMPTY_DWARF: DwarfInfo = {
     lineMap: {},
-    variables: {},
+    variables: [],
     types: {},
     sourceFiles: [],
 }
