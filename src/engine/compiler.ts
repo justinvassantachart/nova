@@ -3,6 +3,7 @@
 // Never terminates it — the preloaded WASM stays in memory.
 
 import { getCompilerWorker } from '@/lib/compiler-cache'
+import { getSysrootFiles } from '@/vfs/sysroot-loader'
 
 export interface CompileResult {
     success: boolean
@@ -61,6 +62,7 @@ export function compile(files: Record<string, string>): Promise<CompileResult> {
         const w = ensureWorker()
         currentResolve = resolve
         stderrLines = []
-        w.postMessage({ type: 'COMPILE', files })
+        const sysrootFiles = getSysrootFiles()
+        w.postMessage({ type: 'COMPILE', files, sysrootFiles })
     })
 }

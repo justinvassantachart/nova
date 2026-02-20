@@ -1,6 +1,7 @@
 import { Volume } from 'memfs'
 import { useFilesStore, type VFSNode } from '@/store/files-store'
 import { useEditorStore } from '@/store/editor-store'
+import { loadSysroot } from './sysroot-loader'
 
 // ── Global Volume ──────────────────────────────────────────────
 export const vol = new Volume()
@@ -101,7 +102,8 @@ export function fileExists(path: string): boolean {
     return vol.existsSync(path)
 }
 
-// ── Get all files (for compiler) ───────────────────────────────
+// ── Get all workspace files (for compiler) ────────────────────
+// Sysroot files are sent separately via getSysrootFiles()
 
 export function getAllFiles(): Record<string, string> {
     const result: Record<string, string> = {}
@@ -115,8 +117,22 @@ export function getAllFiles(): Record<string, string> {
         }
     }
     walk('/workspace')
-    // Also include sysroot (separate from workspace)
-    walk('/sysroot')
+
+    // Include custom sysroot files (nova.h, memory_tracker.cpp) at /sysroot/ root
+    // but NOT the /sysroot/include/ tree (that's sent separately via getSysrootFiles())
+    try {
+        const sysEntries = vol.readdirSync('/sysroot', { encoding: 'utf8' }) as string[]
+        for (const entry of sysEntries) {
+            const full = `/sysroot/${entry}`
+            try {
+                const stat = vol.statSync(full)
+                if (!stat.isDirectory()) {
+                    result[full] = vol.readFileSync(full, { encoding: 'utf8' }) as string
+                }
+            } catch { /* skip */ }
+        }
+    } catch { /* sysroot not initialized yet */ }
+
     return result
 }
 
@@ -166,4 +182,10 @@ export async function initVFS() {
 
     refreshFileTree()
     useEditorStore.getState().setActiveFile('/workspace/main.cpp', readFile('/workspace/main.cpp'))
+
+    // Load standard library sysroot in the background
+    // (non-blocking — compilation will wait for it in the compiler bridge)
+    loadSysroot().catch((err) =>
+        console.warn('[initVFS] Sysroot load failed (std lib autocomplete unavailable):', err)
+    )
 }
