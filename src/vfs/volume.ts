@@ -61,7 +61,7 @@ export function getAllFiles(): Record<string, string> {
             if (stat.isDirectory()) {
                 walk(fullPath);
             } else {
-                result[fullPath] = vol.readFileSync(fullPath, 'utf8') as string;
+                result[fullPath] = vol.readFileSync(fullPath, { encoding: 'utf8' }) as string;
             }
         }
     }
@@ -74,7 +74,7 @@ export function getAllFiles(): Record<string, string> {
 function buildTree(dir: string): VFSNode[] {
     const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[];
     return entries
-        .filter((e) => !e.startsWith('.'))
+        .filter((e) => !e.startsWith('.') && e !== 'sysroot')
         .map((entry) => {
             const fullPath = dir === '/' ? `/${entry}` : `${dir}/${entry}`;
             const stat = vol.statSync(fullPath);
