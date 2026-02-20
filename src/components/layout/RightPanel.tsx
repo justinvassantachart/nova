@@ -1,45 +1,45 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useExecutionStore } from '@/store/execution-store'
 import { CanvasView } from '@/components/canvas/CanvasView'
-import { Terminal } from '@/components/terminal/Terminal'
-import { Separator } from '@/components/ui/separator'
-import { Gamepad2, Brain } from 'lucide-react'
+import { MemoryVisualizer } from '@/components/debug/MemoryVisualizer'
 
 export function RightPanel() {
+    const { activeTab, setActiveTab } = useExecutionStore()
+
     return (
         <div className="flex flex-col h-full">
-            {/* Top: Canvas / Memory tabs */}
-            <Tabs defaultValue="canvas" className="flex flex-col flex-1 min-h-0">
-                <TabsList className="w-full justify-start rounded-none border-b bg-card h-8">
-                    <TabsTrigger value="canvas" className="text-xs gap-1 h-7 data-[state=active]:bg-background">
-                        <Gamepad2 className="h-3 w-3" /> Game Screen
-                    </TabsTrigger>
-                    <TabsTrigger value="memory" className="text-xs gap-1 h-7 data-[state=active]:bg-background">
-                        <Brain className="h-3 w-3" /> Memory
-                    </TabsTrigger>
-                </TabsList>
-                <TabsContent value="canvas" className="flex-1 min-h-0 m-0">
-                    <CanvasView />
-                </TabsContent>
-                <TabsContent value="memory" className="flex-1 min-h-0 m-0 flex items-center justify-center text-muted-foreground text-sm">
-                    <div className="text-center">
-                        <Brain className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p>Memory Visualizer</p>
-                        <p className="text-xs opacity-60 mt-1">Available in Part 2</p>
-                    </div>
-                </TabsContent>
-            </Tabs>
-
-            <Separator />
-
-            {/* Bottom: Terminal */}
-            <div className="h-[220px] min-h-[120px] flex flex-col">
-                <div className="flex items-center px-3 h-7 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b bg-card">
-                    Terminal
-                </div>
-                <div className="flex-1 min-h-0 overflow-hidden">
-                    <Terminal />
-                </div>
+            {/* Tab bar */}
+            <div className="flex border-b bg-card">
+                <button
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'canvas'
+                            ? 'border-b-2 border-primary text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                    onClick={() => setActiveTab('canvas')}
+                >
+                    🎮 Game Screen
+                </button>
+                <button
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'memory'
+                            ? 'border-b-2 border-primary text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                    onClick={() => setActiveTab('memory')}
+                >
+                    🧠 Memory
+                </button>
             </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-hidden">
+                {activeTab === 'canvas' ? (
+                    <CanvasView />
+                ) : (
+                    <MemoryVisualizer />
+                )}
+            </div>
+
+            {/* Terminal area */}
+            <div className="border-t" id="terminal-container" />
         </div>
     )
 }
