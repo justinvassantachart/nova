@@ -73,3 +73,8 @@ body,
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0.4 0 0);
 }
+/* Monaco Debugger Highlight */
+.debug-line-highlight {
+  background-color: oklch(0.75 0.12 230 / 0.25) !important;
+  border-left: 4px solid oklch(0.75 0.12 230) !important;
+}

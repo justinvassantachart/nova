@@ -24,6 +24,12 @@ export interface DebugState {
     /** The raw compiled WASM binary (with debug info) */
     wasmBinary: Uint8Array | null
 
+    /** Cloned WASM memory buffer snapshot (taken while worker is paused) */
+    memoryBuffer: ArrayBuffer | null
+
+    /** Stack pointer value at pause time */
+    stackPointer: number
+
     /** Live variable values extracted from WASM memory during pause */
     liveVariables: Record<string, { value: string | number; address?: number }>
 
@@ -33,6 +39,8 @@ export interface DebugState {
     setCurrentLine: (line: number | null) => void
     toggleBreakpoint: (line: number) => void
     setWasmBinary: (binary: Uint8Array | null) => void
+    setMemoryBuffer: (buf: ArrayBuffer | null) => void
+    setStackPointer: (sp: number) => void
     setLiveVariables: (vars: Record<string, { value: string | number; address?: number }>) => void
     reset: () => void
 }
@@ -43,6 +51,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     currentLine: null,
     breakpoints: new Set(),
     wasmBinary: null,
+    memoryBuffer: null,
+    stackPointer: 0,
     liveVariables: {},
 
     setDwarfInfo: (info) => set({ dwarfInfo: info }),
@@ -58,6 +68,8 @@ export const useDebugStore = create<DebugState>((set) => ({
         }),
 
     setWasmBinary: (binary) => set({ wasmBinary: binary }),
+    setMemoryBuffer: (buf) => set({ memoryBuffer: buf }),
+    setStackPointer: (sp) => set({ stackPointer: sp }),
     setLiveVariables: (vars) => set({ liveVariables: vars }),
 
     reset: () => set({
@@ -65,5 +77,7 @@ export const useDebugStore = create<DebugState>((set) => ({
         currentLine: null,
         liveVariables: {},
         wasmBinary: null,
+        memoryBuffer: null,
+        stackPointer: 0,
     }),
 }))

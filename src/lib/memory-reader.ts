@@ -33,13 +33,18 @@ export interface MemorySnapshot {
 
 /**
  * Read memory values from a WASM memory buffer using DWARF variable info.
- * This should be called when the executor worker is frozen (Atomics.wait)
- * so the memory is stable.
+ * Called when the executor worker is frozen (Atomics.wait) so memory is stable.
+ *
+ * @param memoryBuffer - Cloned WASM linear memory snapshot
+ * @param dwarfInfo    - Parsed DWARF debug info
+ * @param allocations  - malloc() allocations captured by __wrap_malloc
+ * @param stackPointer - Current stack pointer value from __stack_pointer global
  */
 export function readMemorySnapshot(
     memoryBuffer: ArrayBuffer | null,
     dwarfInfo: DwarfInfo,
     allocations: { ptr: number; size: number }[],
+    stackPointer: number,
 ): MemorySnapshot {
     const stackVariables: MemoryValue[] = []
     const heapAllocations: HeapAllocation[] = []
@@ -57,10 +62,10 @@ export function readMemorySnapshot(
         if (name.startsWith('__') || name.startsWith('.')) continue
 
         try {
-            const mv = readVariable(view, bytes, name, varInfo)
+            const mv = readVariable(view, bytes, name, varInfo, stackPointer)
             if (mv) stackVariables.push(mv)
         } catch {
-            // Variable address out of bounds
+            // Variable address out of bounds — skip
         }
     }
 
@@ -106,13 +111,14 @@ function readVariable(
     _bytes: Uint8Array,
     name: string,
     varInfo: VariableInfo,
+    stackPointer: number,
 ): MemoryValue | null {
-    // The stackOffset from DWARF is relative to the frame base.
-    // For a simplified view, we use it as an absolute address indicator.
-    const address = Math.abs(varInfo.stackOffset)
+    // DWARF stackOffset is relative to the frame base (stack pointer).
+    // e.g. offset = -16 means the variable is at SP + (-16) = SP - 16
+    const address = stackPointer + varInfo.stackOffset
 
-    // Ensure address is within memory bounds
-    if (address + varInfo.size > view.byteLength || address === 0) {
+    // Ensure address is within memory bounds and valid
+    if (address <= 0 || address + varInfo.size > view.byteLength) {
         return null
     }
 

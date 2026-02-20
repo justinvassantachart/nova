@@ -1,4 +1,7 @@
 // ── Executor Bridge ────────────────────────────────────────────────
+// Safari-safe: uses requestAnimationFrame polling on SharedArrayBuffer
+// instead of postMessage for debug state, avoiding the WebKit deadlock.
+
 import { useExecutionStore } from '@/store/execution-store'
 import { useDebugStore } from '@/store/debug-store'
 import type { DrawCommand } from '@/store/execution-store'
@@ -6,7 +9,9 @@ import type { DrawCommand } from '@/store/execution-store'
 let executorWorker: Worker | null = null
 let sab: SharedArrayBuffer | null = null
 let debugSab: SharedArrayBuffer | null = null
+let memorySab: SharedArrayBuffer | null = null
 let rafId: number | null = null
+let debugRafId: number | null = null
 
 export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     stop()
@@ -14,10 +19,35 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     const pacer = new Int32Array(sab)
     const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
 
-    // Create debug SharedArrayBuffer if debugging
     if (debugMode) {
-        debugSab = new SharedArrayBuffer(4)
+        debugSab = new SharedArrayBuffer(16) // 4 Int32s: [control, lineNumber, stackPointer, reserved]
+        memorySab = new SharedArrayBuffer(16 * 1024 * 1024) // 16MB memory snapshot buffer
+        const arr = new Int32Array(debugSab)
+        arr[0] = 3 // 3 = Running
         useDebugStore.getState().setDebugMode('running')
+
+        // Safari-safe polling loop: reads SAB state via requestAnimationFrame
+        // instead of relying on postMessage (which Safari drops before Atomics.wait)
+        const pollDebug = () => {
+            if (!debugSab || !memorySab) return
+            const ctrl = new Int32Array(debugSab)
+
+            if (Atomics.load(ctrl, 0) === 1) { // 1 = PAUSED
+                const line = Atomics.load(ctrl, 1)
+                const sp = Atomics.load(ctrl, 2)
+                const store = useDebugStore.getState()
+
+                if (store.currentLine !== line || store.debugMode !== 'paused') {
+                    // Clone the memory snapshot so React can safely read it
+                    store.setMemoryBuffer(memorySab.slice(0) as unknown as ArrayBuffer)
+                    store.setStackPointer(sp)
+                    store.setCurrentLine(line)
+                    store.setDebugMode('paused')
+                }
+            }
+            debugRafId = requestAnimationFrame(pollDebug)
+        }
+        debugRafId = requestAnimationFrame(pollDebug)
     }
 
     executorWorker = new Worker(
@@ -50,15 +80,6 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                         ptr: msg.data.ptr, size: msg.data.size, timestamp: Date.now(),
                     })
                     break
-                case 'DEBUG_PAUSED':
-                    // Worker hit a source line — update React state
-                    useDebugStore.getState().setCurrentLine(msg.data.line)
-                    useDebugStore.getState().setDebugMode('paused')
-                    break
-                case 'DEBUG_MEMORY_READY':
-                    // Worker shared its WASM memory buffer reference
-                    // (Note: this is a reference, reads are valid while worker is paused)
-                    break
                 case 'EXIT':
                     term?.writeln(`\r\n\x1b[90m─── Program exited with code ${msg.data.code ?? 0} ───\x1b[0m`)
                     useExecutionStore.getState().setIsRunning(false)
@@ -85,6 +106,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
             sab,
             debugMode,
             debugSab: debugMode ? debugSab : undefined,
+            memorySab: debugMode ? memorySab : undefined,
         }, [wasmBinary.buffer])
     })
 }
@@ -93,7 +115,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
 export function debugStep() {
     if (!debugSab) return
     const arr = new Int32Array(debugSab)
-    Atomics.store(arr, 0, 1) // 1 = resume
+    Atomics.store(arr, 0, 3) // 3 = Resume
     Atomics.notify(arr, 0, 1)
     useDebugStore.getState().setDebugMode('running')
 }
@@ -102,7 +124,7 @@ export function debugStep() {
 export function debugStop() {
     if (debugSab) {
         const arr = new Int32Array(debugSab)
-        Atomics.store(arr, 0, 2) // 2 = stop
+        Atomics.store(arr, 0, 2) // 2 = Stop
         Atomics.notify(arr, 0, 1)
     }
     stop()
@@ -111,9 +133,11 @@ export function debugStop() {
 
 export function stop() {
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+    if (debugRafId !== null) { cancelAnimationFrame(debugRafId); debugRafId = null }
     if (executorWorker) { executorWorker.terminate(); executorWorker = null }
     sab = null
     debugSab = null
+    memorySab = null
 }
 
 function drawQueue(ctx: CanvasRenderingContext2D, queue: DrawCommand[]) {

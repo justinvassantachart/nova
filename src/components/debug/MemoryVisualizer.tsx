@@ -108,17 +108,14 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
 // ── Main Component ─────────────────────────────────────────────────
 
 export function MemoryVisualizer() {
-    const { debugMode, dwarfInfo } = useDebugStore()
+    const { debugMode, dwarfInfo, memoryBuffer, stackPointer } = useDebugStore()
     const { allocations } = useExecutionStore()
 
-    // Read memory snapshot (during debug pause, memory is stable)
+    // Read memory snapshot using the REAL cloned buffer and stack pointer
     const snapshot = useMemo(() => {
-        if (debugMode !== 'paused') return null
-        // Note: In a full implementation, we'd read from the actual WASM memory
-        // shared via SharedArrayBuffer. For now, we use the DWARF info + allocations
-        // to show what variables exist and what allocations were made.
-        return readMemorySnapshot(null, dwarfInfo, allocations)
-    }, [debugMode, dwarfInfo, allocations])
+        if (debugMode !== 'paused' || !memoryBuffer) return null
+        return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, stackPointer)
+    }, [debugMode, dwarfInfo, allocations, memoryBuffer, stackPointer])
 
     // Build React Flow nodes + edges from memory snapshot
     const { nodes, edges } = useMemo(() => {

@@ -13,6 +13,7 @@ self.onmessage = async (e) => {
         : null
     let drawQueue: Array<Record<string, unknown>> = []
     let exitCode = 0
+    let inst: WebAssembly.Instance
 
     function readCString(mem: WebAssembly.Memory, ptr: number): string {
         const b = new Uint8Array(mem.buffer)
@@ -46,23 +47,45 @@ self.onmessage = async (e) => {
                     Atomics.wait(pacer, 0, 0)
                 },
 
-                // ── Debug stepping ─────────────────────────────────────
-                // Called by instrumented WASM when hitting a source line.
-                // Freezes the worker thread until React tells us to continue.
+                // ── Debug stepping (Safari-safe) ───────────────────────
+                // Uses SharedArrayBuffer state machine instead of postMessage
+                // to avoid Safari's WebKit postMessage-before-Atomics.wait deadlock.
+                //
+                // Protocol:
+                //   stateArr[0] = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
+                //   stateArr[1] = current line number
+                //   stateArr[2] = stack pointer value
                 JS_debug_step: (lineNumber: number) => {
                     if (!debugMode || !debugSab) return
+                    const stateArr = new Int32Array(debugSab.buffer)
 
-                    // Tell React we hit a source line
-                    self.postMessage({ type: 'DEBUG_PAUSED', line: lineNumber })
+                    // 1. Clone live WASM memory into the shared snapshot buffer
+                    if (e.data.memorySab) {
+                        const memArr = new Uint8Array(wasmMemory.buffer)
+                        const sabArr = new Uint8Array(e.data.memorySab as SharedArrayBuffer)
+                        sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
+                    }
 
-                    // FREEZE the worker thread (0% CPU while frozen)
-                    // React will Atomics.store(debugSab, 0, 1) + notify to resume
-                    Atomics.store(debugSab, 0, 0)
-                    Atomics.wait(debugSab, 0, 0)
+                    // 2. Write the stack pointer value
+                    const sp = inst.exports.__stack_pointer
+                        ? (inst.exports.__stack_pointer as WebAssembly.Global).value
+                        : 0
+                    Atomics.store(stateArr, 2, sp as number)
 
-                    // After resuming, check if we should stop (value = 2 means "stop")
-                    const action = Atomics.load(debugSab, 0)
-                    if (action === 2) {
+                    // 3. Write the line number
+                    Atomics.store(stateArr, 1, lineNumber)
+
+                    // 4. Signal PAUSED state (1)
+                    Atomics.store(stateArr, 0, 1)
+                    Atomics.notify(stateArr, 0, 1)
+
+                    // 5. Safari-safe wait loop: spin until resumed (3) or stopped (2)
+                    while (Atomics.load(stateArr, 0) === 1) {
+                        Atomics.wait(stateArr, 0, 1)
+                    }
+
+                    // 6. Check if we should stop
+                    if (Atomics.load(stateArr, 0) === 2) {
                         throw new Error('__debug_stop')
                     }
                 },
@@ -70,17 +93,8 @@ self.onmessage = async (e) => {
         }
 
         const mod = await WebAssembly.compile(wasmBytes)
-        const inst = await WebAssembly.instantiate(mod, imports)
+        inst = await WebAssembly.instantiate(mod, imports)
         wasmMemory = inst.exports.memory as WebAssembly.Memory
-
-        // Expose memory buffer reference for React to read during debug pauses
-        if (debugMode) {
-            // Transfer memory buffer reference via postMessage
-            self.postMessage({
-                type: 'DEBUG_MEMORY_READY',
-                memoryBuffer: wasmMemory.buffer,
-            })
-        }
 
         const start = inst.exports._start as (() => void) | undefined
         if (start) {

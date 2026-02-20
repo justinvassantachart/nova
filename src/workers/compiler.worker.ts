@@ -56,6 +56,7 @@ self.onmessage = async (e) => {
             '-std=c++20', '-g', '-O0',
             '-Wl,--allow-undefined',
             '-Wl,--wrap=malloc',
+            '-Wl,--export=__stack_pointer',
             '-target', 'wasm32-wasip1',
             '-o', '/workspace/program.wasm',
         ]

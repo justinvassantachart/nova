@@ -1,13 +1,50 @@
-import MonacoEditor from '@monaco-editor/react'
+import MonacoEditor, { useMonaco } from '@monaco-editor/react'
 import { useEditorStore } from '@/store/editor-store'
-import { useCallback, useRef } from 'react'
+import { useDebugStore } from '@/store/debug-store'
+import { useCallback, useRef, useEffect } from 'react'
 import { writeFile, getProjectId } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 
 export function Editor() {
     const { activeFile, activeFileContent, setActiveFileContent } = useEditorStore()
+    const { currentLine, debugMode } = useDebugStore()
+    const monaco = useMonaco()
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editorRef = useRef<any>(null)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const decorationsRef = useRef<any>(null)
     // Per-file debounce timers to prevent data loss when switching files
     const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleMount = (editor: any) => {
+        editorRef.current = editor
+        if (editor.createDecorationsCollection) {
+            decorationsRef.current = editor.createDecorationsCollection([])
+        }
+    }
+
+    // ── Debug line highlighting ────────────────────────────────────
+    // Uses Monaco's createDecorationsCollection API to highlight the
+    // current paused line with a blue background + left border.
+    useEffect(() => {
+        if (!editorRef.current || !monaco || !decorationsRef.current) return
+
+        if (debugMode === 'paused' && currentLine) {
+            decorationsRef.current.set([{
+                range: new monaco.Range(currentLine, 1, currentLine, 1),
+                options: {
+                    isWholeLine: true,
+                    className: 'debug-line-highlight',
+                    glyphMarginClassName: 'bg-primary rounded-full w-2 h-2 ml-2 mt-1',
+                },
+            }])
+            editorRef.current.revealLineInCenter(currentLine)
+        } else {
+            decorationsRef.current.set([])
+        }
+    }, [debugMode, currentLine, monaco])
 
     const handleChange = useCallback((value: string | undefined) => {
         if (!value || !activeFile) return
@@ -46,7 +83,9 @@ export function Editor() {
                 theme="vs-dark"
                 value={activeFileContent}
                 onChange={handleChange}
+                onMount={handleMount}
                 options={{
+                    glyphMargin: true,
                     fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                     fontSize: 14, lineHeight: 22,
                     minimap: { enabled: false },
