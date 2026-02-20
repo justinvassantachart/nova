@@ -358,6 +358,9 @@ const DW_TAG_pointer_type = 0x0f
 const _DW_TAG_base_type = 0x24
 const DW_TAG_typedef = 0x16
 const DW_TAG_subprogram = 0x2e
+const DW_TAG_const_type = 0x26
+const DW_TAG_volatile_type = 0x35
+const DW_TAG_restrict_type = 0x37
 
 // DWARF attributes we care about
 const DW_AT_name = 0x03
@@ -578,6 +581,9 @@ function parseDebugInfo(
         // 🚨 TRACK DWARF TREE DEPTH to know what function we are inside
         const dieStack: { tag: number, name: string }[] = []
 
+        // Deferred variables — type resolution happens after all DIEs are collected
+        const pendingVars: { name: string; typeRef: number | undefined; stackOffset: number; declLine: number; funcName: string }[] = []
+
         // Process DIEs
         while (offset < unitEnd && offset < debugInfo.length) {
             const dieOffset = offset
@@ -635,10 +641,10 @@ function parseDebugInfo(
                 if (attr.name === DW_AT_type) {
                     const ref = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize)
                     if (ref !== null) {
-                        // ref4 values are relative to compilation unit start
+                        // ref4/ref1/ref2/ref_udata values are offsets from compilation unit start
                         dieTypeRef = (attr.form === DW_FORM_ref4 || attr.form === DW_FORM_ref1 ||
                             attr.form === DW_FORM_ref2 || attr.form === DW_FORM_ref_udata)
-                            ? unitStart + 4 + ref  // Offset from start of .debug_info data
+                            ? unitStart + ref
                             : ref
                     }
                 }
@@ -715,19 +721,12 @@ function parseDebugInfo(
                     }
                 }
 
-                // Push ONLY if it has an actual memory location and isn't a compiler internal
+                // Collect raw variable data — type resolution is DEFERRED until after all DIEs are parsed
                 if (dieStackOffset !== undefined && !funcName.startsWith('__') && !dieName.startsWith('__')) {
-                    const typeName = dieTypeRef ? resolveTypeName(typeMap, dieTypeRef) : 'unknown'
-                    const typeSize = dieTypeRef ? resolveTypeSize(typeMap, dieTypeRef) : 0
-                    const pointer = isPointerType(typeMap, dieTypeRef)
-
-                    variables.push({
+                    pendingVars.push({
                         name: dieName,
-                        type: typeName,
-                        size: typeSize,
+                        typeRef: dieTypeRef,
                         stackOffset: dieStackOffset,
-                        isPointer: pointer,
-                        pointeeType: pointer && dieTypeRef ? resolvePointeeType(typeMap, dieTypeRef) : undefined,
                         declLine: dieDeclLine ?? 0,
                         funcName,
                     })
@@ -738,6 +737,26 @@ function parseDebugInfo(
             if (abbrev.hasChildren) {
                 dieStack.push({ tag: abbrev.tag, name: dieName || '' })
             }
+        }
+
+        // ═══ DEFERRED TYPE RESOLUTION ═══
+        // Now that ALL DIEs in this unit are processed, typeMap is complete.
+        // Resolve types for collected variables (fixes forward-reference issue).
+        for (const pv of pendingVars) {
+            const typeName = pv.typeRef ? resolveTypeName(typeMap, pv.typeRef) : 'unknown'
+            const typeSize = pv.typeRef ? resolveTypeSize(typeMap, pv.typeRef) : 0
+            const pointer = isPointerType(typeMap, pv.typeRef)
+
+            variables.push({
+                name: pv.name,
+                type: typeName,
+                size: typeSize,
+                stackOffset: pv.stackOffset,
+                isPointer: pointer,
+                pointeeType: pointer && pv.typeRef ? resolvePointeeType(typeMap, pv.typeRef) : undefined,
+                declLine: pv.declLine,
+                funcName: pv.funcName,
+            })
         }
 
         // Update struct members
@@ -776,6 +795,11 @@ function resolveTypeName(
         return resolveTypeName(typeMap, info.typeRef, depth + 1)
     }
 
+    // Follow transparent type wrappers (const, volatile, restrict)
+    if (info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
+        return resolveTypeName(typeMap, info.typeRef, depth + 1)
+    }
+
     return info.name ?? 'unknown'
 }
 
@@ -807,7 +831,11 @@ function isPointerType(
     if (!info) return false
 
     if (info.tag === DW_TAG_pointer_type) return true
-    if (info.tag === DW_TAG_typedef) return isPointerType(typeMap, info.typeRef, depth + 1)
+    // Follow transparent type wrappers
+    if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type
+        || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
+        return isPointerType(typeMap, info.typeRef, depth + 1)
+    }
 
     return false
 }
@@ -826,7 +854,11 @@ function resolvePointeeType(
         return resolveTypeName(typeMap, info.typeRef, depth + 1)
     }
 
-    if (info.tag === DW_TAG_typedef) return resolvePointeeType(typeMap, info.typeRef, depth + 1)
+    // Follow transparent type wrappers
+    if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type
+        || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
+        return resolvePointeeType(typeMap, info.typeRef, depth + 1)
+    }
 
     return undefined
 }

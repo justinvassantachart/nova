@@ -11,9 +11,10 @@ export interface MemoryValue {
     type: string
     address: number
     value: string | number
+    rawValue: number          // always the numeric raw value
     size: number
     isPointer: boolean
-    pointsTo?: number      // address this pointer points to
+    pointsTo?: number        // address this pointer points to
     pointeeType?: string
 }
 
@@ -21,8 +22,8 @@ export interface MemoryValue {
 export interface HeapAllocation {
     ptr: number
     size: number
-    label: string          // e.g. "malloc(24)"
-    members: MemoryValue[] // parsed struct members
+    label: string            // e.g. "0x00011040"
+    members: MemoryValue[]   // parsed struct/array members
 }
 
 /** Full memory snapshot */
@@ -81,11 +82,11 @@ export function readMemorySnapshot(
         const ha: HeapAllocation = {
             ptr: alloc.ptr,
             size: alloc.size,
-            label: `malloc(${alloc.size})`,
+            label: `0x${alloc.ptr.toString(16).padStart(8, '0')}`,
             members: [],
         }
 
-        // Try to read the first few words of the allocation
+        // Read the allocation contents based on size
         try {
             const wordsToRead = Math.min(Math.floor(alloc.size / 4), 8)
             for (let i = 0; i < wordsToRead; i++) {
@@ -93,10 +94,11 @@ export function readMemorySnapshot(
                 if (addr + 4 <= memoryBuffer.byteLength) {
                     const val = view.getInt32(addr, true)
                     ha.members.push({
-                        name: `[${i}]`,
+                        name: `0x${addr.toString(16).padStart(8, '0')}`,
                         type: 'i32',
                         address: addr,
                         value: val,
+                        rawValue: val,
                         size: 4,
                         isPointer: false,
                     })
@@ -129,32 +131,45 @@ function readVariable(
     if (address <= 0 || address + varInfo.size > view.byteLength) {
         return {
             name, type: varInfo.type, address,
-            value: '???', size: varInfo.size, isPointer: varInfo.isPointer,
+            value: '???', rawValue: 0, size: varInfo.size, isPointer: varInfo.isPointer,
         }
     }
 
     let value: string | number = '???'
+    let rawValue = 0
     let pointsTo: number | undefined
 
     try {
         if (varInfo.isPointer) {
             // Read 4-byte pointer (WASM32)
             pointsTo = view.getUint32(address, true)
+            rawValue = pointsTo
             value = `0x${pointsTo.toString(16).padStart(8, '0')}`
         } else {
             switch (varInfo.size) {
-                case 1: value = view.getInt8(address); break
-                case 2: value = view.getInt16(address, true); break
+                case 1: rawValue = view.getInt8(address); value = rawValue; break
+                case 2: rawValue = view.getInt16(address, true); value = rawValue; break
                 case 4:
-                    if (varInfo.type === 'float') value = view.getFloat32(address, true)
-                    else value = view.getInt32(address, true)
+                    if (varInfo.type === 'float') {
+                        rawValue = view.getFloat32(address, true)
+                        value = rawValue
+                    } else {
+                        rawValue = view.getInt32(address, true)
+                        value = rawValue
+                    }
                     break
                 case 8:
-                    if (varInfo.type === 'double') value = view.getFloat64(address, true)
-                    else value = Number(view.getBigInt64(address, true))
+                    if (varInfo.type === 'double') {
+                        rawValue = view.getFloat64(address, true)
+                        value = rawValue
+                    } else {
+                        rawValue = Number(view.getBigInt64(address, true))
+                        value = rawValue
+                    }
                     break
                 default:
-                    value = view.getInt32(address, true)
+                    rawValue = view.getInt32(address, true)
+                    value = rawValue
             }
         }
     } catch {
@@ -162,7 +177,7 @@ function readVariable(
     }
 
     return {
-        name, type: varInfo.type, address, value, size: varInfo.size,
+        name, type: varInfo.type, address, value, rawValue, size: varInfo.size,
         isPointer: varInfo.isPointer, pointsTo, pointeeType: varInfo.pointeeType,
     }
 }

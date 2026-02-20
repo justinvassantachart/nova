@@ -1,7 +1,7 @@
 // ── Memory Visualizer ──────────────────────────────────────────────
 // React Flow component that visualizes WASM memory as an interactive graph.
 // Shows stack variables as nodes and heap allocations as connected nodes
-// with pointer arrows between them. Supports multi-frame call stacks.
+// with pointer arrows. Supports multi-frame call stacks for recursion.
 
 import { useCallback, useMemo } from 'react'
 import {
@@ -44,7 +44,10 @@ function StackFrameNode({ data }: { data: { label: string; funcName: string; isA
                 ) : (
                     data.variables.map((v, i) => (
                         <div key={i} className="flex items-center justify-between text-xs px-1 py-0.5 rounded hover:bg-blue-500/10">
-                            <span className={`${nameText} font-mono`}>{v.name}</span>
+                            <div className="flex items-baseline gap-1.5">
+                                <span className={`${nameText} font-mono`}>{v.name}</span>
+                                <span className="text-[9px] text-muted-foreground/40 font-mono">{v.type}</span>
+                            </div>
                             <span className={`${valueText} font-mono ml-4 tabular-nums`}>
                                 {v.isPointer ? (
                                     <span className="text-amber-400">{String(v.value)}</span>
@@ -60,22 +63,22 @@ function StackFrameNode({ data }: { data: { label: string; funcName: string; isA
     )
 }
 
-function HeapNode({ data }: { data: { label: string; ptr: number; members: MemoryValue[] } }) {
+function HeapNode({ data }: { data: { label: string; sizeBytes: number; members: MemoryValue[] } }) {
     return (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/60 backdrop-blur-sm min-w-[160px] shadow-lg shadow-emerald-500/10">
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/60 backdrop-blur-sm min-w-[180px] shadow-lg shadow-emerald-500/10">
             <div className="px-3 py-1.5 border-b border-emerald-500/30 bg-emerald-500/10 rounded-t-lg flex items-center justify-between">
-                <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">
+                <span className="text-xs font-semibold text-emerald-300">
                     {data.label}
                 </span>
                 <span className="text-[10px] text-emerald-400/60 font-mono">
-                    0x{data.ptr.toString(16).padStart(8, '0')}
+                    {data.sizeBytes}B
                 </span>
             </div>
-            <div className="p-2 space-y-1">
+            <div className="p-2 space-y-0.5">
                 {data.members.map((m, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs px-1 py-0.5">
-                        <span className="text-emerald-200 font-mono">{m.name}</span>
-                        <span className="text-emerald-100/70 font-mono ml-3">{String(m.value)}</span>
+                    <div key={i} className="flex items-center justify-between text-xs px-1 py-0.5 font-mono">
+                        <span className="text-emerald-400/60 text-[10px]">{m.name}</span>
+                        <span className="text-emerald-100 ml-3 tabular-nums">{String(m.value)}</span>
                     </div>
                 ))}
                 {data.members.length === 0 && (
@@ -96,10 +99,10 @@ const nodeTypes = {
 function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
     const g = new dagre.graphlib.Graph()
     g.setDefaultEdgeLabel(() => ({}))
-    g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 80 })
+    g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 80 })
 
     for (const node of nodes) {
-        g.setNode(node.id, { width: 220, height: 140 })
+        g.setNode(node.id, { width: 230, height: 120 })
     }
     for (const edge of edges) {
         g.setEdge(edge.source, edge.target)
@@ -111,7 +114,7 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
         const pos = g.node(node.id)
         return {
             ...node,
-            position: { x: pos.x - 110, y: pos.y - 70 },
+            position: { x: pos.x - 115, y: pos.y - 60 },
         }
     })
 }
@@ -128,6 +131,9 @@ export function MemoryVisualizer() {
         return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, stackPointer, currentLine, currentFunc)
     }, [debugMode, dwarfInfo, allocations, memoryBuffer, stackPointer, currentLine, currentFunc])
 
+    // Current call stack - only show active frame since we can only read current stack pointer
+    const callStack = useMemo(() => currentFunc ? [currentFunc] : [], [currentFunc])
+
     // Build React Flow nodes + edges from memory snapshot
     const { nodes, edges } = useMemo(() => {
         if (!snapshot) {
@@ -137,19 +143,37 @@ export function MemoryVisualizer() {
         const nodes: Node[] = []
         const edges: Edge[] = []
 
-        // Stack frame node (active function)
+        // Active stack frame node (current function)
         nodes.push({
-            id: 'stack',
+            id: 'stack-0',
             type: 'stackFrame',
             position: { x: 0, y: 0 },
             data: {
-                label: 'Stack Frame',
+                label: `#0`,
                 funcName: currentFunc ?? 'main',
                 isActive: true,
                 variables: snapshot.stackVariables,
             },
             sourcePosition: Position.Right,
             targetPosition: Position.Left,
+        })
+
+        // Show previous frames in call stack (without variable values)
+        callStack.slice(1).forEach((func, i) => {
+            const frameIndex = i + 1
+            nodes.push({
+                id: `stack-${frameIndex}`,
+                type: 'stackFrame',
+                position: { x: 0, y: (frameIndex) * 140 },
+                data: {
+                    label: `#${frameIndex}`,
+                    funcName: func,
+                    isActive: false,
+                    variables: [],   // Previous frames don't have live variable reads
+                },
+                sourcePosition: Position.Right,
+                targetPosition: Position.Left,
+            })
         })
 
         // Heap allocation nodes
@@ -161,7 +185,7 @@ export function MemoryVisualizer() {
                 position: { x: 300, y: i * 160 },
                 data: {
                     label: alloc.label,
-                    ptr: alloc.ptr,
+                    sizeBytes: alloc.size,
                     members: alloc.members,
                 },
                 sourcePosition: Position.Right,
@@ -174,10 +198,12 @@ export function MemoryVisualizer() {
                 .forEach((v: MemoryValue) => {
                     edges.push({
                         id: `${v.name}->${nodeId}`,
-                        source: 'stack',
+                        source: 'stack-0',
                         target: nodeId,
                         animated: true,
+                        label: v.name,
                         style: { stroke: '#f59e0b', strokeWidth: 2 },
+                        labelStyle: { fill: '#f59e0b', fontSize: 10, fontFamily: 'monospace' },
                     })
                 })
         })
@@ -185,7 +211,7 @@ export function MemoryVisualizer() {
         // Layout the graph
         const layouted = layoutGraph(nodes, edges)
         return { nodes: layouted, edges }
-    }, [snapshot, currentFunc])
+    }, [snapshot, currentFunc, callStack])
 
     const onNodesChange = useCallback(() => { }, [])
     const onEdgesChange = useCallback(() => { }, [])
