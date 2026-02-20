@@ -37,7 +37,13 @@ export function Terminal() {
         const ro = new ResizeObserver(() => fit.fit())
         ro.observe(containerRef.current)
 
-        return () => { ro.disconnect(); term.dispose(); termRef.current = null }
+        // Cleanup when component unmounts (prevents memory leaks with routing)
+        return () => {
+            ro.disconnect()
+            term.dispose()
+            termRef.current = null
+            delete (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
+        }
     }, [])
 
     return <div ref={containerRef} className="w-full h-full" />

@@ -7,23 +7,30 @@ import { RightPanel } from '@/components/layout/RightPanel'
 import { initVFS } from '@/vfs/volume'
 import { preloadCompiler } from '@/lib/compiler-cache'
 
-// ── Drag handle ────────────────────────────────────────────────
+// ── Drag handle with iframe overlay ────────────────────────────
+// Creates a fullscreen transparent overlay during drag so that
+// mouse events aren't swallowed by iframes (Monaco) or canvases.
 function DragHandle({ onDrag }: { onDrag: (dx: number) => void }) {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     let lastX = e.clientX
+
+    // Overlay prevents iframes from eating mouse events
+    const overlay = document.createElement('div')
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;cursor:col-resize'
+    document.body.appendChild(overlay)
+    document.body.style.userSelect = 'none'
+
     const onMove = (ev: MouseEvent) => {
       onDrag(ev.clientX - lastX)
       lastX = ev.clientX
     }
     const onUp = () => {
-      document.body.style.cursor = ''
+      overlay.remove()
       document.body.style.userSelect = ''
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }, [onDrag])

@@ -34,6 +34,12 @@ const MEMORY_TRACKER = `extern "C" {
 }
 `
 
+// ── Current project ID ─────────────────────────────────────────
+let activeProjectId = 'default-project'
+
+export function getProjectId() { return activeProjectId }
+export function setProjectId(id: string) { activeProjectId = id }
+
 // ── CRUD Operations ────────────────────────────────────────────
 
 export function writeFile(path: string, content: string) {
@@ -67,6 +73,9 @@ export function deleteItem(path: string) {
     } else {
         vol.unlinkSync(path)
     }
+    // Also delete from OPFS to prevent "ghost files"
+    import('./opfs-sync').then(({ deleteFromOPFS }) => deleteFromOPFS(activeProjectId, path))
+
     // If deleted file was active, clear editor
     const { activeFile } = useEditorStore.getState()
     if (activeFile === path) {
@@ -77,7 +86,9 @@ export function deleteItem(path: string) {
 
 export function renameItem(oldPath: string, newPath: string) {
     vol.renameSync(oldPath, newPath)
-    // Update editor if renamed file was active
+    // Persist rename to OPFS
+    import('./opfs-sync').then(({ renameInOPFS }) => renameInOPFS(activeProjectId, oldPath, newPath))
+
     const { activeFile } = useEditorStore.getState()
     if (activeFile === oldPath) {
         const content = readFile(newPath)
@@ -104,17 +115,17 @@ export function getAllFiles(): Record<string, string> {
         }
     }
     walk('/workspace')
+    // Also include sysroot (separate from workspace)
+    walk('/sysroot')
     return result
 }
 
 // ── Tree builder ───────────────────────────────────────────────
 
-const HIDDEN = new Set(['sysroot', '.git'])
-
 function buildTree(dir: string): VFSNode[] {
     const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[]
     return entries
-        .filter((e) => !e.startsWith('.') && !HIDDEN.has(e))
+        .filter((e) => !e.startsWith('.'))
         .map((name) => {
             const path = `${dir}/${name}`
             const isDir = vol.statSync(path).isDirectory()
@@ -127,21 +138,25 @@ function buildTree(dir: string): VFSNode[] {
 }
 
 export function refreshFileTree() {
+    // Only show /workspace in the explorer — sysroot is separate
     useFilesStore.getState().setFiles(buildTree('/workspace'))
 }
 
 // ── Init ───────────────────────────────────────────────────────
 
 export async function initVFS() {
+    // Sysroot is separate from workspace — not polluting student's project
+    vol.mkdirSync('/sysroot', { recursive: true })
+    writeFile('/sysroot/nova.h', NOVA_H)
+    writeFile('/sysroot/memory_tracker.cpp', MEMORY_TRACKER)
+
+    // Student workspace
     vol.mkdirSync('/workspace', { recursive: true })
-    vol.mkdirSync('/workspace/sysroot', { recursive: true })
-    writeFile('/workspace/sysroot/nova.h', NOVA_H)
-    writeFile('/workspace/sysroot/memory_tracker.cpp', MEMORY_TRACKER)
 
     // Hydrate from OPFS
     try {
         const { hydrateFromOPFS } = await import('./opfs-sync')
-        await hydrateFromOPFS()
+        await hydrateFromOPFS(activeProjectId)
     } catch { /* OPFS not available */ }
 
     // Default file

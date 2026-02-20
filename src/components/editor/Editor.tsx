@@ -1,22 +1,25 @@
 import MonacoEditor from '@monaco-editor/react'
 import { useEditorStore } from '@/store/editor-store'
-import { useCallback } from 'react'
-import { writeFile } from '@/vfs/volume'
+import { useCallback, useRef } from 'react'
+import { writeFile, getProjectId } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
-
-let opfsSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 export function Editor() {
     const { activeFile, activeFileContent, setActiveFileContent } = useEditorStore()
+    // Per-file debounce timers to prevent data loss when switching files
+    const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
     const handleChange = useCallback((value: string | undefined) => {
         if (!value || !activeFile) return
         setActiveFileContent(value)
         writeFile(activeFile, value)
 
-        if (opfsSyncTimer) clearTimeout(opfsSyncTimer)
-        opfsSyncTimer = setTimeout(() => {
-            import('@/vfs/opfs-sync').then(({ syncToOPFS }) => syncToOPFS(activeFile, value))
+        // Clear only this file's timer — other files' timers keep running
+        if (syncTimers.current[activeFile]) clearTimeout(syncTimers.current[activeFile])
+
+        syncTimers.current[activeFile] = setTimeout(() => {
+            import('@/vfs/opfs-sync').then(({ syncToOPFS }) => syncToOPFS(getProjectId(), activeFile, value))
+            delete syncTimers.current[activeFile]
         }, 2000)
     }, [activeFile, setActiveFileContent])
 
@@ -37,6 +40,7 @@ export function Editor() {
                 {activeFile.replace('/workspace/', '')}
             </div>
             <MonacoEditor
+                key={activeFile}
                 height="calc(100% - 28px)"
                 language={lang}
                 theme="vs-dark"

@@ -14,7 +14,12 @@ export function CanvasView() {
         const ro = new ResizeObserver(resize)
         if (canvas.parentElement) ro.observe(canvas.parentElement)
             ; (window as any).__novaCanvas = canvas // eslint-disable-line @typescript-eslint/no-explicit-any
-        return () => ro.disconnect()
+
+        // Cleanup on unmount
+        return () => {
+            ro.disconnect()
+            delete (window as any).__novaCanvas // eslint-disable-line @typescript-eslint/no-explicit-any
+        }
     }, [])
 
     return <canvas ref={ref} id="nova-canvas" className="w-full h-full block bg-black" />

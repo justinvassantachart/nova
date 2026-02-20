@@ -28,15 +28,15 @@ self.onmessage = async (e) => {
             node[parts[parts.length - 1]] = enc.encode(content)
         }
 
-        // Collect .cpp sources (exclude our hidden tracker)
+        // Collect .cpp sources (exclude sysroot tracker — it's added separately)
         const sources = Object.keys(files).filter(
-            (f) => f.endsWith('.cpp') && !f.includes('sysroot/memory_tracker'),
+            (f) => f.endsWith('.cpp') && !f.includes('sysroot/'),
         )
 
         const args = [
             ...sources,
-            '/workspace/sysroot/memory_tracker.cpp',
-            '-I/workspace/sysroot/',
+            '/sysroot/memory_tracker.cpp',
+            '-I/sysroot/',
             '-std=c++20', '-g', '-O0',
             '-Wl,--allow-undefined',
             '-Wl,--wrap=malloc',
