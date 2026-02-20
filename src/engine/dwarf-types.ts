@@ -23,6 +23,7 @@ export interface StructMember {
     type: string
     size: number
     isPointer: boolean
+    pointeeType?: string      // type being pointed to (for pointers)
 }
 
 /** A struct/class type definition */

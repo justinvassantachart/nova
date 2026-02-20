@@ -703,12 +703,14 @@ function parseDebugInfo(
                 if (members && dieName !== undefined && dieMemberLoc !== undefined) {
                     const memberType = dieTypeRef ? resolveTypeName(typeMap, dieTypeRef) : 'unknown'
                     const memberSize = dieTypeRef ? resolveTypeSize(typeMap, dieTypeRef) : 0
+                    const isPtr = isPointerType(typeMap, dieTypeRef)
                     members.push({
                         name: dieName,
                         offset: dieMemberLoc,
                         type: memberType,
                         size: memberSize,
-                        isPointer: isPointerType(typeMap, dieTypeRef),
+                        isPointer: isPtr,
+                        pointeeType: isPtr && dieTypeRef ? resolvePointeeType(typeMap, dieTypeRef) : undefined,
                     })
                 }
             } else if ((abbrev.tag === DW_TAG_variable || abbrev.tag === DW_TAG_formal_parameter) && dieName) {
@@ -775,6 +777,16 @@ function parseDebugInfo(
 
 // ── Type Resolution Helpers ────────────────────────────────────────
 
+function cleanTypeName(name: string): string {
+    if (!name) return 'unknown'
+    if (name.startsWith('std::__1::basic_string')) return 'std::string'
+    if (name.startsWith('std::__1::vector')) {
+        const match = name.match(/<([^,]+)/)
+        if (match) return `std::vector<${cleanTypeName(match[1])}>`
+    }
+    return name
+}
+
 function resolveTypeName(
     typeMap: Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>,
     offset: number | undefined,
@@ -785,22 +797,14 @@ function resolveTypeName(
     const info = typeMap.get(offset)
     if (!info) return 'unknown'
 
-    if (info.tag === DW_TAG_pointer_type) {
-        const pointee = resolveTypeName(typeMap, info.typeRef, depth + 1)
-        return `${pointee}*`
-    }
+    if (info.tag === DW_TAG_pointer_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}*`
 
-    if (info.tag === DW_TAG_typedef) {
-        if (info.name) return info.name
+    if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
+        if (info.name) return cleanTypeName(info.name)
         return resolveTypeName(typeMap, info.typeRef, depth + 1)
     }
 
-    // Follow transparent type wrappers (const, volatile, restrict)
-    if (info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
-        return resolveTypeName(typeMap, info.typeRef, depth + 1)
-    }
-
-    return info.name ?? 'unknown'
+    return cleanTypeName(info.name ?? 'unknown')
 }
 
 function resolveTypeSize(

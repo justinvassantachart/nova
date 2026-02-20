@@ -84,6 +84,8 @@ self.onmessage = async (e) => {
             '-I/sysroot/',
             '-isystem', '/sysroot/include/c++/v1',
             '-isystem', '/sysroot/include',
+            '-fno-exceptions', // Strips exception unwinding from WASM
+            '-fno-rtti',       // Strips runtime type info overhead
         ]
 
         let finalWasmBytes: Uint8Array | undefined

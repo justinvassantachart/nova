@@ -47,6 +47,15 @@ self.onmessage = async (e) => {
                 JS_notify_alloc: () => { },
                 JS_notify_free: () => { },
 
+                // ── Exception & System Stubs ───────────────────────────
+                __cxa_allocate_exception: () => { throw new Error("C++ exception thrown!"); },
+                __cxa_throw: () => { throw new Error("C++ exception thrown!"); },
+                __cxa_begin_catch: () => 0,
+                __cxa_end_catch: () => { },
+                __cxa_atexit: () => { },
+                __cxa_pure_virtual: () => { },
+                _ZSt28__throw_bad_array_new_lengthv: () => { throw new Error("Bad array new length"); },
+
                 // Hardware tells us exactly when a frame is pushed/popped!
                 JS_notify_enter: () => {
                     if (!debugMode) return

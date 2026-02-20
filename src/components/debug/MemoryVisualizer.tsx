@@ -1,257 +1,185 @@
-// ── Memory Visualizer ──────────────────────────────────────────────
-// React Flow component that visualizes WASM memory as an interactive graph.
-// Shows stack variables as nodes and heap allocations as connected nodes
-// with pointer arrows. Supports multi-frame call stacks for recursion.
-
-import { useCallback, useMemo } from 'react'
-import {
-    ReactFlow,
-    Background,
-    type Node,
-    type Edge,
-    Position,
-} from '@xyflow/react'
+import { useMemo } from 'react'
+import { ReactFlow, Background, type Node, type Edge, Position, Handle } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
-import { readMemorySnapshot, type MemoryValue, type HeapAllocation } from '@/lib/memory-reader'
+import { readMemorySnapshot, type MemoryValue } from '@/lib/memory-reader'
 
-// ── Custom Node Components ─────────────────────────────────────────
-
-function StackFrameNode({ data }: { data: { label: string; funcName: string; isActive: boolean; variables: MemoryValue[] } }) {
-    const borderColor = data.isActive ? 'border-blue-500/60' : 'border-slate-500/30'
-    const bgColor = data.isActive ? 'bg-blue-950/60' : 'bg-slate-950/40'
-    const headerBg = data.isActive ? 'bg-blue-500/10' : 'bg-slate-500/10'
-    const headerText = data.isActive ? 'text-blue-300' : 'text-slate-400'
-    const nameText = data.isActive ? 'text-blue-200' : 'text-slate-300'
-    const valueText = data.isActive ? 'text-blue-100/70' : 'text-slate-200/50'
-    const shadow = data.isActive ? 'shadow-blue-500/10' : 'shadow-none'
-
+// ── The Two-Column Table Row ──
+function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
     return (
-        <div className={`rounded-lg border ${borderColor} ${bgColor} backdrop-blur-sm min-w-[200px] shadow-lg ${shadow} transition-all duration-200`}>
-            <div className={`px-3 py-1.5 border-b ${borderColor} ${headerBg} rounded-t-lg flex items-center gap-2`}>
-                <span className={`text-[10px] font-bold ${headerText} uppercase tracking-wider`}>
-                    {data.label}
-                </span>
-                <span className={`text-[10px] font-mono ${headerText} opacity-60`}>
-                    {data.funcName}()
-                </span>
+        <div className="flex flex-col border-t border-[#30363d] w-full">
+            <div className="flex items-stretch hover:bg-[#21262d] transition-colors relative w-full group min-h-[28px]">
+                {/* Left Column: Name */}
+                <div className="w-[40%] py-1.5 px-3 border-r border-[#30363d] text-[#8b949e] flex items-center font-mono text-[11px]"
+                    style={{ paddingLeft: `${0.75 + depth * 0.75}rem` }}>
+                    <span className="truncate">{variable.name}</span>
+                </div>
+                {/* Right Column: Value */}
+                <div className="w-[60%] py-1.5 px-3 relative flex items-center font-mono text-[11px] text-[#e6edf3]">
+                    <span className={`truncate ${variable.type.includes('string') || variable.type === 'char' ? 'text-emerald-400' : ''}`}>
+                        {variable.isStruct ? '' : String(variable.value)}
+                    </span>
+
+                    {/* A Handle embedded exactly on the row holding the pointer */}
+                    {variable.isPointer && variable.pointsTo !== 0 && variable.pointsTo !== undefined && (
+                        <Handle type="source" position={Position.Right} id={`${nodeId}-${variable.name}`}
+                            className="!w-2 !h-2 !bg-[#e6edf3] !border-0 !-right-1 opacity-80" />
+                    )}
+                </div>
             </div>
-            <div className="p-2 space-y-0.5">
+
+            {/* Recursive Struct Expansion */}
+            {variable.isStruct && variable.members && (
+                <div className="flex flex-col w-full bg-[#0d1117]/50">
+                    {variable.members.map(m => <VariableRow key={m.name} variable={m} depth={depth + 1} nodeId={`${nodeId}-${variable.name}`} />)}
+                </div>
+            )}
+        </div>
+    )
+}
+
+function StackFrameNode({ data }: { data: { id: string; label: string; isActive: boolean; variables: MemoryValue[] } }) {
+    const borderColor = data.isActive ? 'border-slate-300' : 'border-[#30363d]'
+    return (
+        <div className={`flex flex-col rounded-md border ${borderColor} bg-[#0d1117] min-w-[240px] shadow-2xl overflow-visible`}>
+            {data.isActive && <div className="absolute -top-[1px] -left-[1px] -right-[1px] h-[2px] bg-slate-300 rounded-t-md" />}
+            <div className="px-3 py-2 bg-[#161b22] flex justify-between items-center rounded-t-md">
+                <span className="text-[#c9d1d9] font-bold text-[11px] font-mono">{data.label}</span>
+                {data.isActive && <span className="bg-[#e6edf3] text-[#0d1117] text-[9px] px-1.5 rounded-sm font-bold tracking-wider">ACTIVE</span>}
+            </div>
+            <div className="flex flex-col w-full">
                 {data.variables.length === 0 ? (
-                    <div className="text-xs text-muted-foreground italic px-1">No variables yet</div>
-                ) : (
-                    data.variables.map((v, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs px-1 py-0.5 rounded hover:bg-blue-500/10">
-                            <div className="flex items-baseline gap-1.5">
-                                <span className={`${nameText} font-mono`}>{v.name}</span>
-                                <span className="text-[9px] text-muted-foreground/40 font-mono">{v.type}</span>
-                            </div>
-                            <span className={`${valueText} font-mono ml-4 tabular-nums`}>
-                                {v.isPointer ? (
-                                    <span className="text-amber-400">{String(v.value)}</span>
-                                ) : (
-                                    String(v.value)
-                                )}
-                            </span>
-                        </div>
-                    ))
-                )}
+                    <div className="p-2 text-xs border-t border-[#30363d] text-[#8b949e] italic text-center">No variables</div>
+                ) : data.variables.map(v => <VariableRow key={v.name} variable={v} nodeId={data.id} />)}
             </div>
+            <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+            <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
         </div>
     )
 }
 
-function HeapNode({ data }: { data: { label: string; sizeBytes: number; members: MemoryValue[] } }) {
+function HeapNode({ data }: { data: { id: string; label: string; ptr: number; members: MemoryValue[] } }) {
     return (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/60 backdrop-blur-sm min-w-[180px] shadow-lg shadow-emerald-500/10">
-            <div className="px-3 py-1.5 border-b border-emerald-500/30 bg-emerald-500/10 rounded-t-lg flex items-center justify-between">
-                <span className="text-xs font-semibold text-emerald-300">
-                    {data.label}
-                </span>
-                <span className="text-[10px] text-emerald-400/60 font-mono">
-                    {data.sizeBytes}B
-                </span>
+        <div className="flex flex-col rounded-md border border-[#30363d] bg-[#0d1117] min-w-[200px] shadow-2xl overflow-visible relative">
+            <div className="px-3 py-2 bg-[#161b22] flex justify-between items-center rounded-t-md">
+                <span className="text-[#8b949e] font-mono text-[10px] uppercase tracking-wider">{data.label}</span>
+                <span className="text-[#8b949e] font-mono text-[10px]">0x{data.ptr.toString(16).padStart(6, '0')}</span>
             </div>
-            <div className="p-2 space-y-0.5">
-                {data.members.map((m, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs px-1 py-0.5 font-mono">
-                        <span className="text-emerald-400/60 text-[10px]">{m.name}</span>
-                        <span className="text-emerald-100 ml-3 tabular-nums">{String(m.value)}</span>
-                    </div>
-                ))}
-                {data.members.length === 0 && (
-                    <div className="text-xs text-muted-foreground italic px-1">Empty</div>
-                )}
+            <div className="flex flex-col w-full">
+                {data.members.length === 0 ? (
+                    <div className="p-2 text-xs border-t border-[#30363d] text-[#8b949e] italic text-center">Raw Data</div>
+                ) : data.members.map(m => <VariableRow key={m.name} variable={m} nodeId={data.id} />)}
             </div>
+            <Handle type="target" position={Position.Left} id="target" className="!w-2 !h-2 !bg-[#e6edf3] !border-0 !-left-1 opacity-80" />
         </div>
     )
 }
 
-const nodeTypes = {
-    stackFrame: StackFrameNode,
-    heapNode: HeapNode,
-}
+const nodeTypes = { stackFrame: StackFrameNode, heapNode: HeapNode }
 
-// ── Layout ─────────────────────────────────────────────────────────
-
+// ── Graph Layout Engine ──
 function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
     const g = new dagre.graphlib.Graph()
     g.setDefaultEdgeLabel(() => ({}))
-    g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 80 })
+    g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 120 })
 
-    for (const node of nodes) {
-        g.setNode(node.id, { width: 230, height: 120 })
-    }
-    for (const edge of edges) {
-        g.setEdge(edge.source, edge.target)
-    }
-
+    nodes.forEach(node => {
+        // Dynamically estimate height based on table rows
+        const rows = node.type === 'stackFrame' ? (node.data.variables as MemoryValue[]).length : (node.data.members as MemoryValue[]).length;
+        g.setNode(node.id, { width: 250, height: Math.max(80, rows * 28 + 35) })
+    })
+    edges.forEach(edge => g.setEdge(edge.source, edge.target))
     dagre.layout(g)
 
     return nodes.map((node) => {
         const pos = g.node(node.id)
-        return {
-            ...node,
-            position: { x: pos.x - 115, y: pos.y - 60 },
-        }
+        return { ...node, position: { x: pos.x - 125, y: pos.y - (pos.height / 2) } }
     })
 }
-
-// ── Main Component ─────────────────────────────────────────────────
 
 export function MemoryVisualizer() {
     const { debugMode, dwarfInfo, memoryBuffer, callStack, heapPointers } = useDebugStore()
 
-    // Read memory snapshot with multi-frame call stack and native heap pointers
     const snapshot = useMemo(() => {
         if (debugMode !== 'paused' || !memoryBuffer) return null
         return readMemorySnapshot(memoryBuffer, dwarfInfo, callStack, heapPointers)
     }, [debugMode, dwarfInfo, memoryBuffer, callStack, heapPointers])
 
-    // Build React Flow nodes + edges from memory snapshot
     const { nodes, edges } = useMemo(() => {
-        if (!snapshot) {
-            return { nodes: [] as Node[], edges: [] as Edge[] }
-        }
+        if (!snapshot) return { nodes: [] as Node[], edges: [] as Edge[] }
 
         const nodes: Node[] = []
         const edges: Edge[] = []
-
-        // Render EVERY frame in the call stack!
-        // Reverse them so the active (deepest) frame is at the top of the UI
         const reversedFrames = [...snapshot.frames].reverse()
 
         reversedFrames.forEach((frameData, i) => {
-            const isTopFrame = i === 0
-
             nodes.push({
-                id: frameData.id,
-                type: 'stackFrame',
-                position: { x: 0, y: i * 160 },
-                data: {
-                    label: isTopFrame ? 'Active Frame' : `Caller Frame (Depth ${reversedFrames.length - i - 1})`,
-                    funcName: frameData.funcName,
-                    isActive: isTopFrame,
-                    variables: frameData.variables,
-                },
-                sourcePosition: Position.Right,
-                targetPosition: Position.Left,
+                id: frameData.id, type: 'stackFrame', position: { x: 0, y: 0 },
+                data: { id: frameData.id, label: frameData.funcName, isActive: i === 0, variables: frameData.variables },
             })
 
-            // Force visual top-to-bottom layout stacking using an invisible edge
+            // Invisible edge to force Stack Frames into a strict vertical column
             if (i > 0) {
                 edges.push({
-                    id: `stack-order-${i}`,
-                    source: reversedFrames[i - 1].id,
-                    target: frameData.id,
-                    type: 'straight',
-                    animated: false,
-                    style: { stroke: 'transparent', strokeWidth: 0 },
+                    id: `stack-order-${i}`, source: reversedFrames[i - 1].id, target: frameData.id,
+                    type: 'straight', style: { stroke: 'transparent', strokeWidth: 0 },
                 })
             }
 
-            // Draw pointer arrows from this frame to heap nodes
-            frameData.variables.filter((v: MemoryValue) => v.isPointer && v.pointsTo).forEach((v: MemoryValue) => {
-                if (snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
-                    edges.push({
-                        id: `${frameData.id}-${v.name}->heap-${v.pointsTo}`,
-                        source: frameData.id, target: `heap-${v.pointsTo}`,
-                        animated: isTopFrame, label: v.name,
-                        style: { stroke: isTopFrame ? '#f59e0b' : '#64748b', strokeWidth: 2 },
-                        labelStyle: { fill: isTopFrame ? '#f59e0b' : '#64748b', fontSize: 10, fontFamily: 'monospace' },
-                    })
+            // Extract edges targeting the exact table row handles
+            const extractEdges = (vars: MemoryValue[], parentId: string) => {
+                for (const v of vars) {
+                    if (v.isPointer && v.pointsTo && snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
+                        edges.push({
+                            id: `${parentId}-${v.name}->heap-${v.pointsTo}`,
+                            source: frameData.id, sourceHandle: `${parentId}-${v.name}`,
+                            target: `heap-${v.pointsTo}`, targetHandle: 'target',
+                            type: 'smoothstep', animated: i === 0,
+                            style: { stroke: i === 0 ? '#94a3b8' : '#475569', strokeWidth: 2 }
+                        })
+                    }
+                    if (v.isStruct && v.members) extractEdges(v.members, `${parentId}-${v.name}`);
                 }
-            })
+            }
+            extractEdges(frameData.variables, frameData.id);
         })
 
-        // Heap allocation nodes
-        snapshot.heapAllocations.forEach((alloc: HeapAllocation, i: number) => {
+        snapshot.heapAllocations.forEach((alloc) => {
             const nodeId = `heap-${alloc.ptr}`
             nodes.push({
-                id: nodeId,
-                type: 'heapNode',
-                position: { x: 300, y: i * 160 },
-                data: {
-                    label: alloc.label,
-                    sizeBytes: alloc.size,
-                    members: alloc.members,
-                },
-                sourcePosition: Position.Right,
-                targetPosition: Position.Left,
+                id: nodeId, type: 'heapNode', position: { x: 0, y: 0 },
+                data: { id: nodeId, label: alloc.typeName, ptr: alloc.ptr, members: alloc.members },
             })
+
+            // Allow pointers from Heap to point to other Heap items (Linked Lists!)
+            const extractHeapEdges = (vars: MemoryValue[], parentId: string) => {
+                for (const v of vars) {
+                    if (v.isPointer && v.pointsTo && snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
+                        edges.push({
+                            id: `${parentId}-${v.name}->heap-${v.pointsTo}`,
+                            source: nodeId, sourceHandle: `${parentId}-${v.name}`,
+                            target: `heap-${v.pointsTo}`, targetHandle: 'target',
+                            type: 'smoothstep', animated: false,
+                            style: { stroke: '#8b949e', strokeWidth: 2 }
+                        })
+                    }
+                    if (v.isStruct && v.members) extractHeapEdges(v.members, `${parentId}-${v.name}`);
+                }
+            }
+            extractHeapEdges(alloc.members, nodeId);
         })
 
-        // Layout the graph
-        const layouted = layoutGraph(nodes, edges)
-        return { nodes: layouted, edges }
+        return { nodes: layoutGraph(nodes, edges), edges }
     }, [snapshot])
 
-    const onNodesChange = useCallback(() => { }, [])
-    const onEdgesChange = useCallback(() => { }, [])
-
-    if (debugMode === 'idle') {
-        return (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-                <div className="text-center space-y-2">
-                    <div className="text-2xl">🧠</div>
-                    <div className="text-sm font-medium">Memory Visualizer</div>
-                    <div className="text-xs text-muted-foreground/60">
-                        Click <span className="text-purple-400 font-medium">Debug</span> to inspect memory
-                    </div>
-                </div>
-            </div>
-        )
-    }
-
-    if (debugMode === 'running' || debugMode === 'compiling') {
-        return (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-                <div className="text-center space-y-2">
-                    <div className="animate-spin text-2xl">⏳</div>
-                    <div className="text-sm">
-                        {debugMode === 'compiling' ? 'Compiling…' : 'Running…'}
-                    </div>
-                </div>
-            </div>
-        )
-    }
+    if (debugMode === 'idle') return <div className="flex h-full items-center justify-center text-[#8b949e] font-mono text-xs bg-[#010409]">Click Debug to inspect memory</div>
+    if (debugMode === 'compiling' || debugMode === 'running') return <div className="flex h-full items-center justify-center text-[#8b949e] font-mono text-xs bg-[#010409]">⏳ {debugMode === 'compiling' ? 'Compiling...' : 'Running...'}</div>
 
     return (
-        <div className="w-full h-full">
-            <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                nodeTypes={nodeTypes}
-                fitView
-                minZoom={0.5}
-                maxZoom={2}
-                proOptions={{ hideAttribution: true }}
-                className="bg-background"
-            >
-                <Background gap={16} size={0.5} color="hsl(var(--muted-foreground) / 0.1)" />
+        <div className="w-full h-full bg-[#010409]">
+            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2} proOptions={{ hideAttribution: true }}>
+                <Background gap={16} size={0.5} color="#30363d" />
             </ReactFlow>
         </div>
     )
