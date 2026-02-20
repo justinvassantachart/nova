@@ -106,7 +106,6 @@ self.onmessage = async (e) => {
                     src, ...baseIncludes,
                     '-std=c++20',
                     '-g', '-gdwarf-4', '-O0',
-                    '-finstrument-functions',
                     '-S',
                     '-target', 'wasm32-wasip1',
                     '-o', asmName,
