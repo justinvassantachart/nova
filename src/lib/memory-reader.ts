@@ -34,11 +34,6 @@ export interface MemorySnapshot {
 /**
  * Read memory values from a WASM memory buffer using DWARF variable info.
  * Called when the executor worker is frozen (Atomics.wait) so memory is stable.
- *
- * @param memoryBuffer - Cloned WASM linear memory snapshot
- * @param dwarfInfo    - Parsed DWARF debug info
- * @param allocations  - malloc() allocations captured by __wrap_malloc
- * @param stackPointer - Current stack pointer value from __stack_pointer global
  */
 export function readMemorySnapshot(
     memoryBuffer: ArrayBuffer | null,
@@ -113,47 +108,48 @@ function readVariable(
     varInfo: VariableInfo,
     stackPointer: number,
 ): MemoryValue | null {
-    // DWARF stackOffset is relative to the frame base (stack pointer).
-    // e.g. offset = -16 means the variable is at SP + (-16) = SP - 16
+    // DWARF stackOffset is relative to the stack pointer.
+    // Absolute address = Stack Pointer + Offset
     const address = stackPointer + varInfo.stackOffset
 
-    // Ensure address is within memory bounds and valid
+    // If out of bounds, still return with "???" so the UI draws the box
     if (address <= 0 || address + varInfo.size > view.byteLength) {
-        return null
-    }
-
-    let value: string | number
-    let pointsTo: number | undefined
-
-    if (varInfo.isPointer) {
-        // Read 4-byte pointer (WASM32)
-        pointsTo = view.getUint32(address, true)
-        value = `0x${pointsTo.toString(16).padStart(8, '0')}`
-    } else {
-        switch (varInfo.size) {
-            case 1: value = view.getInt8(address); break
-            case 2: value = view.getInt16(address, true); break
-            case 4:
-                if (varInfo.type === 'float') value = view.getFloat32(address, true)
-                else value = view.getInt32(address, true)
-                break
-            case 8:
-                if (varInfo.type === 'double') value = view.getFloat64(address, true)
-                else value = Number(view.getBigInt64(address, true))
-                break
-            default:
-                value = view.getInt32(address, true)
+        return {
+            name, type: varInfo.type, address,
+            value: '???', size: varInfo.size, isPointer: varInfo.isPointer,
         }
     }
 
+    let value: string | number = '???'
+    let pointsTo: number | undefined
+
+    try {
+        if (varInfo.isPointer) {
+            // Read 4-byte pointer (WASM32)
+            pointsTo = view.getUint32(address, true)
+            value = `0x${pointsTo.toString(16).padStart(8, '0')}`
+        } else {
+            switch (varInfo.size) {
+                case 1: value = view.getInt8(address); break
+                case 2: value = view.getInt16(address, true); break
+                case 4:
+                    if (varInfo.type === 'float') value = view.getFloat32(address, true)
+                    else value = view.getInt32(address, true)
+                    break
+                case 8:
+                    if (varInfo.type === 'double') value = view.getFloat64(address, true)
+                    else value = Number(view.getBigInt64(address, true))
+                    break
+                default:
+                    value = view.getInt32(address, true)
+            }
+        }
+    } catch {
+        value = '???'
+    }
+
     return {
-        name,
-        type: varInfo.type,
-        address,
-        value,
-        size: varInfo.size,
-        isPointer: varInfo.isPointer,
-        pointsTo,
-        pointeeType: varInfo.pointeeType,
+        name, type: varInfo.type, address, value, size: varInfo.size,
+        isPointer: varInfo.isPointer, pointsTo, pointeeType: varInfo.pointeeType,
     }
 }

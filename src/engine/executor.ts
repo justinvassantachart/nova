@@ -27,7 +27,6 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
         useDebugStore.getState().setDebugMode('running')
 
         // Safari-safe polling loop: reads SAB state via requestAnimationFrame
-        // instead of relying on postMessage (which Safari drops before Atomics.wait)
         const pollDebug = () => {
             if (!debugSab || !memorySab) return
             const ctrl = new Int32Array(debugSab)
@@ -38,8 +37,11 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                 const store = useDebugStore.getState()
 
                 if (store.currentLine !== line || store.debugMode !== 'paused') {
-                    // Clone the memory snapshot so React can safely read it
-                    store.setMemoryBuffer(memorySab.slice(0) as unknown as ArrayBuffer)
+                    // Safari-safe: Use ArrayBuffer copy, NOT SharedArrayBuffer.slice()
+                    const memCopy = new ArrayBuffer(memorySab.byteLength)
+                    new Uint8Array(memCopy).set(new Uint8Array(memorySab))
+
+                    store.setMemoryBuffer(memCopy)
                     store.setStackPointer(sp)
                     store.setCurrentLine(line)
                     store.setDebugMode('paused')

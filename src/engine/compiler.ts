@@ -70,12 +70,12 @@ function setupWorkerHandlers() {
     }
 }
 
-export function compile(files: Record<string, string>): Promise<CompileResult> {
+export function compile(files: Record<string, string>, debugMode = false): Promise<CompileResult> {
     return new Promise((resolve) => {
         const w = ensureWorker()
         currentResolve = resolve
         stderrLines = []
         const sysrootFiles = getSysrootFiles()
-        w.postMessage({ type: 'COMPILE', files, sysrootFiles })
+        w.postMessage({ type: 'COMPILE', files, sysrootFiles, debugMode })
     })
 }

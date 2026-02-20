@@ -9,12 +9,11 @@ import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
 import { compile } from '@/engine/compiler'
 import { execute, stop, debugStep, debugStop } from '@/engine/executor'
-import { instrumentWasmForStepping } from '@/engine/instrumenter'
 
 export function Toolbar() {
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
-    const { debugMode, currentLine, dwarfInfo } = useDebugStore()
+    const { debugMode, currentLine } = useDebugStore()
     const compilerReady = cacheState === 'ready'
 
     const handleRun = async () => {
@@ -48,24 +47,24 @@ export function Toolbar() {
         if (!term) return
         try {
             term.clear()
-            term.writeln('\x1b[1;33m⏳ Compiling with debug info…\x1b[0m')
+            term.writeln('\x1b[1;35m🐛 Compiling in Debug Mode…\x1b[0m')
             setIsCompiling(true)
-            const result = await compile(getAllFiles())
+
+            // Pass TRUE to trigger the 3-stage Assembly Intercept pipeline
+            const result = await compile(getAllFiles(), true)
             setIsCompiling(false)
+
             if (!result.success) {
                 term.writeln('\x1b[1;31m✗ Compilation failed:\x1b[0m')
                 result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
                 return
             }
-            term.writeln('\x1b[1;32m✓ Compiled successfully\x1b[0m')
-            term.writeln('\x1b[1;35m🔍 Instrumenting for debug stepping…\x1b[0m')
-
-            // Instrument the WASM binary for line-level stepping
-            const instrumented = instrumentWasmForStepping(result.wasmBinary!, dwarfInfo)
-
+            term.writeln('\x1b[1;32m✓ Debug build ready\x1b[0m')
             term.writeln('\x1b[90m─────────────────────────\x1b[0m')
             setIsRunning(true)
-            await execute(instrumented, true) // debugMode = true
+
+            // Execute with debugMode — the WASM already has JS_debug_step calls baked in
+            await execute(result.wasmBinary!, true)
         } catch (err: unknown) {
             term.writeln(`\x1b[1;31m✗ ${err instanceof Error ? err.message : err}\x1b[0m`)
         } finally {
