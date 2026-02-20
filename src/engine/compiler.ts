@@ -4,6 +4,8 @@
 
 import { getCompilerWorker } from '@/lib/compiler-cache'
 import { getSysrootFiles } from '@/vfs/sysroot-loader'
+import { parseDwarf } from './dwarf-parser'
+import { useDebugStore } from '@/store/debug-store'
 
 export interface CompileResult {
     success: boolean
@@ -31,7 +33,18 @@ function setupWorkerHandlers() {
     worker.onmessage = (e) => {
         const { type } = e.data
         if (type === 'COMPILE_DONE') {
-            currentResolve?.({ success: true, errors: [], wasmBinary: new Uint8Array(e.data.wasmBinary) })
+            const wasmBinary = new Uint8Array(e.data.wasmBinary)
+
+            // Parse DWARF debug info from the compiled binary
+            try {
+                const dwarfInfo = parseDwarf(wasmBinary)
+                useDebugStore.getState().setDwarfInfo(dwarfInfo)
+                useDebugStore.getState().setWasmBinary(wasmBinary)
+            } catch (err) {
+                console.warn('[compiler] DWARF parse failed:', err)
+            }
+
+            currentResolve?.({ success: true, errors: [], wasmBinary })
             currentResolve = null
             stderrLines = []
         } else if (type === 'COMPILE_ERROR') {
