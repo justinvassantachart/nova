@@ -25,14 +25,38 @@ extern "C" {
 
 const MEMORY_TRACKER = `extern "C" {
     extern void JS_notify_alloc(unsigned int addr, unsigned int size);
+    extern void JS_notify_free(unsigned int addr);
+    extern void JS_notify_enter();
+    extern void JS_notify_exit();
     extern void* __real_malloc(unsigned long size);
+    extern void __real_free(void* ptr);
 
     void* __wrap_malloc(unsigned long size) {
         void* ptr = __real_malloc(size);
-        JS_notify_alloc((unsigned int)ptr, (unsigned int)size);
+        if (size > 0) JS_notify_alloc((unsigned int)ptr, (unsigned int)size);
         return ptr;
     }
+
+    void __wrap_free(void* ptr) {
+        if (ptr) JS_notify_free((unsigned int)ptr);
+        __real_free(ptr);
+    }
+
+    // Native Hardware Call Stack Tracking (Recursion Proof!)
+    void __cyg_profile_func_enter(void *this_fn, void *call_site) __attribute__((no_instrument_function));
+    void __cyg_profile_func_exit(void *this_fn, void *call_site) __attribute__((no_instrument_function));
+
+    void __cyg_profile_func_enter(void *this_fn, void *call_site) { JS_notify_enter(); }
+    void __cyg_profile_func_exit(void *this_fn, void *call_site) { JS_notify_exit(); }
 }
+
+// Global C++ overrides guarantee we catch all object destruction natively!
+void* operator new(unsigned long size) { return __wrap_malloc(size); }
+void* operator new[](unsigned long size) { return __wrap_malloc(size); }
+void operator delete(void* ptr) noexcept { __wrap_free(ptr); }
+void operator delete[](void* ptr) noexcept { __wrap_free(ptr); }
+void operator delete(void* ptr, unsigned long) noexcept { __wrap_free(ptr); }
+void operator delete[](void* ptr, unsigned long) noexcept { __wrap_free(ptr); }
 `
 
 // ── Current project ID ─────────────────────────────────────────
