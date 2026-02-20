@@ -159,8 +159,6 @@ self.onmessage = async (e) => {
                 currentStepId += result.injectedCount
                 Object.assign(globalStepMap, result.stepMap)
 
-                // Log instrumentation diagnostics
-                self.postMessage({ type: 'COMPILE_PROGRESS', message: result.diagnostics })
                 self.postMessage({ type: 'COMPILE_PROGRESS', message: `Injected ${result.injectedCount} debug breakpoints into ${asmName.split('/').pop()}` })
 
                 // Overwrite the .s file in the virtual tree with instrumented version
