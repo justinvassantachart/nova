@@ -14,6 +14,7 @@ self.onmessage = async (e) => {
     let drawQueue: Array<Record<string, unknown>> = []
     let exitCode = 0
     let inst: WebAssembly.Instance
+    let callStackSPs: number[] = []
 
     function readCString(mem: WebAssembly.Memory, ptr: number): string {
         const b = new Uint8Array(mem.buffer)
@@ -36,6 +37,18 @@ self.onmessage = async (e) => {
             wasi_snapshot_preview1: wasi,
             env: {
                 JS_notify_alloc: (ptr: number, size: number) => self.postMessage({ type: 'ALLOC', ptr, size }),
+                JS_notify_free: (ptr: number) => self.postMessage({ type: 'FREE', ptr }),
+
+                JS_notify_enter: () => {
+                    if (!debugMode) return
+                    const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                    callStackSPs.push(sp)
+                },
+                JS_notify_exit: () => {
+                    if (!debugMode) return
+                    callStackSPs.pop()
+                },
+
                 clear_screen: () => { drawQueue.push({ type: 'CLEAR' }) },
                 draw_circle: (x: number, y: number, r: number, cp: number) => {
                     drawQueue.push({ type: 'CIRCLE', x, y, r, color: readCString(wasmMemory, cp) })
@@ -53,9 +66,11 @@ self.onmessage = async (e) => {
                 //
                 // Protocol:
                 //   stateArr[0] = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
-                //   stateArr[1] = current line number
-                //   stateArr[2] = stack pointer value
-                JS_debug_step: (lineNumber: number) => {
+                //   stateArr[1] = current step ID
+                //   stateArr[2] = (reserved)
+                //   stateArr[3] = call stack depth
+                //   stateArr[4..63] = call stack SPs
+                JS_debug_step: (stepId: number) => {
                     if (!debugMode || !debugSab) return
                     const stateArr = new Int32Array(debugSab.buffer)
 
@@ -66,14 +81,19 @@ self.onmessage = async (e) => {
                         sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
                     }
 
-                    // 2. Write the stack pointer value
-                    const sp = inst.exports.__stack_pointer
-                        ? (inst.exports.__stack_pointer as WebAssembly.Global).value
-                        : 0
-                    Atomics.store(stateArr, 2, sp as number)
+                    // Keep SP accurate for this specific execution frame
+                    const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                    if (callStackSPs.length > 0) callStackSPs[callStackSPs.length - 1] = sp
+                    else callStackSPs.push(sp)
 
-                    // 3. Write the line number
-                    Atomics.store(stateArr, 1, lineNumber)
+                    // 2. Write the step ID
+                    Atomics.store(stateArr, 1, stepId)
+
+                    // 3. Send the recursion depths
+                    Atomics.store(stateArr, 3, callStackSPs.length)
+                    for (let i = 0; i < callStackSPs.length && i < 60; i++) {
+                        Atomics.store(stateArr, 4 + i, callStackSPs[i])
+                    }
 
                     // 4. Signal PAUSED state (1)
                     Atomics.store(stateArr, 0, 1)

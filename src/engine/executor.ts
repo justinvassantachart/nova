@@ -20,7 +20,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
 
     if (debugMode) {
-        debugSab = new SharedArrayBuffer(16) // 4 Int32s: [control, lineNumber, stackPointer, reserved]
+        debugSab = new SharedArrayBuffer(256) // 64 Int32s: [control, stepId, reserved, depth, sp0..sp59]
         memorySab = new SharedArrayBuffer(16 * 1024 * 1024) // 16MB memory snapshot buffer
         const arr = new Int32Array(debugSab)
         arr[0] = 3 // 3 = Running
@@ -32,24 +32,38 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
             const ctrl = new Int32Array(debugSab)
 
             if (Atomics.load(ctrl, 0) === 1) { // 1 = PAUSED
-                const stepId = Atomics.load(ctrl, 1)  // Now reads step ID, not raw line
-                const sp = Atomics.load(ctrl, 2)
-                const store = useDebugStore.getState()
+                const stepId = Atomics.load(ctrl, 1)
+                const depth = Atomics.load(ctrl, 3)
+                const sps: number[] = []
+                for (let i = 0; i < depth && i < 60; i++) sps.push(Atomics.load(ctrl, 4 + i))
 
-                // Decode stepId → (line, func) via the global stepMap
+                const store = useDebugStore.getState()
                 const mapEntry = store.stepMap[stepId]
                 const line = mapEntry ? mapEntry.line : -1
-                const func = mapEntry ? mapEntry.func : null
+                const func = mapEntry ? mapEntry.func : 'unknown'
 
                 if (store.currentLine !== line || store.debugMode !== 'paused') {
                     // Safari-safe: Use ArrayBuffer copy, NOT SharedArrayBuffer.slice()
                     const memCopy = new ArrayBuffer(memorySab.byteLength)
                     new Uint8Array(memCopy).set(new Uint8Array(memorySab))
 
+                    // Build the recursive call stack
+                    const newCallStack = sps.map((frameSp, i) => {
+                        const isTop = i === depth - 1
+                        const existing = store.callStack.find(f => f.sp === frameSp)
+                        return {
+                            id: `frame-${frameSp}`,
+                            sp: frameSp,
+                            func: isTop ? func : (existing ? existing.func : 'unknown'),
+                            line: isTop ? line : (existing ? existing.line : -1),
+                        }
+                    })
+
                     store.setMemoryBuffer(memCopy)
-                    store.setStackPointer(sp)
+                    store.setCallStack(newCallStack)
                     store.setCurrentLine(line)
                     store.setCurrentFunc(func)
+                    store.setStackPointer(sps.length > 0 ? sps[sps.length - 1] : 0)
                     store.setDebugMode('paused')
                 }
             }
@@ -87,6 +101,9 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     useExecutionStore.getState().addAllocation({
                         ptr: msg.data.ptr, size: msg.data.size, timestamp: Date.now(),
                     })
+                    break
+                case 'FREE':
+                    useExecutionStore.getState().removeAllocation(msg.data.ptr)
                     break
                 case 'EXIT':
                     term?.writeln(`\r\n\x1b[90m─── Program exited with code ${msg.data.code ?? 0} ───\x1b[0m`)
