@@ -80,6 +80,7 @@ self.onmessage = async (e) => {
         )
 
         const baseIncludes = [
+            '-I/workspace/',
             '-I/sysroot/',
             '-isystem', '/sysroot/include/c++/v1',
             '-isystem', '/sysroot/include',
@@ -104,8 +105,9 @@ self.onmessage = async (e) => {
                 const compileArgs = [
                     src, ...baseIncludes,
                     '-std=c++20',
-                    '-g', '-gdwarf-4', '-O0',  // DWARF-4 for our parser
-                    '-S',                       // Emit assembly (not binary)
+                    '-g', '-gdwarf-4', '-O0',
+                    '-finstrument-functions',
+                    '-S',
                     '-target', 'wasm32-wasip1',
                     '-o', asmName,
                 ]
@@ -176,6 +178,7 @@ self.onmessage = async (e) => {
                 '-target', 'wasm32-wasip1',
                 '-Wl,--allow-undefined',
                 '-Wl,--wrap=malloc',
+                '-Wl,--wrap=free',
                 '-Wl,--export=__stack_pointer',
                 '-o', '/workspace/program.wasm',
             ]
@@ -199,6 +202,7 @@ self.onmessage = async (e) => {
                 '-std=c++20', '-O2',
                 '-Wl,--allow-undefined',
                 '-Wl,--wrap=malloc',
+                '-Wl,--wrap=free',
                 '-target', 'wasm32-wasip1',
                 '-o', '/workspace/program.wasm',
             ]
