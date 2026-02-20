@@ -122,17 +122,14 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
 // ── Main Component ─────────────────────────────────────────────────
 
 export function MemoryVisualizer() {
-    const { debugMode, dwarfInfo, memoryBuffer, stackPointer, currentLine, currentFunc } = useDebugStore()
+    const { debugMode, dwarfInfo, memoryBuffer, callStack } = useDebugStore()
     const { allocations } = useExecutionStore()
 
-    // Read memory snapshot with scope + time-travel filters
+    // Read memory snapshot with multi-frame call stack
     const snapshot = useMemo(() => {
         if (debugMode !== 'paused' || !memoryBuffer) return null
-        return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, stackPointer, currentLine, currentFunc)
-    }, [debugMode, dwarfInfo, allocations, memoryBuffer, stackPointer, currentLine, currentFunc])
-
-    // Current call stack - only show active frame since we can only read current stack pointer
-    const callStack = useMemo(() => currentFunc ? [currentFunc] : [], [currentFunc])
+        return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, callStack)
+    }, [debugMode, dwarfInfo, allocations, memoryBuffer, callStack])
 
     // Build React Flow nodes + edges from memory snapshot
     const { nodes, edges } = useMemo(() => {
@@ -143,36 +140,38 @@ export function MemoryVisualizer() {
         const nodes: Node[] = []
         const edges: Edge[] = []
 
-        // Active stack frame node (current function)
-        nodes.push({
-            id: 'stack-0',
-            type: 'stackFrame',
-            position: { x: 0, y: 0 },
-            data: {
-                label: `#0`,
-                funcName: currentFunc ?? 'main',
-                isActive: true,
-                variables: snapshot.stackVariables,
-            },
-            sourcePosition: Position.Right,
-            targetPosition: Position.Left,
-        })
+        // Render EVERY frame in the call stack!
+        // Reverse them so the active (deepest) frame is at the top of the UI
+        const reversedFrames = [...snapshot.frames].reverse()
 
-        // Show previous frames in call stack (without variable values)
-        callStack.slice(1).forEach((func, i) => {
-            const frameIndex = i + 1
+        reversedFrames.forEach((frameData, i) => {
+            const isTopFrame = i === 0
+
             nodes.push({
-                id: `stack-${frameIndex}`,
+                id: frameData.id,
                 type: 'stackFrame',
-                position: { x: 0, y: (frameIndex) * 140 },
+                position: { x: 0, y: i * 160 },
                 data: {
-                    label: `#${frameIndex}`,
-                    funcName: func,
-                    isActive: false,
-                    variables: [],   // Previous frames don't have live variable reads
+                    label: isTopFrame ? 'Active Frame' : `Caller Frame (Depth ${reversedFrames.length - i - 1})`,
+                    funcName: frameData.funcName,
+                    isActive: isTopFrame,
+                    variables: frameData.variables,
                 },
                 sourcePosition: Position.Right,
                 targetPosition: Position.Left,
+            })
+
+            // Draw pointer arrows specifically isolated to this frame
+            frameData.variables.filter((v: MemoryValue) => v.isPointer && v.pointsTo).forEach((v: MemoryValue) => {
+                if (snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
+                    edges.push({
+                        id: `${frameData.id}-${v.name}->heap-${v.pointsTo}`,
+                        source: frameData.id, target: `heap-${v.pointsTo}`,
+                        animated: isTopFrame, label: v.name,
+                        style: { stroke: isTopFrame ? '#f59e0b' : '#64748b', strokeWidth: 2 },
+                        labelStyle: { fill: isTopFrame ? '#f59e0b' : '#64748b', fontSize: 10, fontFamily: 'monospace' },
+                    })
+                }
             })
         })
 
@@ -191,27 +190,12 @@ export function MemoryVisualizer() {
                 sourcePosition: Position.Right,
                 targetPosition: Position.Left,
             })
-
-            // Create edges from pointer variables to heap allocations
-            snapshot.stackVariables
-                .filter((v: MemoryValue) => v.isPointer && v.pointsTo === alloc.ptr)
-                .forEach((v: MemoryValue) => {
-                    edges.push({
-                        id: `${v.name}->${nodeId}`,
-                        source: 'stack-0',
-                        target: nodeId,
-                        animated: true,
-                        label: v.name,
-                        style: { stroke: '#f59e0b', strokeWidth: 2 },
-                        labelStyle: { fill: '#f59e0b', fontSize: 10, fontFamily: 'monospace' },
-                    })
-                })
         })
 
         // Layout the graph
         const layouted = layoutGraph(nodes, edges)
         return { nodes: layouted, edges }
-    }, [snapshot, currentFunc, callStack])
+    }, [snapshot])
 
     const onNodesChange = useCallback(() => { }, [])
     const onEdgesChange = useCallback(() => { }, [])
