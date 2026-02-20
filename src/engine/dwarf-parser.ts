@@ -779,10 +779,19 @@ function parseDebugInfo(
 
 function cleanTypeName(name: string): string {
     if (!name) return 'unknown'
-    if (name.startsWith('std::__1::basic_string')) return 'std::string'
-    if (name.startsWith('std::__1::vector')) {
+    // Full libc++ internal names
+    if (name.startsWith('std::__1::basic_string') || name.startsWith('std::__2::basic_string')) return 'std::string'
+    if (name.startsWith('std::__1::vector') || name.startsWith('std::__2::vector')) {
         const match = name.match(/<([^,]+)/)
-        if (match) return `std::vector<${cleanTypeName(match[1])}>`
+        if (match) return `std::vector<${cleanTypeName(match[1].trim())}>`
+    }
+    // Bare names from DWARF typedefs (clang often omits namespace prefix)
+    if (name === 'string' || name === 'std::string') return 'std::string'
+    if (name.startsWith('basic_string')) return 'std::string'
+    if (name === 'vector' || name.startsWith('vector<')) {
+        const match = name.match(/<([^,]+)/)
+        if (match) return `std::vector<${cleanTypeName(match[1].trim())}>`
+        return 'std::vector<unknown>'
     }
     return name
 }
@@ -800,8 +809,17 @@ function resolveTypeName(
     if (info.tag === DW_TAG_pointer_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}*`
 
     if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
+        // For typedefs: try cleaning the name first; if it resolves to something useful, use it.
+        // Otherwise follow through to the underlying type for better resolution.
+        if (info.name) {
+            const cleaned = cleanTypeName(info.name)
+            // If cleanTypeName actually transformed it (std:: prefix), use it
+            if (cleaned !== info.name) return cleaned
+        }
+        // Follow through to underlying type
+        if (info.typeRef !== undefined) return resolveTypeName(typeMap, info.typeRef, depth + 1)
         if (info.name) return cleanTypeName(info.name)
-        return resolveTypeName(typeMap, info.typeRef, depth + 1)
+        return 'unknown'
     }
 
     return cleanTypeName(info.name ?? 'unknown')

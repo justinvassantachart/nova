@@ -8,7 +8,7 @@ import { EMPTY_DWARF } from '@/engine/dwarf-types'
 
 export type DebugMode = 'idle' | 'compiling' | 'running' | 'paused'
 
-export interface StackFrame { id: string; func: string; line: number; sp: number }
+export interface StackFrame { id: string; func: string; line: number; sp: number; frameSize: number }
 
 export interface DebugState {
     /** Parsed DWARF debug info from the last compilation */

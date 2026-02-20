@@ -20,7 +20,7 @@ self.onmessage = async (e) => {
     // JS_notify_enter/exit are called by __cyg_profile_func_enter/exit
     // which Clang generates automatically with -finstrument-functions.
     // Each entry has a unique ID so React Flow can track nodes across renders.
-    let callStack: Array<{ id: number; func: string; sp: number }> = []
+    let callStack: Array<{ id: number; func: string; sp: number; frameSize: number }> = []
     let nextCallId = 1
 
     function readCString(mem: WebAssembly.Memory, ptr: number): string {
@@ -40,114 +40,163 @@ self.onmessage = async (e) => {
             onExit: (code: number) => { exitCode = code },
         })
 
-        const imports: WebAssembly.Imports = {
-            wasi_snapshot_preview1: wasi,
-            env: {
-                // Natively handled by C++ Memory Tracker — no async postMessage needed!
-                JS_notify_alloc: () => { },
-                JS_notify_free: () => { },
+        // Base environment — functions we explicitly implement
+        const baseEnv: Record<string, Function> = {
+            // Natively handled by C++ Memory Tracker
+            JS_notify_alloc: () => { },
+            JS_notify_free: () => { },
 
-                // ── Exception & System Stubs ───────────────────────────
-                __cxa_allocate_exception: () => { throw new Error("C++ exception thrown!"); },
-                __cxa_throw: () => { throw new Error("C++ exception thrown!"); },
-                __cxa_begin_catch: () => 0,
-                __cxa_end_catch: () => { },
-                __cxa_atexit: () => { },
-                __cxa_pure_virtual: () => { },
-                _ZSt28__throw_bad_array_new_lengthv: () => { throw new Error("Bad array new length"); },
+            // Explicit Exception & System Stubs
+            __cxa_allocate_exception: () => { throw new Error("C++ Exception Thrown"); },
+            __cxa_throw: () => { throw new Error("C++ Exception Thrown"); },
+            __cxa_begin_catch: () => 0,
+            __cxa_end_catch: () => { },
+            __cxa_atexit: () => { },
+            __cxa_pure_virtual: () => { },
+            _ZSt28__throw_bad_array_new_lengthv: () => { throw new Error("Bad array length"); },
 
-                // Hardware tells us exactly when a frame is pushed/popped!
-                JS_notify_enter: () => {
-                    if (!debugMode) return
-                    const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                    callStack.push({ id: nextCallId++, func: 'unknown', sp })
-                },
-                JS_notify_exit: () => {
-                    if (!debugMode) return
-                    callStack.pop()
-                },
-
-                clear_screen: () => { drawQueue.push({ type: 'CLEAR' }) },
-                draw_circle: (x: number, y: number, r: number, cp: number) => {
-                    drawQueue.push({ type: 'CIRCLE', x, y, r, color: readCString(wasmMemory, cp) })
-                },
-                render_frame: () => {
-                    self.postMessage({ type: 'RENDER_BATCH', queue: drawQueue })
-                    drawQueue = []
-                    Atomics.store(pacer, 0, 0)
-                    Atomics.wait(pacer, 0, 0)
-                },
-
-                // ── Debug stepping (Safari-safe) ───────────────────────
-                // Protocol (1024-byte SAB):
-                //   [0]  = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
-                //   [1]  = current step ID
-                //   [2]  = (reserved)
-                //   [3]  = call stack depth
-                //   [4..123] = interleaved (callId, sp) pairs — 60 max frames
-                //   [128] = __nova_alloc_count ptr
-                //   [129] = __nova_allocs ptr
-                JS_debug_step: (stepId: number) => {
-                    if (!debugMode || !debugSab) return
-                    const stateArr = new Int32Array(debugSab.buffer)
-
-                    // 1. Clone live WASM memory into the shared snapshot buffer
-                    if (e.data.memorySab) {
-                        const memArr = new Uint8Array(wasmMemory.buffer)
-                        const sabArr = new Uint8Array(e.data.memorySab as SharedArrayBuffer)
-                        sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
-                    }
-
-                    // 2. Update the active frame's function name and SP
-                    const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                    const mapEntry = stepMap[stepId]
-                    const currentFunc = mapEntry ? mapEntry.func : 'unknown'
-
-                    if (callStack.length > 0) {
-                        callStack[callStack.length - 1].func = currentFunc
-                        callStack[callStack.length - 1].sp = sp
-                    } else {
-                        callStack.push({ id: nextCallId++, func: currentFunc, sp })
-                    }
-
-                    // 3. Write step ID + call stack into the SAB
-                    Atomics.store(stateArr, 1, stepId)
-                    Atomics.store(stateArr, 3, callStack.length)
-
-                    // Stream the entire hardware call stack back to the React UI
-                    for (let i = 0; i < callStack.length && i < 60; i++) {
-                        Atomics.store(stateArr, 4 + i * 2, callStack[i].id)
-                        Atomics.store(stateArr, 4 + i * 2 + 1, callStack[i].sp)
-                    }
-
-                    // 4. Export native heap tracker pointers
-                    const getExportAddr = (name: string) => {
-                        const exp = inst.exports[name]
-                        if (typeof exp === 'number') return exp
-                        if (exp && typeof (exp as any).value === 'number') return (exp as any).value // eslint-disable-line @typescript-eslint/no-explicit-any
-                        return 0
-                    }
-                    Atomics.store(stateArr, 128, getExportAddr('__nova_alloc_count'))
-                    Atomics.store(stateArr, 129, getExportAddr('__nova_allocs'))
-
-                    // 5. Signal PAUSED state (1)
-                    Atomics.store(stateArr, 0, 1)
-                    Atomics.notify(stateArr, 0, 1)
-
-                    // 6. Safari-safe wait loop: spin until resumed (3) or stopped (2)
-                    while (Atomics.load(stateArr, 0) === 1) {
-                        Atomics.wait(stateArr, 0, 1)
-                    }
-
-                    // 7. Check if we should stop
-                    if (Atomics.load(stateArr, 0) === 2) {
-                        throw new Error('__debug_stop')
-                    }
-                },
+            // Hardware tells us exactly when a frame is pushed/popped!
+            JS_notify_enter: (frameSize: number) => {
+                if (!debugMode) return
+                const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                console.log(`[executor] ENTER: depth=${callStack.length} sp=0x${sp.toString(16)} frameSize=${frameSize}`)
+                callStack.push({ id: nextCallId++, func: 'unknown', sp, frameSize })
             },
-        }
+            JS_notify_exit: () => {
+                if (!debugMode) return
+                callStack.pop()
+            },
+
+            clear_screen: () => { drawQueue.push({ type: 'CLEAR' }) },
+            draw_circle: (x: number, y: number, r: number, cp: number) => {
+                drawQueue.push({ type: 'CIRCLE', x, y, r, color: readCString(wasmMemory, cp) })
+            },
+            render_frame: () => {
+                self.postMessage({ type: 'RENDER_BATCH', queue: drawQueue })
+                drawQueue = []
+                Atomics.store(pacer, 0, 0)
+                Atomics.wait(pacer, 0, 0)
+            },
+
+            // ── Debug stepping (Safari-safe) ───────────────────────
+            // Protocol (1024-byte SAB):
+            //   [0]  = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
+            //   [1]  = current step ID
+            //   [2]  = (reserved)
+            //   [3]  = call stack depth
+            //   [4..123] = interleaved (callId, sp) pairs — 60 max frames
+            //   [128] = __nova_alloc_count ptr
+            //   [129] = __nova_allocs ptr
+            JS_debug_step: (stepId: number) => {
+                if (!debugMode || !debugSab) return
+                const stateArr = new Int32Array(debugSab.buffer)
+
+                // 1. Clone live WASM memory into the shared snapshot buffer
+                if (e.data.memorySab) {
+                    const memArr = new Uint8Array(wasmMemory.buffer)
+                    const sabArr = new Uint8Array(e.data.memorySab as SharedArrayBuffer)
+                    sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
+
+                    // Diagnostic: verify memory content at SP address
+                    const spDiag = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                    const wView = new DataView(wasmMemory.buffer)
+                    const dataEnd = inst.exports.__data_end ? (inst.exports.__data_end as WebAssembly.Global).value as number : -1
+                    const heapBase = inst.exports.__heap_base ? (inst.exports.__heap_base as WebAssembly.Global).value as number : -1
+                    console.log(`[executor] DIAG: sp=0x${spDiag.toString(16)} __data_end=0x${dataEnd.toString(16)} __heap_base=0x${heapBase.toString(16)} wasmMem.len=${memArr.length}`)
+                    // Dump 64 bytes (16 i32s) starting from SP
+                    if (spDiag + 64 <= memArr.length) {
+                        const dump: string[] = []
+                        for (let i = 0; i < 16; i++) {
+                            dump.push(`${wView.getInt32(spDiag + i * 4, true)}`)
+                        }
+                        console.log(`[executor] WASM 64B at sp: [${dump.join(', ')}]`)
+                    }
+                    // Also check if values are at negative offsets from SP (stack frame starts ABOVE sp)
+                    if (spDiag >= 64) {
+                        const dump: string[] = []
+                        for (let i = 0; i < 16; i++) {
+                            dump.push(`${wView.getInt32(spDiag - 64 + i * 4, true)}`)
+                        }
+                        console.log(`[executor] WASM 64B BEFORE sp: [${dump.join(', ')}]`)
+                    }
+                }
+
+                // 2. Update the active frame's function name (but NOT the sp — 
+                // the entry sp from JS_notify_enter is the correct frame base for DW_OP_fbreg)
+                const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                const mapEntry = stepMap[stepId]
+                const currentFunc = mapEntry ? mapEntry.func : 'unknown'
+
+                if (callStack.length > 0) {
+                    callStack[callStack.length - 1].func = currentFunc
+                    // DO NOT overwrite .sp here — it was set at function entry (frame base)
+                } else {
+                    callStack.push({ id: nextCallId++, func: currentFunc, sp, frameSize: 0 })
+                }
+
+                // 3. Write step ID + call stack into the SAB
+                Atomics.store(stateArr, 1, stepId)
+                Atomics.store(stateArr, 3, callStack.length)
+
+                // Stream the entire hardware call stack back to the React UI
+                // 3 values per frame: (callId, sp, frameSize)
+                for (let i = 0; i < callStack.length && i < 40; i++) {
+                    Atomics.store(stateArr, 4 + i * 3, callStack[i].id)
+                    Atomics.store(stateArr, 4 + i * 3 + 1, callStack[i].sp)
+                    Atomics.store(stateArr, 4 + i * 3 + 2, callStack[i].frameSize)
+                }
+
+                // 4. Export native heap tracker pointers
+                const getExportAddr = (name: string) => {
+                    const exp = inst.exports[name]
+                    if (typeof exp === 'number') return exp
+                    if (exp && typeof (exp as any).value === 'number') return (exp as any).value // eslint-disable-line @typescript-eslint/no-explicit-any
+                    return 0
+                }
+                Atomics.store(stateArr, 128, getExportAddr('__nova_alloc_count'))
+                Atomics.store(stateArr, 129, getExportAddr('__nova_allocs'))
+
+                // 5. Signal PAUSED state (1)
+                Atomics.store(stateArr, 0, 1)
+                Atomics.notify(stateArr, 0, 1)
+
+                // 6. Safari-safe wait loop: spin until resumed (3) or stopped (2)
+                while (Atomics.load(stateArr, 0) === 1) {
+                    Atomics.wait(stateArr, 0, 1)
+                }
+
+                // 7. Check if we should stop
+                if (Atomics.load(stateArr, 0) === 2) {
+                    throw new Error('__debug_stop')
+                }
+            },
+        };
 
         const mod = await WebAssembly.compile(wasmBytes)
+
+        // ── Dynamic Import Proxy ───────────────────────────────────
+        // Dynamically satisfy any required C++ system imports to prevent
+        // WebAssembly.instantiate from crashing on missing callables.
+        const expectedImports = WebAssembly.Module.imports(mod);
+        for (const imp of expectedImports) {
+            if (imp.module === 'env' && !(imp.name in baseEnv)) {
+                baseEnv[imp.name] = () => {
+                    console.warn(`[WASM] Safely ignored unimplemented C++ system call: env.${imp.name}`);
+                    if (imp.name.includes('exception') || imp.name.includes('throw') || imp.name.includes('cxa')) {
+                        throw new Error(`C++ Exception: ${imp.name}`);
+                    }
+                    return 0;
+                };
+            } else if (imp.module === 'wasi_snapshot_preview1' && !(imp.name in wasi)) {
+                (wasi as any)[imp.name] = () => 0; // Stub missing WASI calls safely
+            }
+        }
+
+        const imports: WebAssembly.Imports = {
+            wasi_snapshot_preview1: wasi,
+            env: baseEnv,
+        }
+
         inst = await WebAssembly.instantiate(mod, imports)
         wasmMemory = inst.exports.memory as WebAssembly.Memory
 

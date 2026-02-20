@@ -31,6 +31,8 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
     let injectedLines = new Set<number>()
     let needsEnterCall = false // True after we see prologue_end in a user function
     let enteredCurrentFunc = false // Whether we've injected enter for current function
+    let frameAllocSize = 0 // Frame size detected from prologue (i32.const N before i32.sub/global.set __stack_pointer)
+    let lastI32Const = 0 // Track last i32.const value to detect frame allocation
     const userFileIds = new Set<string>()
 
     // We need to skip injecting enter/exit for the memory tracker functions
@@ -41,7 +43,7 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
     ])
 
     output.push('\t.functype\tJS_debug_step (i32) -> ()')
-    output.push('\t.functype\tJS_notify_enter () -> ()')
+    output.push('\t.functype\tJS_notify_enter (i32) -> ()')
     output.push('\t.functype\tJS_notify_exit () -> ()')
 
     for (const line of lines) {
@@ -78,6 +80,7 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
 
             inFunc = true; stackReady = false; currentLine = -1; injectedLines.clear()
             needsEnterCall = false; enteredCurrentFunc = false
+            frameAllocSize = 0; lastI32Const = 0
         }
         // 3. Track DWARF Lines
         else if (opcode === '.loc') {
@@ -104,8 +107,20 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             !opcode.startsWith('@') && !opcode.endsWith(':') &&
             opcode !== 'end_function' && /^[a-z_]/.test(opcode)
 
-        // 5. Inject enter call at the first real instruction after prologue_end
+        // 5. Detect frame allocation (i32.const N / i32.sub / global.set __stack_pointer)
+        // Only capture the FIRST i32.sub — that's the frame allocation.
+        // Subsequent i32.sub in the prologue compute sub-frame addresses (not the allocation).
+        if (inFunc && !stackReady && isInstruction) {
+            if (opcode === 'i32.const' && tokens[1]) {
+                lastI32Const = parseInt(tokens[1], 10) || 0
+            } else if (opcode === 'i32.sub' && frameAllocSize === 0) {
+                frameAllocSize = lastI32Const
+            }
+        }
+
+        // 6. Inject enter call at the first real instruction after prologue_end
         if (needsEnterCall && isInstruction) {
+            output.push(`\ti32.const\t${frameAllocSize}`)
             output.push('\tcall\tJS_notify_enter')
             needsEnterCall = false
             enteredCurrentFunc = true
