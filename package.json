@@ -16,6 +16,7 @@
     "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.10.1",
     "@yowasp/clang": "^21.1.4-3",
+    "binaryen": "^125.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fflate": "^0.8.2",

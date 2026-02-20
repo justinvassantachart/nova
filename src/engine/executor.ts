@@ -1,16 +1,24 @@
 // ── Executor Bridge ────────────────────────────────────────────────
 import { useExecutionStore } from '@/store/execution-store'
+import { useDebugStore } from '@/store/debug-store'
 import type { DrawCommand } from '@/store/execution-store'
 
 let executorWorker: Worker | null = null
 let sab: SharedArrayBuffer | null = null
+let debugSab: SharedArrayBuffer | null = null
 let rafId: number | null = null
 
-export async function execute(wasmBinary: Uint8Array) {
+export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     stop()
     sab = new SharedArrayBuffer(4)
     const pacer = new Int32Array(sab)
     const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    // Create debug SharedArrayBuffer if debugging
+    if (debugMode) {
+        debugSab = new SharedArrayBuffer(4)
+        useDebugStore.getState().setDebugMode('running')
+    }
 
     executorWorker = new Worker(
         new URL('../workers/executor.worker.ts', import.meta.url),
@@ -42,14 +50,25 @@ export async function execute(wasmBinary: Uint8Array) {
                         ptr: msg.data.ptr, size: msg.data.size, timestamp: Date.now(),
                     })
                     break
+                case 'DEBUG_PAUSED':
+                    // Worker hit a source line — update React state
+                    useDebugStore.getState().setCurrentLine(msg.data.line)
+                    useDebugStore.getState().setDebugMode('paused')
+                    break
+                case 'DEBUG_MEMORY_READY':
+                    // Worker shared its WASM memory buffer reference
+                    // (Note: this is a reference, reads are valid while worker is paused)
+                    break
                 case 'EXIT':
                     term?.writeln(`\r\n\x1b[90m─── Program exited with code ${msg.data.code ?? 0} ───\x1b[0m`)
                     useExecutionStore.getState().setIsRunning(false)
+                    if (debugMode) useDebugStore.getState().setDebugMode('idle')
                     resolve()
                     break
                 case 'ERROR':
                     term?.writeln(`\x1b[1;31m✗ Runtime error: ${msg.data.message}\x1b[0m`)
                     useExecutionStore.getState().setIsRunning(false)
+                    if (debugMode) useDebugStore.getState().setDebugMode('idle')
                     resolve()
                     break
             }
@@ -57,16 +76,44 @@ export async function execute(wasmBinary: Uint8Array) {
         executorWorker!.onerror = (err) => {
             term?.writeln(`\x1b[1;31m✗ Worker error: ${err.message}\x1b[0m`)
             useExecutionStore.getState().setIsRunning(false)
+            if (debugMode) useDebugStore.getState().setDebugMode('idle')
             resolve()
         }
-        executorWorker!.postMessage({ type: 'EXECUTE', wasmBinary: wasmBinary.buffer, sab }, [wasmBinary.buffer])
+        executorWorker!.postMessage({
+            type: 'EXECUTE',
+            wasmBinary: wasmBinary.buffer,
+            sab,
+            debugMode,
+            debugSab: debugMode ? debugSab : undefined,
+        }, [wasmBinary.buffer])
     })
+}
+
+/** Resume the paused debugger (step to next line) */
+export function debugStep() {
+    if (!debugSab) return
+    const arr = new Int32Array(debugSab)
+    Atomics.store(arr, 0, 1) // 1 = resume
+    Atomics.notify(arr, 0, 1)
+    useDebugStore.getState().setDebugMode('running')
+}
+
+/** Stop debugging and terminate execution */
+export function debugStop() {
+    if (debugSab) {
+        const arr = new Int32Array(debugSab)
+        Atomics.store(arr, 0, 2) // 2 = stop
+        Atomics.notify(arr, 0, 1)
+    }
+    stop()
+    useDebugStore.getState().reset()
 }
 
 export function stop() {
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
     if (executorWorker) { executorWorker.terminate(); executorWorker = null }
     sab = null
+    debugSab = null
 }
 
 function drawQueue(ctx: CanvasRenderingContext2D, queue: DrawCommand[]) {
