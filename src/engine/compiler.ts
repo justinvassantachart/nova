@@ -23,25 +23,53 @@ export function compile(
             { type: 'module' },
         );
 
-        compilerWorker.onmessage = (e) => {
-            const { type, wasmBinary, errors } = e.data;
+        const stderrLines: string[] = [];
+        const term = (window as any).__novaTerminal; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-            if (type === 'COMPILE_DONE') {
-                resolve({
-                    success: true,
-                    errors: [],
-                    wasmBinary: new Uint8Array(wasmBinary),
-                });
-                compilerWorker?.terminate();
-                compilerWorker = null;
-            } else if (type === 'COMPILE_ERROR') {
-                resolve({
-                    success: false,
-                    errors: errors || ['Unknown compilation error'],
-                    wasmBinary: null,
-                });
-                compilerWorker?.terminate();
-                compilerWorker = null;
+        compilerWorker.onmessage = (e) => {
+            const { type } = e.data;
+
+            switch (type) {
+                case 'COMPILE_DONE': {
+                    resolve({
+                        success: true,
+                        errors: [],
+                        wasmBinary: new Uint8Array(e.data.wasmBinary),
+                    });
+                    compilerWorker?.terminate();
+                    compilerWorker = null;
+                    break;
+                }
+
+                case 'COMPILE_ERROR': {
+                    resolve({
+                        success: false,
+                        errors: stderrLines.length > 0 ? stderrLines : (e.data.errors || ['Unknown compilation error']),
+                        wasmBinary: null,
+                    });
+                    compilerWorker?.terminate();
+                    compilerWorker = null;
+                    break;
+                }
+
+                case 'COMPILE_STDERR': {
+                    // Stream stderr to terminal in real-time
+                    const text: string = e.data.text;
+                    if (term) {
+                        term.write(text.replace(/\n/g, '\r\n'));
+                    }
+                    // Collect lines for error reporting
+                    const lines = text.split('\n').filter(Boolean);
+                    stderrLines.push(...lines);
+                    break;
+                }
+
+                case 'COMPILE_PROGRESS': {
+                    if (term) {
+                        term.writeln(`\x1b[90m${e.data.message}\x1b[0m`);
+                    }
+                    break;
+                }
             }
         };
 

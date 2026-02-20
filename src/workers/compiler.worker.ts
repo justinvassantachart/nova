@@ -4,16 +4,16 @@
 /// <reference lib="webworker" />
 declare const self: DedicatedWorkerGlobalScope;
 
+import { commands, Exit } from '@yowasp/clang';
+
+const clangpp = commands['clang++'];
+
 self.onmessage = async (e) => {
     if (e.data.type !== 'COMPILE') return;
 
     const files: Record<string, string> = e.data.files;
 
     try {
-        // Dynamically import yowasp-clang
-        const { commands } = await import('@yowasp/clang');
-        const clangpp = commands['clang++'];
-
         // Build the input file tree for yowasp (Tree = { [name]: string | Uint8Array | Tree })
         const inputTree: Record<string, unknown> = {};
         const encoder = new TextEncoder();
@@ -35,7 +35,7 @@ self.onmessage = async (e) => {
             (f) => f.endsWith('.cpp') && !f.includes('sysroot/memory_tracker'),
         );
 
-        // Build args per spec (without the initial 'clang++' — the command handles that)
+        // Build args — use wasm32-wasip1 target to match @yowasp/clang's sysroot layout
         const args = [
             ...cppFiles,
             '/workspace/sysroot/memory_tracker.cpp',
@@ -46,12 +46,27 @@ self.onmessage = async (e) => {
             '-Wl,--allow-undefined',
             '-Wl,--wrap=malloc',
             '-target',
-            'wasm32-wasi',
+            'wasm32-wasip1',
             '-o',
             '/workspace/program.wasm',
         ];
 
-        const output = await clangpp(args, inputTree as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        // Capture stderr for error messages
+        const decoder = new TextDecoder();
+        let stderrOutput = '';
+
+        self.postMessage({ type: 'COMPILE_PROGRESS', message: 'Running clang++...' });
+
+        const output = await clangpp(args, inputTree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) {
+                    const text = decoder.decode(bytes, { stream: true });
+                    stderrOutput += text;
+                    // Stream errors back to terminal in real-time
+                    self.postMessage({ type: 'COMPILE_STDERR', text });
+                }
+            },
+        });
 
         // Check if output contains the wasm file
         if (output) {
@@ -72,32 +87,27 @@ self.onmessage = async (e) => {
             }
         }
 
+        // No WASM output but also no error — maybe warnings only
         self.postMessage({
             type: 'COMPILE_ERROR',
-            errors: ['Compilation produced no output. Check for errors.'],
+            errors: stderrOutput
+                ? stderrOutput.split('\n').filter(Boolean)
+                : ['Compilation produced no output.'],
         });
     } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-
-        // yowasp Exit type contains error info
-        const errObj = err as { files?: Record<string, unknown> };
-        if (errObj.files) {
-            // Try to read stderr from exit
+        if (err instanceof Exit) {
+            // Clang exited with non-zero status — error messages already streamed via stderr
             self.postMessage({
                 type: 'COMPILE_ERROR',
-                errors: [message],
+                errors: [err.message],
             });
             return;
         }
 
-        // Try to extract compiler error messages
-        const errors = message
-            .split('\n')
-            .filter((line: string) => line.includes('error:') || line.includes('warning:'));
-
+        const message = err instanceof Error ? err.message : String(err);
         self.postMessage({
             type: 'COMPILE_ERROR',
-            errors: errors.length > 0 ? errors : [message],
+            errors: [message],
         });
     }
 };
