@@ -1,115 +1,73 @@
-// ── Compiler Worker ────────────────────────────────────────────────
-// Receives files from main thread, runs @yowasp/clang, returns WASM
-
 /// <reference lib="webworker" />
-declare const self: DedicatedWorkerGlobalScope;
+declare const self: DedicatedWorkerGlobalScope
 
-import { commands, Exit } from '@yowasp/clang';
+import { commands, Exit } from '@yowasp/clang'
 
-const clangpp = commands['clang++'];
+const clangpp = commands['clang++']
+
+// Notify main thread that the WASM is loaded (import succeeded)
+self.postMessage({ type: 'PRELOAD_DONE' })
 
 self.onmessage = async (e) => {
-    if (e.data.type !== 'COMPILE') return;
+    if (e.data.type === 'PRELOAD') return // Already loaded via static import
 
-    const files: Record<string, string> = e.data.files;
+    if (e.data.type !== 'COMPILE') return
+    const files: Record<string, string> = e.data.files
 
     try {
-        // Build the input file tree for yowasp (Tree = { [name]: string | Uint8Array | Tree })
-        const inputTree: Record<string, unknown> = {};
-        const encoder = new TextEncoder();
+        // Build input tree
+        const tree: Record<string, unknown> = {}
+        const enc = new TextEncoder()
         for (const [path, content] of Object.entries(files)) {
-            // Convert /workspace/main.cpp → workspace/main.cpp for tree
-            const treePath = path.startsWith('/') ? path.slice(1) : path;
-            const parts = treePath.split('/');
-
-            let node: Record<string, unknown> = inputTree;
+            const parts = (path.startsWith('/') ? path.slice(1) : path).split('/')
+            let node: Record<string, unknown> = tree
             for (let i = 0; i < parts.length - 1; i++) {
-                if (!node[parts[i]]) node[parts[i]] = {};
-                node = node[parts[i]] as Record<string, unknown>;
+                if (!node[parts[i]]) node[parts[i]] = {}
+                node = node[parts[i]] as Record<string, unknown>
             }
-            node[parts[parts.length - 1]] = encoder.encode(content);
+            node[parts[parts.length - 1]] = enc.encode(content)
         }
 
-        // Collect all .cpp source files
-        const cppFiles = Object.keys(files).filter(
+        // Collect .cpp sources (exclude our hidden tracker)
+        const sources = Object.keys(files).filter(
             (f) => f.endsWith('.cpp') && !f.includes('sysroot/memory_tracker'),
-        );
+        )
 
-        // Build args — use wasm32-wasip1 target to match @yowasp/clang's sysroot layout
         const args = [
-            ...cppFiles,
+            ...sources,
             '/workspace/sysroot/memory_tracker.cpp',
             '-I/workspace/sysroot/',
-            '-std=c++20',
-            '-g',
-            '-O0',
+            '-std=c++20', '-g', '-O0',
             '-Wl,--allow-undefined',
             '-Wl,--wrap=malloc',
-            '-target',
-            'wasm32-wasip1',
-            '-o',
-            '/workspace/program.wasm',
-        ];
+            '-target', 'wasm32-wasip1',
+            '-o', '/workspace/program.wasm',
+        ]
 
-        // Capture stderr for error messages
-        const decoder = new TextDecoder();
-        let stderrOutput = '';
-
-        self.postMessage({ type: 'COMPILE_PROGRESS', message: 'Running clang++...' });
-
-        const output = await clangpp(args, inputTree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+        const decoder = new TextDecoder()
+        const output = await clangpp(args, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
             stderr: (bytes: Uint8Array | null) => {
-                if (bytes) {
-                    const text = decoder.decode(bytes, { stream: true });
-                    stderrOutput += text;
-                    // Stream errors back to terminal in real-time
-                    self.postMessage({ type: 'COMPILE_STDERR', text });
-                }
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
             },
-        });
+        })
 
-        // Check if output contains the wasm file
-        if (output) {
-            // Navigate the output tree to find program.wasm
-            const workspace = (output as Record<string, unknown>)['workspace'] as Record<string, unknown> | undefined;
-            const wasmOutput = workspace?.['program.wasm'] as Uint8Array | undefined;
-
-            if (wasmOutput) {
-                const buffer = wasmOutput.buffer.slice(
-                    wasmOutput.byteOffset,
-                    wasmOutput.byteOffset + wasmOutput.byteLength,
-                );
-                self.postMessage(
-                    { type: 'COMPILE_DONE', wasmBinary: buffer },
-                    [buffer],
-                );
-                return;
-            }
+        // Extract compiled WASM
+        const ws = (output as Record<string, unknown>)?.['workspace'] as Record<string, unknown> | undefined
+        const wasm = ws?.['program.wasm'] as Uint8Array | undefined
+        if (wasm) {
+            const buf = wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength)
+            self.postMessage({ type: 'COMPILE_DONE', wasmBinary: buf }, [buf])
+        } else {
+            self.postMessage({ type: 'COMPILE_ERROR', errors: ['No output produced.'] })
         }
-
-        // No WASM output but also no error — maybe warnings only
-        self.postMessage({
-            type: 'COMPILE_ERROR',
-            errors: stderrOutput
-                ? stderrOutput.split('\n').filter(Boolean)
-                : ['Compilation produced no output.'],
-        });
     } catch (err: unknown) {
         if (err instanceof Exit) {
-            // Clang exited with non-zero status — error messages already streamed via stderr
-            self.postMessage({
-                type: 'COMPILE_ERROR',
-                errors: [err.message],
-            });
-            return;
+            self.postMessage({ type: 'COMPILE_ERROR', errors: [err.message] })
+        } else {
+            const msg = err instanceof Error ? err.message : String(err)
+            self.postMessage({ type: 'COMPILE_ERROR', errors: [msg] })
         }
-
-        const message = err instanceof Error ? err.message : String(err);
-        self.postMessage({
-            type: 'COMPILE_ERROR',
-            errors: [message],
-        });
     }
-};
+}
 
-export { }; // Make it a module
+export { }

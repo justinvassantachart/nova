@@ -1,110 +1,66 @@
-// ── Executor Worker ────────────────────────────────────────────────
-// Runs compiled WASM with WASI shim + graphics bridge + SAB pacer
-
 /// <reference lib="webworker" />
-declare const self: DedicatedWorkerGlobalScope;
+declare const self: DedicatedWorkerGlobalScope
 
-import { createWasiShim } from '../engine/wasi-shim';
+import { createWasiShim } from '@/engine/wasi-shim'
 
 self.onmessage = async (e) => {
-    if (e.data.type !== 'EXECUTE') return;
+    if (e.data.type !== 'EXECUTE') return
+    const wasmBytes = new Uint8Array(e.data.wasmBinary)
+    const pacer = new Int32Array(e.data.sab as SharedArrayBuffer)
+    let drawQueue: Array<Record<string, unknown>> = []
+    let exitCode = 0
 
-    const wasmBytes = new Uint8Array(e.data.wasmBinary);
-    const sab: SharedArrayBuffer = e.data.sab;
-    const pacer = new Int32Array(sab);
-
-    let drawQueue: Array<Record<string, unknown>> = [];
-    let exitCode = 0;
-    let hasExited = false;
-
-    // Helper to read a null-terminated string from WASM memory
-    function readCString(memory: WebAssembly.Memory, ptr: number): string {
-        const bytes = new Uint8Array(memory.buffer);
-        let end = ptr;
-        while (bytes[end] !== 0) end++;
-        return new TextDecoder().decode(bytes.slice(ptr, end));
+    function readCString(mem: WebAssembly.Memory, ptr: number): string {
+        const b = new Uint8Array(mem.buffer)
+        let end = ptr
+        while (b[end] !== 0) end++
+        return new TextDecoder().decode(b.slice(ptr, end))
     }
 
     try {
-        // We need a reference to wasm memory — set after instantiation
-        let wasmMemory: WebAssembly.Memory;
+        let wasmMemory: WebAssembly.Memory
+        const memProxy = { get buffer() { return wasmMemory.buffer } } as WebAssembly.Memory
 
-        // Create a proxy object that lazily returns the memory
-        const memoryProxy = {
-            get buffer() {
-                return wasmMemory.buffer;
-            },
-        } as WebAssembly.Memory;
+        const wasi = createWasiShim({
+            memory: memProxy,
+            onStdout: (text: string) => self.postMessage({ type: 'STDOUT', text }),
+            onExit: (code: number) => { exitCode = code },
+        })
 
-        const wasiShim = createWasiShim({
-            memory: memoryProxy,
-            onStdout: (text: string) => {
-                self.postMessage({ type: 'STDOUT', text });
-            },
-            onExit: (code: number) => {
-                exitCode = code;
-                hasExited = true;
-            },
-        });
-
-        const wasmImports = {
-            wasi_snapshot_preview1: wasiShim,
+        const imports = {
+            wasi_snapshot_preview1: wasi,
             env: {
-                // ── Memory Tracker Bridge ──
-                JS_notify_alloc: (ptr: number, size: number) => {
-                    self.postMessage({ type: 'ALLOC', ptr, size });
+                JS_notify_alloc: (ptr: number, size: number) => self.postMessage({ type: 'ALLOC', ptr, size }),
+                clear_screen: () => { drawQueue.push({ type: 'CLEAR' }) },
+                draw_circle: (x: number, y: number, r: number, cp: number) => {
+                    drawQueue.push({ type: 'CIRCLE', x, y, r, color: readCString(wasmMemory, cp) })
                 },
-
-                // ── Graphics Bridge ──
-                clear_screen: () => {
-                    drawQueue.push({ type: 'CLEAR' });
-                },
-                draw_circle: (x: number, y: number, r: number, colorPtr: number) => {
-                    const color = readCString(wasmMemory, colorPtr);
-                    drawQueue.push({ type: 'CIRCLE', x, y, r, color });
-                },
-
-                // ── THE 60 FPS PACER ──
                 render_frame: () => {
-                    // Send the batch of draw commands to main thread
-                    self.postMessage({ type: 'RENDER_BATCH', queue: drawQueue });
-                    drawQueue = [];
-
-                    // FREEZE — wait until main thread signals after rendering
-                    Atomics.store(pacer, 0, 0);
-                    Atomics.wait(pacer, 0, 0);
+                    self.postMessage({ type: 'RENDER_BATCH', queue: drawQueue })
+                    drawQueue = []
+                    Atomics.store(pacer, 0, 0)
+                    Atomics.wait(pacer, 0, 0)
                 },
             },
-        };
+        }
 
-        const module = await WebAssembly.compile(wasmBytes);
-        const instance = await WebAssembly.instantiate(module, wasmImports);
+        const mod = await WebAssembly.compile(wasmBytes)
+        const inst = await WebAssembly.instantiate(mod, imports)
+        wasmMemory = inst.exports.memory as WebAssembly.Memory
 
-        // Grab the exported memory
-        wasmMemory = instance.exports.memory as WebAssembly.Memory;
-
-        // Call _start (WASI entry point)
-        const start = instance.exports._start as (() => void) | undefined;
+        const start = inst.exports._start as (() => void) | undefined
         if (start) {
-            try {
-                start();
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                if (!message.includes('__wasi_proc_exit')) {
-                    throw err;
-                }
+            try { start() } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err)
+                if (!msg.includes('__wasi_proc_exit')) throw err
             }
         }
-
-        self.postMessage({ type: 'EXIT', code: exitCode });
+        self.postMessage({ type: 'EXIT', code: exitCode })
     } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('__wasi_proc_exit')) {
-            self.postMessage({ type: 'EXIT', code: exitCode });
-        } else if (!hasExited) {
-            self.postMessage({ type: 'ERROR', message });
-        }
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('__wasi_proc_exit')) self.postMessage({ type: 'EXIT', code: exitCode })
+        else self.postMessage({ type: 'ERROR', message: msg })
     }
-};
+}
 
-export { }; // Make it a module
+export { }

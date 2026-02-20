@@ -1,29 +1,28 @@
-import { Volume } from 'memfs';
-import { useNovaStore, type VFSNode } from '../store';
+import { Volume } from 'memfs'
+import { useFilesStore, type VFSNode } from '@/store/files-store'
+import { useEditorStore } from '@/store/editor-store'
 
-// ── Global Volume ──────────────────────────────────────────────────
-export const vol = new Volume();
+// ── Global Volume ──────────────────────────────────────────────
+export const vol = new Volume()
 
-// ── Default main.cpp template ──────────────────────────────────────
-const DEFAULT_MAIN_CPP = `#include <iostream>
+// ── Templates ──────────────────────────────────────────────────
+const DEFAULT_MAIN = `#include <iostream>
 
 int main() {
     std::cout << "Hello, Nova!" << std::endl;
     return 0;
 }
-`;
+`
 
-// ── Nova graphics header (hidden sysroot) ──────────────────────────
 const NOVA_H = `#pragma once
 extern "C" {
     void clear_screen();
     void draw_circle(int x, int y, int radius, const char* hex_color);
     void render_frame();
 }
-`;
+`
 
-// ── Memory tracker (linker interceptor) ────────────────────────────
-const MEMORY_TRACKER_CPP = `extern "C" {
+const MEMORY_TRACKER = `extern "C" {
     extern void JS_notify_alloc(unsigned int addr, unsigned int size);
     extern void* __real_malloc(unsigned long size);
 
@@ -33,103 +32,123 @@ const MEMORY_TRACKER_CPP = `extern "C" {
         return ptr;
     }
 }
-`;
+`
 
-// ── Helper: write a file, creating dirs as needed ──────────────────
+// ── CRUD Operations ────────────────────────────────────────────
+
 export function writeFile(path: string, content: string) {
-    const dir = path.substring(0, path.lastIndexOf('/'));
+    const dir = path.substring(0, path.lastIndexOf('/'))
     if (dir && !vol.existsSync(dir)) {
-        vol.mkdirSync(dir, { recursive: true });
+        vol.mkdirSync(dir, { recursive: true })
     }
-    vol.writeFileSync(path, content, { encoding: 'utf8' });
+    vol.writeFileSync(path, content, { encoding: 'utf8' })
 }
 
-// ── Helper: read a file ────────────────────────────────────────────
 export function readFile(path: string): string {
-    return vol.readFileSync(path, { encoding: 'utf8' }) as string;
+    return vol.readFileSync(path, { encoding: 'utf8' }) as string
 }
 
-// ── Helper: get all files as a flat map ────────────────────────────
-export function getAllFiles(): Record<string, string> {
-    const result: Record<string, string> = {};
+export function createFile(path: string, content = '') {
+    writeFile(path, content)
+    refreshFileTree()
+}
 
+export function createFolder(path: string) {
+    if (!vol.existsSync(path)) {
+        vol.mkdirSync(path, { recursive: true })
+    }
+    refreshFileTree()
+}
+
+export function deleteItem(path: string) {
+    const stat = vol.statSync(path)
+    if (stat.isDirectory()) {
+        vol.rmdirSync(path, { recursive: true } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+    } else {
+        vol.unlinkSync(path)
+    }
+    // If deleted file was active, clear editor
+    const { activeFile } = useEditorStore.getState()
+    if (activeFile === path) {
+        useEditorStore.getState().setActiveFile('', '')
+    }
+    refreshFileTree()
+}
+
+export function renameItem(oldPath: string, newPath: string) {
+    vol.renameSync(oldPath, newPath)
+    // Update editor if renamed file was active
+    const { activeFile } = useEditorStore.getState()
+    if (activeFile === oldPath) {
+        const content = readFile(newPath)
+        useEditorStore.getState().setActiveFile(newPath, content)
+    }
+    refreshFileTree()
+}
+
+export function fileExists(path: string): boolean {
+    return vol.existsSync(path)
+}
+
+// ── Get all files (for compiler) ───────────────────────────────
+
+export function getAllFiles(): Record<string, string> {
+    const result: Record<string, string> = {}
     function walk(dir: string) {
-        const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[];
+        const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[]
         for (const entry of entries) {
-            const fullPath = dir === '/' ? `/${entry}` : `${dir}/${entry}`;
-            const stat = vol.statSync(fullPath);
-            if (stat.isDirectory()) {
-                walk(fullPath);
-            } else {
-                result[fullPath] = vol.readFileSync(fullPath, { encoding: 'utf8' }) as string;
-            }
+            const full = dir === '/' ? `/${entry}` : `${dir}/${entry}`
+            const stat = vol.statSync(full)
+            if (stat.isDirectory()) walk(full)
+            else result[full] = vol.readFileSync(full, { encoding: 'utf8' }) as string
         }
     }
-
-    walk('/workspace');
-    return result;
+    walk('/workspace')
+    return result
 }
 
-// ── Build tree for explorer ────────────────────────────────────────
+// ── Tree builder ───────────────────────────────────────────────
+
+const HIDDEN = new Set(['sysroot', '.git'])
+
 function buildTree(dir: string): VFSNode[] {
-    const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[];
+    const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[]
     return entries
-        .filter((e) => !e.startsWith('.') && e !== 'sysroot')
-        .map((entry) => {
-            const fullPath = dir === '/' ? `/${entry}` : `${dir}/${entry}`;
-            const stat = vol.statSync(fullPath);
-            const isDir = stat.isDirectory();
-            return {
-                name: entry,
-                path: fullPath,
-                isDirectory: isDir,
-                children: isDir ? buildTree(fullPath) : undefined,
-            };
+        .filter((e) => !e.startsWith('.') && !HIDDEN.has(e))
+        .map((name) => {
+            const path = `${dir}/${name}`
+            const isDir = vol.statSync(path).isDirectory()
+            return { name, path, isDirectory: isDir, children: isDir ? buildTree(path) : undefined }
         })
         .sort((a, b) => {
-            if (a.isDirectory && !b.isDirectory) return -1;
-            if (!a.isDirectory && b.isDirectory) return 1;
-            return a.name.localeCompare(b.name);
-        });
+            if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+            return a.name.localeCompare(b.name)
+        })
 }
 
-// ── Refresh explorer in React ──────────────────────────────────────
 export function refreshFileTree() {
-    const tree = buildTree('/workspace');
-    useNovaStore.getState().setFiles(tree);
+    useFilesStore.getState().setFiles(buildTree('/workspace'))
 }
 
-// ── Initialize the VFS ─────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────
+
 export async function initVFS() {
-    // Create workspace
-    vol.mkdirSync('/workspace', { recursive: true });
-    vol.mkdirSync('/workspace/sysroot', { recursive: true });
+    vol.mkdirSync('/workspace', { recursive: true })
+    vol.mkdirSync('/workspace/sysroot', { recursive: true })
+    writeFile('/workspace/sysroot/nova.h', NOVA_H)
+    writeFile('/workspace/sysroot/memory_tracker.cpp', MEMORY_TRACKER)
 
-    // Write sysroot (hidden from user in explorer, but accessible for compiler)
-    writeFile('/workspace/sysroot/nova.h', NOVA_H);
-    writeFile('/workspace/sysroot/memory_tracker.cpp', MEMORY_TRACKER_CPP);
-
-    // Hydrate from OPFS if available
+    // Hydrate from OPFS
     try {
-        const { hydrateFromOPFS } = await import('./opfs-sync');
-        await hydrateFromOPFS();
-    } catch {
-        // OPFS not available — write default
-        if (!vol.existsSync('/workspace/main.cpp')) {
-            writeFile('/workspace/main.cpp', DEFAULT_MAIN_CPP);
-        }
-    }
+        const { hydrateFromOPFS } = await import('./opfs-sync')
+        await hydrateFromOPFS()
+    } catch { /* OPFS not available */ }
 
-    // If still no main.cpp after OPFS hydration, create default
+    // Default file
     if (!vol.existsSync('/workspace/main.cpp')) {
-        writeFile('/workspace/main.cpp', DEFAULT_MAIN_CPP);
+        writeFile('/workspace/main.cpp', DEFAULT_MAIN)
     }
 
-    refreshFileTree();
-
-    // Auto-open main.cpp
-    useNovaStore.getState().setActiveFile(
-        '/workspace/main.cpp',
-        readFile('/workspace/main.cpp'),
-    );
+    refreshFileTree()
+    useEditorStore.getState().setActiveFile('/workspace/main.cpp', readFile('/workspace/main.cpp'))
 }

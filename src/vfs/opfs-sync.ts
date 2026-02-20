@@ -1,53 +1,40 @@
-// ── OPFS Sync Module ───────────────────────────────────────────────
-// Provides persistence: memfs ↔ Origin Private File System (OPFS)
+// ── OPFS Sync ─────────────────────────────────────────────────────
+import { writeFile } from './volume'
 
-import { writeFile as vfsWrite } from './volume';
-
-// ── Sync a single file TO OPFS ────────────────────────────────────
 export async function syncToOPFS(path: string, content: string) {
     try {
-        const root = await navigator.storage.getDirectory();
-        const parts = path.replace('/workspace/', '').split('/');
-        let dir = root;
-
-        // Navigate/create directories
+        const root = await navigator.storage.getDirectory()
+        const parts = path.replace('/workspace/', '').split('/')
+        let dir = root
         for (let i = 0; i < parts.length - 1; i++) {
-            dir = await dir.getDirectoryHandle(parts[i], { create: true });
+            dir = await dir.getDirectoryHandle(parts[i], { create: true })
         }
-
-        const fileName = parts[parts.length - 1];
-        const fileHandle = await dir.getFileHandle(fileName, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(content);
-        await writable.close();
+        const handle = await dir.getFileHandle(parts[parts.length - 1], { create: true })
+        const writable = await handle.createWritable()
+        await writable.write(content)
+        await writable.close()
     } catch (err) {
-        console.warn('[OPFS] sync failed:', err);
+        console.warn('[OPFS] sync failed:', err)
     }
 }
 
-// ── Hydrate memfs FROM OPFS ───────────────────────────────────────
 export async function hydrateFromOPFS() {
     try {
-        const root = await navigator.storage.getDirectory();
-        await walkOPFS(root, '/workspace');
+        const root = await navigator.storage.getDirectory()
+        await walk(root, '/workspace')
     } catch (err) {
-        console.warn('[OPFS] hydration failed:', err);
+        console.warn('[OPFS] hydration failed:', err)
     }
 }
 
-async function walkOPFS(
-    dirHandle: FileSystemDirectoryHandle,
-    basePath: string,
-) {
-    for await (const [name, handle] of (dirHandle as any).entries()) {
-        const fullPath = `${basePath}/${name}`;
-
+async function walk(dir: FileSystemDirectoryHandle, base: string) {
+    for await (const [name, handle] of (dir as any).entries()) {
+        const path = `${base}/${name}`
         if (handle.kind === 'directory') {
-            await walkOPFS(handle as FileSystemDirectoryHandle, fullPath);
+            await walk(handle as FileSystemDirectoryHandle, path)
         } else {
-            const file = await (handle as FileSystemFileHandle).getFile();
-            const content = await file.text();
-            vfsWrite(fullPath, content);
+            const file = await (handle as FileSystemFileHandle).getFile()
+            writeFile(path, await file.text())
         }
     }
 }
