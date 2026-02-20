@@ -5,6 +5,7 @@
 import { useExecutionStore } from '@/store/execution-store'
 import { useDebugStore } from '@/store/debug-store'
 import type { DrawCommand } from '@/store/execution-store'
+import { readMemorySnapshot } from '@/lib/memory-reader'
 
 let executorWorker: Worker | null = null
 let sab: SharedArrayBuffer | null = null
@@ -20,6 +21,9 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
 
     if (debugMode) {
+        useDebugStore.getState().setKnownHeapTypes({})
+        useDebugStore.getState().setMemorySnapshot(null)
+
         debugSab = new SharedArrayBuffer(1024) // 256 Int32s — deep recursion support
         memorySab = new SharedArrayBuffer(16 * 1024 * 1024) // 16MB memory snapshot buffer
         const arr = new Int32Array(debugSab)
@@ -73,9 +77,16 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                         }
                     })
 
+                    const ptrs = { countPtr, allocsPtr }
+                    const { snapshot, nextKnownTypes } = readMemorySnapshot(
+                        memCopy, store.dwarfInfo, newCallStack, ptrs, store.knownHeapTypes
+                    )
+
                     store.setMemoryBuffer(memCopy)
                     store.setCallStack(newCallStack)
-                    store.setHeapPointers({ countPtr, allocsPtr })
+                    store.setHeapPointers(ptrs)
+                    store.setKnownHeapTypes(nextKnownTypes)
+                    store.setMemorySnapshot(snapshot)
                     store.setCurrentLine(line)
                     store.setCurrentFunc(func)
                     store.setStackPointer(framesData.length > 0 ? framesData[framesData.length - 1].sp : 0)

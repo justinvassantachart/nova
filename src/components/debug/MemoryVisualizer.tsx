@@ -3,7 +3,7 @@ import { ReactFlow, Background, type Node, type Edge, Position, Handle } from '@
 import '@xyflow/react/dist/style.css'
 import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
-import { readMemorySnapshot, type MemoryValue } from '@/lib/memory-reader'
+import type { MemoryValue } from '@/lib/memory-reader'
 
 // ── Recursive Table Row ──
 function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
@@ -112,16 +112,12 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
 }
 
 export function MemoryVisualizer() {
-    const { debugMode, dwarfInfo, memoryBuffer, callStack, heapPointers } = useDebugStore()
-
-    const snapshot = useMemo(() => {
-        if (debugMode !== 'paused' || !memoryBuffer) return null
-        return readMemorySnapshot(memoryBuffer, dwarfInfo, callStack, heapPointers)
-    }, [debugMode, dwarfInfo, memoryBuffer, callStack, heapPointers])
+    const { debugMode, memorySnapshot } = useDebugStore()
 
     const { nodes, edges } = useMemo(() => {
-        if (!snapshot) return { nodes: [] as Node[], edges: [] as Edge[] }
+        if (!memorySnapshot) return { nodes: [] as Node[], edges: [] as Edge[] }
 
+        const snapshot = memorySnapshot
         const nodes: Node[] = []
         const edges: Edge[] = []
         const reversedFrames = [...snapshot.frames].reverse()
@@ -186,7 +182,7 @@ export function MemoryVisualizer() {
         })
 
         return { nodes: layoutGraph(nodes, edges), edges }
-    }, [snapshot])
+    }, [memorySnapshot])
 
     const onNodesChange = useCallback(() => { }, [])
     const onEdgesChange = useCallback(() => { }, [])

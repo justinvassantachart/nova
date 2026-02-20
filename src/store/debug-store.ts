@@ -5,6 +5,7 @@
 import { create } from 'zustand'
 import type { DwarfInfo } from '@/engine/dwarf-types'
 import { EMPTY_DWARF } from '@/engine/dwarf-types'
+import type { MemorySnapshot } from '@/lib/memory-reader'
 
 export type DebugMode = 'idle' | 'compiling' | 'running' | 'paused'
 
@@ -47,6 +48,12 @@ export interface DebugState {
     /** Native heap array pointers for synchronous RAM reading */
     heapPointers: { countPtr: number; allocsPtr: number }
 
+    /** Processed memory snapshot ready for UI */
+    memorySnapshot: MemorySnapshot | null
+
+    /** Known heap pointer→type map persisted across debug steps */
+    knownHeapTypes: Record<number, string>
+
     /** Actions */
     setDwarfInfo: (info: DwarfInfo) => void
     setDebugMode: (mode: DebugMode) => void
@@ -60,6 +67,8 @@ export interface DebugState {
     setLiveVariables: (vars: Record<string, { value: string | number; address?: number }>) => void
     setCallStack: (stack: StackFrame[]) => void
     setHeapPointers: (ptrs: { countPtr: number; allocsPtr: number }) => void
+    setMemorySnapshot: (snapshot: MemorySnapshot | null) => void
+    setKnownHeapTypes: (types: Record<number, string>) => void
     reset: () => void
 }
 
@@ -76,6 +85,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     liveVariables: {},
     callStack: [],
     heapPointers: { countPtr: 0, allocsPtr: 0 },
+    memorySnapshot: null,
+    knownHeapTypes: {},
 
     setDwarfInfo: (info) => set({ dwarfInfo: info }),
     setDebugMode: (mode) => set({ debugMode: mode }),
@@ -97,6 +108,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     setLiveVariables: (vars) => set({ liveVariables: vars }),
     setCallStack: (stack) => set({ callStack: stack }),
     setHeapPointers: (ptrs) => set({ heapPointers: ptrs }),
+    setMemorySnapshot: (snapshot) => set({ memorySnapshot: snapshot }),
+    setKnownHeapTypes: (types) => set({ knownHeapTypes: types }),
 
     reset: () => set({
         debugMode: 'idle',
@@ -109,5 +122,7 @@ export const useDebugStore = create<DebugState>((set) => ({
         stackPointer: 0,
         callStack: [],
         heapPointers: { countPtr: 0, allocsPtr: 0 },
+        memorySnapshot: null,
+        knownHeapTypes: {},
     }),
 }))
