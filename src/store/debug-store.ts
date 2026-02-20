@@ -8,6 +8,8 @@ import { EMPTY_DWARF } from '@/engine/dwarf-types'
 
 export type DebugMode = 'idle' | 'compiling' | 'running' | 'paused'
 
+export interface StackFrame { id: string; func: string; line: number; sp: number }
+
 export interface DebugState {
     /** Parsed DWARF debug info from the last compilation */
     dwarfInfo: DwarfInfo
@@ -39,6 +41,9 @@ export interface DebugState {
     /** Live variable values extracted from WASM memory during pause */
     liveVariables: Record<string, { value: string | number; address?: number }>
 
+    /** Call stack frames for recursion tracking */
+    callStack: StackFrame[]
+
     /** Actions */
     setDwarfInfo: (info: DwarfInfo) => void
     setDebugMode: (mode: DebugMode) => void
@@ -50,6 +55,7 @@ export interface DebugState {
     setMemoryBuffer: (buf: ArrayBuffer | null) => void
     setStackPointer: (sp: number) => void
     setLiveVariables: (vars: Record<string, { value: string | number; address?: number }>) => void
+    setCallStack: (stack: StackFrame[]) => void
     reset: () => void
 }
 
@@ -64,6 +70,7 @@ export const useDebugStore = create<DebugState>((set) => ({
     memoryBuffer: null,
     stackPointer: 0,
     liveVariables: {},
+    callStack: [],
 
     setDwarfInfo: (info) => set({ dwarfInfo: info }),
     setDebugMode: (mode) => set({ debugMode: mode }),
@@ -83,6 +90,7 @@ export const useDebugStore = create<DebugState>((set) => ({
     setMemoryBuffer: (buf) => set({ memoryBuffer: buf }),
     setStackPointer: (sp) => set({ stackPointer: sp }),
     setLiveVariables: (vars) => set({ liveVariables: vars }),
+    setCallStack: (stack) => set({ callStack: stack }),
 
     reset: () => set({
         debugMode: 'idle',
@@ -93,5 +101,6 @@ export const useDebugStore = create<DebugState>((set) => ({
         wasmBinary: null,
         memoryBuffer: null,
         stackPointer: 0,
+        callStack: [],
     }),
 }))

@@ -23,6 +23,7 @@ interface ExecutionState {
     setRightTab: (tab: 'canvas' | 'memory') => void
     setDrawQueue: (q: DrawCommand[]) => void
     addAllocation: (a: AllocRecord) => void
+    removeAllocation: (ptr: number) => void
     clearAllocations: () => void
 }
 
@@ -38,5 +39,6 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
     setRightTab: (tab) => set({ rightTab: tab }),
     setDrawQueue: (q) => set({ drawQueue: q }),
     addAllocation: (a) => set((s) => ({ allocations: [...s.allocations, a] })),
+    removeAllocation: (ptr) => set((s) => ({ allocations: s.allocations.filter(a => a.ptr !== ptr) })),
     clearAllocations: () => set({ allocations: [] }),
 }))
