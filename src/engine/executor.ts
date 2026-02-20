@@ -132,6 +132,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
             debugMode,
             debugSab: debugMode ? debugSab : undefined,
             memorySab: debugMode ? memorySab : undefined,
+            stepMap: debugMode ? useDebugStore.getState().stepMap : undefined,
         }, [wasmBinary.buffer])
     })
 }

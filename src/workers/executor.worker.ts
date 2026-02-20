@@ -11,10 +11,16 @@ self.onmessage = async (e) => {
     const debugSab = e.data.debugSab
         ? new Int32Array(e.data.debugSab as SharedArrayBuffer)
         : null
+    const stepMap: Record<number, { line: number; func: string }> = e.data.stepMap || {}
     let drawQueue: Array<Record<string, unknown>> = []
     let exitCode = 0
     let inst: WebAssembly.Instance
-    let callStackSPs: number[] = []
+
+    // ── Call Stack Tracking ────────────────────────────────────────
+    // Track function call stack by observing SP changes and function
+    // transitions in JS_debug_step. Each entry is { func, sp }.
+    let callStack: Array<{ func: string; sp: number }> = []
+    let lastFunc: string | null = null
 
     function readCString(mem: WebAssembly.Memory, ptr: number): string {
         const b = new Uint8Array(mem.buffer)
@@ -38,16 +44,8 @@ self.onmessage = async (e) => {
             env: {
                 JS_notify_alloc: (ptr: number, size: number) => self.postMessage({ type: 'ALLOC', ptr, size }),
                 JS_notify_free: (ptr: number) => self.postMessage({ type: 'FREE', ptr }),
-
-                JS_notify_enter: () => {
-                    if (!debugMode) return
-                    const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                    callStackSPs.push(sp)
-                },
-                JS_notify_exit: () => {
-                    if (!debugMode) return
-                    callStackSPs.pop()
-                },
+                JS_notify_enter: () => { /* no-op: resolved by --allow-undefined */ },
+                JS_notify_exit: () => { /* no-op: resolved by --allow-undefined */ },
 
                 clear_screen: () => { drawQueue.push({ type: 'CLEAR' }) },
                 draw_circle: (x: number, y: number, r: number, cp: number) => {
@@ -81,30 +79,54 @@ self.onmessage = async (e) => {
                         sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
                     }
 
-                    // Keep SP accurate for this specific execution frame
+                    // 2. Read current SP
                     const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                    if (callStackSPs.length > 0) callStackSPs[callStackSPs.length - 1] = sp
-                    else callStackSPs.push(sp)
 
-                    // 2. Write the step ID
+                    // 3. Track call stack via function transitions
+                    const mapEntry = stepMap[stepId]
+                    const currentFunc = mapEntry ? mapEntry.func : 'unknown'
+
+                    if (lastFunc === null) {
+                        // First step ever — initialize
+                        callStack = [{ func: currentFunc, sp }]
+                    } else if (currentFunc !== lastFunc) {
+                        // Function changed — determine call vs return
+                        // In WASM, the stack grows downward: lower SP = deeper call
+                        const parentIdx = callStack.findIndex(f => f.func === currentFunc)
+                        if (parentIdx >= 0) {
+                            // Returning to a function already on the stack — pop frames above it
+                            callStack = callStack.slice(0, parentIdx + 1)
+                            callStack[parentIdx].sp = sp
+                        } else {
+                            // Calling a new function — push onto stack
+                            callStack.push({ func: currentFunc, sp })
+                        }
+                    }
+                    // Update SP for current frame
+                    if (callStack.length > 0) {
+                        callStack[callStack.length - 1].sp = sp
+                    }
+                    lastFunc = currentFunc
+
+                    // 4. Write the step ID
                     Atomics.store(stateArr, 1, stepId)
 
-                    // 3. Send the recursion depths
-                    Atomics.store(stateArr, 3, callStackSPs.length)
-                    for (let i = 0; i < callStackSPs.length && i < 60; i++) {
-                        Atomics.store(stateArr, 4 + i, callStackSPs[i])
+                    // 5. Send the call stack depths
+                    Atomics.store(stateArr, 3, callStack.length)
+                    for (let i = 0; i < callStack.length && i < 60; i++) {
+                        Atomics.store(stateArr, 4 + i, callStack[i].sp)
                     }
 
-                    // 4. Signal PAUSED state (1)
+                    // 6. Signal PAUSED state (1)
                     Atomics.store(stateArr, 0, 1)
                     Atomics.notify(stateArr, 0, 1)
 
-                    // 5. Safari-safe wait loop: spin until resumed (3) or stopped (2)
+                    // 7. Safari-safe wait loop: spin until resumed (3) or stopped (2)
                     while (Atomics.load(stateArr, 0) === 1) {
                         Atomics.wait(stateArr, 0, 1)
                     }
 
-                    // 6. Check if we should stop
+                    // 8. Check if we should stop
                     if (Atomics.load(stateArr, 0) === 2) {
                         throw new Error('__debug_stop')
                     }
