@@ -18,7 +18,7 @@ int main() {
 const NOVA_H = `#pragma once
 extern "C" {
     void clear_screen();
-    void draw_circle(int x, int y, int radius, const char* hex_color);
+    void draw_circle(double x, double y, double radius, const char* hex_color);
     void render_frame();
 }
 `

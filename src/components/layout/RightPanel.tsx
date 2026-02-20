@@ -4,7 +4,7 @@ import { MemoryVisualizer } from '@/components/debug/MemoryVisualizer'
 import { Terminal } from '@/components/terminal/Terminal'
 
 export function RightPanel() {
-    const { activeTab, setActiveTab } = useExecutionStore()
+    const { rightTab: activeTab, setRightTab: setActiveTab } = useExecutionStore()
 
     return (
         <div className="flex flex-col h-full">
