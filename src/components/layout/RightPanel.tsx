@@ -1,6 +1,7 @@
 import { useExecutionStore } from '@/store/execution-store'
 import { CanvasView } from '@/components/canvas/CanvasView'
 import { MemoryVisualizer } from '@/components/debug/MemoryVisualizer'
+import { Terminal } from '@/components/terminal/Terminal'
 
 export function RightPanel() {
     const { activeTab, setActiveTab } = useExecutionStore()
@@ -11,8 +12,8 @@ export function RightPanel() {
             <div className="flex border-b bg-card">
                 <button
                     className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'canvas'
-                            ? 'border-b-2 border-primary text-primary'
-                            : 'text-muted-foreground hover:text-foreground'
+                        ? 'border-b-2 border-primary text-primary'
+                        : 'text-muted-foreground hover:text-foreground'
                         }`}
                     onClick={() => setActiveTab('canvas')}
                 >
@@ -20,8 +21,8 @@ export function RightPanel() {
                 </button>
                 <button
                     className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'memory'
-                            ? 'border-b-2 border-primary text-primary'
-                            : 'text-muted-foreground hover:text-foreground'
+                        ? 'border-b-2 border-primary text-primary'
+                        : 'text-muted-foreground hover:text-foreground'
                         }`}
                     onClick={() => setActiveTab('memory')}
                 >
@@ -29,8 +30,8 @@ export function RightPanel() {
                 </button>
             </div>
 
-            {/* Tab content */}
-            <div className="flex-1 overflow-hidden">
+            {/* Tab content — takes available space above terminal */}
+            <div className="flex-1 min-h-0 overflow-hidden">
                 {activeTab === 'canvas' ? (
                     <CanvasView />
                 ) : (
@@ -38,8 +39,10 @@ export function RightPanel() {
                 )}
             </div>
 
-            {/* Terminal area */}
-            <div className="border-t" id="terminal-container" />
+            {/* Terminal — fixed height at bottom */}
+            <div className="border-t h-[200px] shrink-0">
+                <Terminal />
+            </div>
         </div>
     )
 }
