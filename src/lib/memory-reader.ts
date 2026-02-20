@@ -3,8 +3,9 @@
 // stack variable values and heap allocation contents. Uses DWARF info
 // for type-aware reading with scope and time-travel filtering.
 //
-// Multi-frame: processes every frame in the call stack independently,
-// applying each frame's unique Stack Pointer.
+// Multi-frame: processes every frame in the call stack independently.
+// Heap: reads the native C++ __nova_allocs array directly from RAM
+// (synchronous — no async postMessage race conditions).
 
 import type { DwarfInfo, VariableInfo } from '@/engine/dwarf-types'
 
@@ -14,19 +15,19 @@ export interface MemoryValue {
     type: string
     address: number
     value: string | number
-    rawValue: number          // always the numeric raw value
+    rawValue: number
     size: number
     isPointer: boolean
-    pointsTo?: number        // address this pointer points to
+    pointsTo?: number
     pointeeType?: string
 }
 
-/** A heap allocation from wrapping malloc */
+/** A heap allocation from the native C++ tracking array */
 export interface HeapAllocation {
     ptr: number
     size: number
-    label: string            // e.g. "0x00011040"
-    members: MemoryValue[]   // parsed struct/array members
+    label: string
+    members: MemoryValue[]
 }
 
 /** A single call frame with its own variables */
@@ -50,12 +51,13 @@ export interface MemorySnapshot {
  * Called when the executor worker is frozen (Atomics.wait) so memory is stable.
  *
  * Multi-frame: processes every frame in the call stack independently.
+ * Heap: reads __nova_allocs directly from RAM via heapPointers.
  */
 export function readMemorySnapshot(
     memoryBuffer: ArrayBuffer | null,
     dwarfInfo: DwarfInfo,
-    allocations: { ptr: number; size: number }[],
     callStack: { id: string; func: string; sp: number; line: number }[],
+    heapPointers: { countPtr: number; allocsPtr: number },
 ): MemorySnapshot {
     const frames: CallFrameSnapshot[] = callStack.map(f => ({
         id: f.id, funcName: f.func, sp: f.sp, line: f.line, variables: [], isActive: false,
@@ -74,52 +76,49 @@ export function readMemorySnapshot(
         const isTopFrame = (i === callStack.length - 1)
 
         for (const varInfo of dwarfInfo.variables) {
-            // Skip internal/compiler-generated variables
             if (varInfo.name.startsWith('__') || varInfo.name.startsWith('.')) continue
-
-            // SCOPE FILTER: Only show variables from matching function
             if (varInfo.funcName !== frame.func) continue
-
-            // TIME TRAVEL FILTER: Only hide future uninitialized variables on the actively executing frame
             if (isTopFrame && varInfo.declLine > 0 && varInfo.declLine >= frame.line) continue
 
             try {
-                // Pass THIS frame's unique SP!
                 const mv = readVariable(view, bytes, varInfo.name, varInfo, frame.sp)
                 if (mv) frames[i].variables.push(mv)
             } catch { /* Variable address out of bounds — skip */ }
         }
     }
 
-    // Read heap allocations
-    for (const alloc of allocations) {
-        const ha: HeapAllocation = {
-            ptr: alloc.ptr,
-            size: alloc.size,
-            label: `0x${alloc.ptr.toString(16).padStart(8, '0')}`,
-            members: [],
-        }
-
+    // ── Synchronous Native Heap Read ───────────────────────────────
+    // Read the C++ __nova_allocs array directly from RAM. No async postMessage!
+    if (heapPointers.countPtr > 0 && heapPointers.allocsPtr > 0) {
         try {
-            const wordsToRead = Math.min(Math.floor(alloc.size / 4), 8)
-            for (let j = 0; j < wordsToRead; j++) {
-                const addr = alloc.ptr + j * 4
-                if (addr + 4 <= memoryBuffer.byteLength) {
-                    const val = view.getInt32(addr, true)
-                    ha.members.push({
-                        name: `0x${addr.toString(16).padStart(8, '0')}`,
-                        type: 'i32',
-                        address: addr,
-                        value: val,
-                        rawValue: val,
-                        size: 4,
-                        isPointer: false,
-                    })
+            const count = view.getInt32(heapPointers.countPtr, true)
+
+            for (let j = 0; j < count && j < 1024; j++) {
+                const allocPtr = view.getUint32(heapPointers.allocsPtr + j * 8, true)
+                const allocSize = view.getUint32(heapPointers.allocsPtr + j * 8 + 4, true)
+
+                const ha: HeapAllocation = {
+                    ptr: allocPtr,
+                    size: allocSize,
+                    label: `0x${allocPtr.toString(16).padStart(8, '0')} (${allocSize}B)`,
+                    members: [],
                 }
+
+                const wordsToRead = Math.min(Math.floor(allocSize / 4), 8)
+                for (let k = 0; k < wordsToRead; k++) {
+                    const addr = allocPtr + k * 4
+                    if (addr + 4 <= memoryBuffer.byteLength) {
+                        const val = view.getInt32(addr, true)
+                        ha.members.push({
+                            name: `0x${addr.toString(16).padStart(8, '0')}`,
+                            type: 'i32', address: addr, value: val, rawValue: val,
+                            size: 4, isPointer: false,
+                        })
+                    }
+                }
+                heapAllocations.push(ha)
             }
         } catch { /* Out of bounds */ }
-
-        heapAllocations.push(ha)
     }
 
     return { frames, heapAllocations }
@@ -133,12 +132,9 @@ function readVariable(
     varInfo: VariableInfo,
     frameSp: number,
 ): MemoryValue | null {
-    // DWARF stackOffset is relative to the stack pointer.
-    // Absolute address = Stack Pointer + Offset
     if (varInfo.stackOffset === undefined) return null
     const address = frameSp + varInfo.stackOffset
 
-    // If out of bounds, still return with "???" so the UI draws the box
     if (address <= 0 || address + varInfo.size > view.byteLength) {
         return {
             name, type: varInfo.type, address,
@@ -152,7 +148,6 @@ function readVariable(
 
     try {
         if (varInfo.isPointer) {
-            // Read 4-byte pointer (WASM32)
             pointsTo = view.getUint32(address, true)
             rawValue = pointsTo
             value = `0x${pointsTo.toString(16).padStart(8, '0')}`

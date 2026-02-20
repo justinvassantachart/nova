@@ -177,6 +177,8 @@ self.onmessage = async (e) => {
                 '-Wl,--wrap=malloc',
                 '-Wl,--wrap=free',
                 '-Wl,--export=__stack_pointer',
+                '-Wl,--export=__nova_allocs',
+                '-Wl,--export=__nova_alloc_count',
                 '-o', '/workspace/program.wasm',
             ]
 
@@ -200,6 +202,8 @@ self.onmessage = async (e) => {
                 '-Wl,--allow-undefined',
                 '-Wl,--wrap=malloc',
                 '-Wl,--wrap=free',
+                '-Wl,--export=__nova_allocs',
+                '-Wl,--export=__nova_alloc_count',
                 '-target', 'wasm32-wasip1',
                 '-o', '/workspace/program.wasm',
             ]

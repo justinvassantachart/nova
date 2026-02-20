@@ -23,20 +23,36 @@ extern "C" {
 }
 `
 
-const MEMORY_TRACKER = `extern "C" {
-    extern void JS_notify_alloc(unsigned int addr, unsigned int size);
-    extern void JS_notify_free(unsigned int addr);
-    extern void* __real_malloc(unsigned long size);
+const MEMORY_TRACKER = `typedef decltype(sizeof(0)) size_t;
+
+extern "C" {
+    extern void* __real_malloc(size_t size);
     extern void __real_free(void* ptr);
 
-    void* __wrap_malloc(unsigned long size) {
+    // Synchronous Heap Tracking Array — UI reads directly from RAM
+    struct AllocRecord { unsigned int ptr; unsigned int size; };
+    __attribute__((used)) AllocRecord __nova_allocs[1024];
+    __attribute__((used)) int __nova_alloc_count = 0;
+
+    void* __wrap_malloc(size_t size) {
         void* ptr = __real_malloc(size);
-        if (size > 0) JS_notify_alloc((unsigned int)ptr, (unsigned int)size);
+        if (size > 0 && __nova_alloc_count < 1024) {
+            __nova_allocs[__nova_alloc_count].ptr = (unsigned int)ptr;
+            __nova_allocs[__nova_alloc_count].size = (unsigned int)size;
+            __nova_alloc_count++;
+        }
         return ptr;
     }
 
     void __wrap_free(void* ptr) {
-        if (ptr) JS_notify_free((unsigned int)ptr);
+        if (!ptr) return;
+        for (int i = 0; i < __nova_alloc_count; i++) {
+            if (__nova_allocs[i].ptr == (unsigned int)ptr) {
+                __nova_allocs[i] = __nova_allocs[__nova_alloc_count - 1];
+                __nova_alloc_count--;
+                break;
+            }
+        }
         __real_free(ptr);
     }
 }

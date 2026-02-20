@@ -44,6 +44,9 @@ export interface DebugState {
     /** Call stack frames for recursion tracking */
     callStack: StackFrame[]
 
+    /** Native heap array pointers for synchronous RAM reading */
+    heapPointers: { countPtr: number; allocsPtr: number }
+
     /** Actions */
     setDwarfInfo: (info: DwarfInfo) => void
     setDebugMode: (mode: DebugMode) => void
@@ -56,6 +59,7 @@ export interface DebugState {
     setStackPointer: (sp: number) => void
     setLiveVariables: (vars: Record<string, { value: string | number; address?: number }>) => void
     setCallStack: (stack: StackFrame[]) => void
+    setHeapPointers: (ptrs: { countPtr: number; allocsPtr: number }) => void
     reset: () => void
 }
 
@@ -71,6 +75,7 @@ export const useDebugStore = create<DebugState>((set) => ({
     stackPointer: 0,
     liveVariables: {},
     callStack: [],
+    heapPointers: { countPtr: 0, allocsPtr: 0 },
 
     setDwarfInfo: (info) => set({ dwarfInfo: info }),
     setDebugMode: (mode) => set({ debugMode: mode }),
@@ -91,6 +96,7 @@ export const useDebugStore = create<DebugState>((set) => ({
     setStackPointer: (sp) => set({ stackPointer: sp }),
     setLiveVariables: (vars) => set({ liveVariables: vars }),
     setCallStack: (stack) => set({ callStack: stack }),
+    setHeapPointers: (ptrs) => set({ heapPointers: ptrs }),
 
     reset: () => set({
         debugMode: 'idle',
@@ -102,5 +108,6 @@ export const useDebugStore = create<DebugState>((set) => ({
         memoryBuffer: null,
         stackPointer: 0,
         callStack: [],
+        heapPointers: { countPtr: 0, allocsPtr: 0 },
     }),
 }))

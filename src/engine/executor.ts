@@ -20,7 +20,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
 
     if (debugMode) {
-        debugSab = new SharedArrayBuffer(256) // 64 Int32s: [control, stepId, reserved, depth, sp0..sp59]
+        debugSab = new SharedArrayBuffer(1024) // 256 Int32s — deep recursion support
         memorySab = new SharedArrayBuffer(16 * 1024 * 1024) // 16MB memory snapshot buffer
         const arr = new Int32Array(debugSab)
         arr[0] = 3 // 3 = Running
@@ -34,8 +34,19 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
             if (Atomics.load(ctrl, 0) === 1) { // 1 = PAUSED
                 const stepId = Atomics.load(ctrl, 1)
                 const depth = Atomics.load(ctrl, 3)
-                const sps: number[] = []
-                for (let i = 0; i < depth && i < 60; i++) sps.push(Atomics.load(ctrl, 4 + i))
+
+                // Read interleaved (callId, sp) pairs
+                const framesData: Array<{ id: number; sp: number }> = []
+                for (let i = 0; i < depth && i < 60; i++) {
+                    framesData.push({
+                        id: Atomics.load(ctrl, 4 + i * 2),
+                        sp: Atomics.load(ctrl, 4 + i * 2 + 1),
+                    })
+                }
+
+                // Read native heap tracker pointers
+                const countPtr = Atomics.load(ctrl, 128)
+                const allocsPtr = Atomics.load(ctrl, 129)
 
                 const store = useDebugStore.getState()
                 const mapEntry = store.stepMap[stepId]
@@ -47,13 +58,14 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     const memCopy = new ArrayBuffer(memorySab.byteLength)
                     new Uint8Array(memCopy).set(new Uint8Array(memorySab))
 
-                    // Build the recursive call stack
-                    const newCallStack = sps.map((frameSp, i) => {
+                    // Build the recursive call stack with guaranteed-unique React keys
+                    const newCallStack = framesData.map((fData, i) => {
                         const isTop = i === depth - 1
-                        const existing = store.callStack.find(f => f.sp === frameSp)
+                        const frameIdStr = `frame-${fData.id}` // Guaranteed unique!
+                        const existing = store.callStack.find(f => f.id === frameIdStr)
                         return {
-                            id: `frame-${frameSp}`,
-                            sp: frameSp,
+                            id: frameIdStr,
+                            sp: fData.sp,
                             func: isTop ? func : (existing ? existing.func : 'unknown'),
                             line: isTop ? line : (existing ? existing.line : -1),
                         }
@@ -61,9 +73,10 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
 
                     store.setMemoryBuffer(memCopy)
                     store.setCallStack(newCallStack)
+                    store.setHeapPointers({ countPtr, allocsPtr })
                     store.setCurrentLine(line)
                     store.setCurrentFunc(func)
-                    store.setStackPointer(sps.length > 0 ? sps[sps.length - 1] : 0)
+                    store.setStackPointer(framesData.length > 0 ? framesData[framesData.length - 1].sp : 0)
                     store.setDebugMode('paused')
                 }
             }
@@ -97,14 +110,6 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     })
                     break
                 }
-                case 'ALLOC':
-                    useExecutionStore.getState().addAllocation({
-                        ptr: msg.data.ptr, size: msg.data.size, timestamp: Date.now(),
-                    })
-                    break
-                case 'FREE':
-                    useExecutionStore.getState().removeAllocation(msg.data.ptr)
-                    break
                 case 'EXIT':
                     term?.writeln(`\r\n\x1b[90m─── Program exited with code ${msg.data.code ?? 0} ───\x1b[0m`)
                     useExecutionStore.getState().setIsRunning(false)

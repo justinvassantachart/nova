@@ -14,7 +14,6 @@ import {
 import '@xyflow/react/dist/style.css'
 import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
-import { useExecutionStore } from '@/store/execution-store'
 import { readMemorySnapshot, type MemoryValue, type HeapAllocation } from '@/lib/memory-reader'
 
 // ── Custom Node Components ─────────────────────────────────────────
@@ -122,14 +121,13 @@ function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
 // ── Main Component ─────────────────────────────────────────────────
 
 export function MemoryVisualizer() {
-    const { debugMode, dwarfInfo, memoryBuffer, callStack } = useDebugStore()
-    const { allocations } = useExecutionStore()
+    const { debugMode, dwarfInfo, memoryBuffer, callStack, heapPointers } = useDebugStore()
 
-    // Read memory snapshot with multi-frame call stack
+    // Read memory snapshot with multi-frame call stack and native heap pointers
     const snapshot = useMemo(() => {
         if (debugMode !== 'paused' || !memoryBuffer) return null
-        return readMemorySnapshot(memoryBuffer, dwarfInfo, allocations, callStack)
-    }, [debugMode, dwarfInfo, allocations, memoryBuffer, callStack])
+        return readMemorySnapshot(memoryBuffer, dwarfInfo, callStack, heapPointers)
+    }, [debugMode, dwarfInfo, memoryBuffer, callStack, heapPointers])
 
     // Build React Flow nodes + edges from memory snapshot
     const { nodes, edges } = useMemo(() => {
@@ -161,7 +159,19 @@ export function MemoryVisualizer() {
                 targetPosition: Position.Left,
             })
 
-            // Draw pointer arrows specifically isolated to this frame
+            // Force visual top-to-bottom layout stacking using an invisible edge
+            if (i > 0) {
+                edges.push({
+                    id: `stack-order-${i}`,
+                    source: reversedFrames[i - 1].id,
+                    target: frameData.id,
+                    type: 'straight',
+                    animated: false,
+                    style: { stroke: 'transparent', strokeWidth: 0 },
+                })
+            }
+
+            // Draw pointer arrows from this frame to heap nodes
             frameData.variables.filter((v: MemoryValue) => v.isPointer && v.pointsTo).forEach((v: MemoryValue) => {
                 if (snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
                     edges.push({
@@ -200,7 +210,6 @@ export function MemoryVisualizer() {
     const onNodesChange = useCallback(() => { }, [])
     const onEdgesChange = useCallback(() => { }, [])
 
-    // Idle / Not debugging state
     if (debugMode === 'idle') {
         return (
             <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -215,7 +224,6 @@ export function MemoryVisualizer() {
         )
     }
 
-    // Running state
     if (debugMode === 'running' || debugMode === 'compiling') {
         return (
             <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -229,7 +237,6 @@ export function MemoryVisualizer() {
         )
     }
 
-    // Paused state — show the graph
     return (
         <div className="w-full h-full">
             <ReactFlow

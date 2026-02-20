@@ -16,11 +16,12 @@ self.onmessage = async (e) => {
     let exitCode = 0
     let inst: WebAssembly.Instance
 
-    // ── Call Stack Tracking ────────────────────────────────────────
-    // Track function call stack by observing SP changes and function
-    // transitions in JS_debug_step. Each entry is { func, sp }.
-    let callStack: Array<{ func: string; sp: number }> = []
-    let lastFunc: string | null = null
+    // ── Native Hardware Call Stack ──────────────────────────────
+    // JS_notify_enter/exit are called by __cyg_profile_func_enter/exit
+    // which Clang generates automatically with -finstrument-functions.
+    // Each entry has a unique ID so React Flow can track nodes across renders.
+    let callStack: Array<{ id: number; func: string; sp: number }> = []
+    let nextCallId = 1
 
     function readCString(mem: WebAssembly.Memory, ptr: number): string {
         const b = new Uint8Array(mem.buffer)
@@ -42,10 +43,20 @@ self.onmessage = async (e) => {
         const imports: WebAssembly.Imports = {
             wasi_snapshot_preview1: wasi,
             env: {
-                JS_notify_alloc: (ptr: number, size: number) => self.postMessage({ type: 'ALLOC', ptr, size }),
-                JS_notify_free: (ptr: number) => self.postMessage({ type: 'FREE', ptr }),
-                JS_notify_enter: () => { /* no-op: resolved by --allow-undefined */ },
-                JS_notify_exit: () => { /* no-op: resolved by --allow-undefined */ },
+                // Natively handled by C++ Memory Tracker — no async postMessage needed!
+                JS_notify_alloc: () => { },
+                JS_notify_free: () => { },
+
+                // Hardware tells us exactly when a frame is pushed/popped!
+                JS_notify_enter: () => {
+                    if (!debugMode) return
+                    const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                    callStack.push({ id: nextCallId++, func: 'unknown', sp })
+                },
+                JS_notify_exit: () => {
+                    if (!debugMode) return
+                    callStack.pop()
+                },
 
                 clear_screen: () => { drawQueue.push({ type: 'CLEAR' }) },
                 draw_circle: (x: number, y: number, r: number, cp: number) => {
@@ -59,15 +70,14 @@ self.onmessage = async (e) => {
                 },
 
                 // ── Debug stepping (Safari-safe) ───────────────────────
-                // Uses SharedArrayBuffer state machine instead of postMessage
-                // to avoid Safari's WebKit postMessage-before-Atomics.wait deadlock.
-                //
-                // Protocol:
-                //   stateArr[0] = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
-                //   stateArr[1] = current step ID
-                //   stateArr[2] = (reserved)
-                //   stateArr[3] = call stack depth
-                //   stateArr[4..63] = call stack SPs
+                // Protocol (1024-byte SAB):
+                //   [0]  = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
+                //   [1]  = current step ID
+                //   [2]  = (reserved)
+                //   [3]  = call stack depth
+                //   [4..123] = interleaved (callId, sp) pairs — 60 max frames
+                //   [128] = __nova_alloc_count ptr
+                //   [129] = __nova_allocs ptr
                 JS_debug_step: (stepId: number) => {
                     if (!debugMode || !debugSab) return
                     const stateArr = new Int32Array(debugSab.buffer)
@@ -79,54 +89,48 @@ self.onmessage = async (e) => {
                         sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
                     }
 
-                    // 2. Read current SP
+                    // 2. Update the active frame's function name and SP
                     const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-
-                    // 3. Track call stack via function transitions
                     const mapEntry = stepMap[stepId]
                     const currentFunc = mapEntry ? mapEntry.func : 'unknown'
 
-                    if (lastFunc === null) {
-                        // First step ever — initialize
-                        callStack = [{ func: currentFunc, sp }]
-                    } else if (currentFunc !== lastFunc) {
-                        // Function changed — determine call vs return
-                        // In WASM, the stack grows downward: lower SP = deeper call
-                        const parentIdx = callStack.findIndex(f => f.func === currentFunc)
-                        if (parentIdx >= 0) {
-                            // Returning to a function already on the stack — pop frames above it
-                            callStack = callStack.slice(0, parentIdx + 1)
-                            callStack[parentIdx].sp = sp
-                        } else {
-                            // Calling a new function — push onto stack
-                            callStack.push({ func: currentFunc, sp })
-                        }
-                    }
-                    // Update SP for current frame
                     if (callStack.length > 0) {
+                        callStack[callStack.length - 1].func = currentFunc
                         callStack[callStack.length - 1].sp = sp
+                    } else {
+                        callStack.push({ id: nextCallId++, func: currentFunc, sp })
                     }
-                    lastFunc = currentFunc
 
-                    // 4. Write the step ID
+                    // 3. Write step ID + call stack into the SAB
                     Atomics.store(stateArr, 1, stepId)
-
-                    // 5. Send the call stack depths
                     Atomics.store(stateArr, 3, callStack.length)
+
+                    // Stream the entire hardware call stack back to the React UI
                     for (let i = 0; i < callStack.length && i < 60; i++) {
-                        Atomics.store(stateArr, 4 + i, callStack[i].sp)
+                        Atomics.store(stateArr, 4 + i * 2, callStack[i].id)
+                        Atomics.store(stateArr, 4 + i * 2 + 1, callStack[i].sp)
                     }
 
-                    // 6. Signal PAUSED state (1)
+                    // 4. Export native heap tracker pointers
+                    const getExportAddr = (name: string) => {
+                        const exp = inst.exports[name]
+                        if (typeof exp === 'number') return exp
+                        if (exp && typeof (exp as any).value === 'number') return (exp as any).value // eslint-disable-line @typescript-eslint/no-explicit-any
+                        return 0
+                    }
+                    Atomics.store(stateArr, 128, getExportAddr('__nova_alloc_count'))
+                    Atomics.store(stateArr, 129, getExportAddr('__nova_allocs'))
+
+                    // 5. Signal PAUSED state (1)
                     Atomics.store(stateArr, 0, 1)
                     Atomics.notify(stateArr, 0, 1)
 
-                    // 7. Safari-safe wait loop: spin until resumed (3) or stopped (2)
+                    // 6. Safari-safe wait loop: spin until resumed (3) or stopped (2)
                     while (Atomics.load(stateArr, 0) === 1) {
                         Atomics.wait(stateArr, 0, 1)
                     }
 
-                    // 8. Check if we should stop
+                    // 7. Check if we should stop
                     if (Atomics.load(stateArr, 0) === 2) {
                         throw new Error('__debug_stop')
                     }
