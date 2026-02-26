@@ -11,6 +11,9 @@ import { EMPTY_DWARF } from './dwarf-types'
 
 // ── WASM Section Parsing ───────────────────────────────────────────
 
+// Instantiate a single TextDecoder globally
+const textDecoder = new TextDecoder('utf-8')
+
 /** Read a LEB128 unsigned integer from a DataView */
 function readULEB128(view: DataView, offset: number): { value: number; bytesRead: number } {
     let result = 0
@@ -54,8 +57,16 @@ function readSLEB128(view: DataView, offset: number): { value: number; bytesRead
 function readCString(data: Uint8Array, offset: number): { value: string; bytesRead: number } {
     let end = offset
     while (end < data.length && data[end] !== 0) end++
-    const value = new TextDecoder().decode(data.slice(offset, end))
+    // 🚀 Use .subarray() to avoid copying the buffer in memory
+    const value = textDecoder.decode(data.subarray(offset, end))
     return { value, bytesRead: end - offset + 1 }
+}
+
+/** Efficiently skip over a string without decoding it */
+function skipCString(data: Uint8Array, offset: number): number {
+    let end = offset
+    while (end < data.length && data[end] !== 0) end++
+    return end - offset + 1
 }
 
 /** Extract named custom sections from a WASM binary */
@@ -78,12 +89,13 @@ function extractCustomSections(wasmBinary: Uint8Array): Map<string, Uint8Array> 
             // Custom section name is LEB128 length-prefixed (NOT null-terminated)
             const { value: nameLen, bytesRead: nameLenBytes } = readULEB128(view, offset)
             offset += nameLenBytes
-            const name = new TextDecoder().decode(wasmBinary.slice(offset, offset + nameLen))
+            // 🚀 Replaced new TextDecoder().decode() and .slice()
+            const name = textDecoder.decode(wasmBinary.subarray(offset, offset + nameLen))
             offset += nameLen
             const dataSize = sectionSize - nameLenBytes - nameLen
 
             if (dataSize > 0) {
-                sections.set(name, wasmBinary.slice(offset, offset + dataSize))
+                sections.set(name, wasmBinary.subarray(offset, offset + dataSize))
             }
 
             offset = sectionStart + sectionSize
@@ -465,7 +477,7 @@ function skipFormValue(
         case DW_FORM_sec_offset: case DW_FORM_ref_addr:
         case DW_FORM_line_strp: case DW_FORM_strx4: return is64 ? 8 : 4
         case DW_FORM_data8: case DW_FORM_ref8: case DW_FORM_ref_sig8: return 8
-        case DW_FORM_string: return readCString(data, offset).bytesRead
+        case DW_FORM_string: return skipCString(data, offset) // 🚀 Skip without decoding
         case DW_FORM_block1: return 1 + view.getUint8(offset)
         case DW_FORM_block2: return 2 + view.getUint16(offset, true)
         case DW_FORM_block4: return 4 + view.getUint32(offset, true)

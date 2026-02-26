@@ -68,14 +68,35 @@ function isBufferLike(value: unknown): boolean {
         || (typeof (value as any).byteLength === 'number' && typeof (value as any).buffer === 'object') // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
+// Cache the encoded sysroot tree globally — avoids re-encoding 1200+ headers per compile
+let cachedSysrootTree: Record<string, unknown> | null = null
+let cachedSysrootCount = 0
+
 /** Build the full virtual filesystem tree from workspace + sysroot files. */
 function buildFileTree(files: Record<string, string>, sysrootFiles: Record<string, string>): Record<string, unknown> {
     const tree: Record<string, unknown> = {}
     const enc = new TextEncoder()
-    for (const [path, content] of Object.entries(files)) {
-        insertIntoTree(tree, path, enc.encode(content))
+
+    // Process and cache sysroot files globally to avoid encoding 1200+ headers per compile
+    if (sysrootFiles) {
+        const keys = Object.keys(sysrootFiles)
+        if (keys.length > 0 && (!cachedSysrootTree || keys.length !== cachedSysrootCount)) {
+            cachedSysrootTree = {}
+            for (const path of keys) {
+                insertIntoTree(cachedSysrootTree, path, enc.encode(sysrootFiles[path]))
+            }
+            cachedSysrootCount = keys.length
+        }
     }
-    for (const [path, content] of Object.entries(sysrootFiles)) {
+
+    // Fast shallow copy of the cached sysroot tree
+    if (cachedSysrootTree) {
+        for (const [k, v] of Object.entries(cachedSysrootTree)) {
+            tree[k] = v
+        }
+    }
+
+    for (const [path, content] of Object.entries(files)) {
         insertIntoTree(tree, path, enc.encode(content))
     }
     return tree
@@ -225,8 +246,7 @@ async function handleLinkAsm(data: any) { // eslint-disable-line @typescript-esl
         const linkArgs = [
             ...asmNames,
             '/sysroot/memory_tracker.cpp',
-            ...BASE_INCLUDES,
-            '-g', '-gdwarf-4', '-O0',
+            '-O0',
             '-target', 'wasm32-wasip1',
             '-Wl,--allow-undefined',
             '-Wl,--wrap=malloc',

@@ -54,6 +54,16 @@ export function getCompilerWorker(): Worker {
     )
 }
 
+/** Pop the preload worker for debug pool use (without affecting release mode). */
+export function popPreloadWorker(): Worker | null {
+    if (preloadWorker) {
+        const w = preloadWorker
+        preloadWorker = null
+        return w
+    }
+    return null
+}
+
 export function isCompilerReady(): boolean {
     return useCompilerStore.getState().cacheState === 'ready'
 }

@@ -16,7 +16,7 @@
 //   Stage 3 — Link instrumented .s → .wasm
 //     • Single worker assembles + links the final debug binary
 
-import { getCompilerWorker } from '@/lib/compiler-cache'
+import { getCompilerWorker, popPreloadWorker } from '@/lib/compiler-cache'
 import { CompilerPool, createPool } from '@/lib/compiler-pool'
 import { computeSourceHash, getCached, setCached } from '@/lib/compile-cache'
 import { getSysrootFiles } from '@/vfs/sysroot-loader'
@@ -115,6 +115,9 @@ function takePreloadedWorker(): Worker | undefined {
         worker = null // Release the singleton — debug mode takes ownership
         return w
     }
+    // Fallback: steal the background preload worker
+    const preloaded = popPreloadWorker()
+    if (preloaded) return preloaded
     return undefined
 }
 
@@ -129,9 +132,15 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
     )
 
     try {
-        // Create the worker pool up front (reuse preloaded worker if available)
-        if (debugPool) debugPool.dispose()
-        debugPool = createPool(sources.length, takePreloadedWorker())
+        // PERSIST the worker pool. Workers stay warm across compiles.
+        const cpuCount = navigator.hardwareConcurrency || 2
+        const targetPoolSize = Math.max(1, Math.min(cpuCount, sources.length, 4))
+
+        if (!debugPool) {
+            debugPool = createPool(targetPoolSize, takePreloadedWorker())
+        } else {
+            debugPool.ensureSize(targetPoolSize)
+        }
 
         // ── Stage 1: Compile .cpp → .s (parallel, cached) ─────────
         const assemblyMap = await compileSourcesWithCache(
@@ -143,7 +152,14 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
         const { asmEntries, globalStepMap } = instrumentAllAssembly(assemblyMap, progress)
 
         // ── Stage 3: Link instrumented .s → .wasm ─────────────────
-        const wasmBinary = await linkInstrumented(asmEntries, sysrootFiles, progress, stderr)
+        // 🚀 Only send the memory tracker. We don't need to rebuild a 5,000-file VFS tree for linking!
+        const linkSysrootFiles: Record<string, string> = {}
+        for (const key of Object.keys(sysrootFiles)) {
+            if (key.includes('memory_tracker')) {
+                linkSysrootFiles[key] = sysrootFiles[key]
+            }
+        }
+        const wasmBinary = await linkInstrumented(asmEntries, linkSysrootFiles, progress, stderr)
 
         // ── Parse DWARF and store results ─────────────────────────
         try {

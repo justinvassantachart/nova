@@ -51,13 +51,21 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
         const trimmed = line.trim()
         if (trimmed.length === 0) { output.push(line); continue }
 
-        // STRICT LEXER: No regex guessing. Process absolute tokens.
-        const tokens = trimmed.split(/\s+/)
-        const opcode = tokens[0]
+        // FAST LEXER: Extract opcode without allocating full split array.
+        // Only split into tokens lazily when we actually need parameters.
+        const spaceIdx = trimmed.indexOf('\t') !== -1 ? trimmed.indexOf('\t') : trimmed.indexOf(' ')
+        const opcode = spaceIdx === -1 ? trimmed : trimmed.substring(0, spaceIdx)
+
+        let tokens: string[] | null = null
+        const getTokens = () => {
+            if (!tokens) tokens = trimmed.split(/\s+/)
+            return tokens
+        }
 
         // 1. Map Workspace Files
         if (opcode === '.file') {
-            const fileId = tokens[1]
+            const tok = getTokens()
+            const fileId = tok[1]
             const pathIdx = line.indexOf('"')
             if (pathIdx !== -1) {
                 const path = line.substring(pathIdx + 1, line.lastIndexOf('"'))
@@ -68,7 +76,8 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
         }
         // 2. Track Function Boundaries & Demangle Names cleanly
         else if (opcode === '.functype' && !trimmed.includes('JS_debug_step') && !trimmed.includes('JS_notify_enter') && !trimmed.includes('JS_notify_exit')) {
-            let rawName = tokens[1] || 'unknown'
+            const tok = getTokens()
+            let rawName = tok[1] || 'unknown'
             if (rawName === '__original_main') currentFuncName = 'main'
             else if (rawName.startsWith('_Z')) {
                 let i = 2
@@ -85,9 +94,10 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
         }
         // 3. Track DWARF Lines
         else if (opcode === '.loc') {
-            const fileId = tokens[1]
-            currentLine = userFileIds.has(fileId) ? parseInt(tokens[2], 10) : -1
-            if (tokens.includes('prologue_end')) {
+            const tok = getTokens()
+            const fileId = tok[1]
+            currentLine = userFileIds.has(fileId) ? parseInt(tok[2], 10) : -1
+            if (tok.includes('prologue_end')) {
                 stackReady = true
                 // Mark that we need to inject enter call before the next instruction
                 if (!enteredCurrentFunc && !skipInstrument.has(currentFuncName)) {
@@ -112,12 +122,14 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
         // Only capture the FIRST i32.sub — that's the frame allocation.
         // Subsequent i32.sub in the prologue compute sub-frame addresses (not the allocation).
         if (inFunc && !stackReady && isInstruction) {
-            if (opcode === 'i32.const' && tokens[1]) {
-                lastI32Const = parseInt(tokens[1], 10) || 0
+            if (opcode === 'i32.const') {
+                const tok = getTokens()
+                if (tok[1]) lastI32Const = parseInt(tok[1], 10) || 0
             } else if (opcode === 'i32.sub' && frameAllocSize === 0) {
                 frameAllocSize = lastI32Const
-            } else if (opcode === 'global.set' && tokens[1] === '__stack_pointer') {
-                updatedGlobalSp = true
+            } else if (opcode === 'global.set') {
+                const tok = getTokens()
+                if (tok[1] === '__stack_pointer') updatedGlobalSp = true
             }
         }
 
