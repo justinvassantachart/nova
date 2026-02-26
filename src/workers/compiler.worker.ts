@@ -5,20 +5,12 @@ import { commands, Exit } from '@yowasp/clang'
 
 const clangpp = commands['clang++']
 
-// Notify main thread that the WASM is loaded (import succeeded)
+// Notify main thread that the WASM is loaded
 self.postMessage({ type: 'PRELOAD_DONE' })
 
-// ── Message Protocol ───────────────────────────────────────────────
-//
-// COMPILE      — Release mode: single-pass .cpp → .wasm (unchanged)
-// COMPILE_ONE  — Debug mode:   compile one .cpp → .s assembly text
-// LINK_ASM     — Debug mode:   link pre-instrumented .s files → .wasm
-//
-// The debug pipeline is orchestrated by the main thread (compiler.ts),
-// which fans out COMPILE_ONE messages across a pool of workers, then
-// sends LINK_ASM to one worker for the final link step.
-
-// ── Shared Constants ───────────────────────────────────────────────
+// OPTIMIZATION: Centralize instances to eliminate GC thrashing inside tight compilation loops
+const enc = new TextEncoder()
+const dec = new TextDecoder()
 
 const BASE_INCLUDES = [
     '-I/workspace/',
@@ -28,8 +20,6 @@ const BASE_INCLUDES = [
     '-fno-exceptions',
     '-fno-rtti',
 ]
-
-// ── Virtual Filesystem Helpers ─────────────────────────────────────
 
 function insertIntoTree(tree: Record<string, unknown>, path: string, data: Uint8Array) {
     const parts = (path.startsWith('/') ? path.slice(1) : path).split('/')
@@ -65,35 +55,29 @@ function findFileInTree(tree: Record<string, unknown>, filename: string): unknow
 function isBufferLike(value: unknown): boolean {
     if (!value || typeof value !== 'object') return false
     return ArrayBuffer.isView(value) || value instanceof ArrayBuffer
-        || (typeof (value as any).byteLength === 'number' && typeof (value as any).buffer === 'object') // eslint-disable-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        || (typeof (value as any).byteLength === 'number' && typeof (value as any).buffer === 'object')
 }
 
-// Cache the encoded sysroot tree globally — avoids re-encoding 1200+ headers per compile
-let cachedSysrootTree: Record<string, unknown> | null = null
-let cachedSysrootCount = 0
+// Global cached state inside the worker to avoid repetitive IPC transfers
+let cachedSysrootTree: Record<string, unknown> = {}
+let globalPchBytes: Uint8Array | null = null
 
-/** Build the full virtual filesystem tree from workspace + sysroot files. */
-function buildFileTree(files: Record<string, string>, sysrootFiles: Record<string, string>): Record<string, unknown> {
+// Constant definition of headers we bundle into the PCH
+const PCH_HEADERS = [
+    '<iostream>', '<vector>', '<string>', '<map>', '<algorithm>',
+    '<memory>', '<functional>', '<utility>', '<unordered_map>',
+    '<unordered_set>', '<set>', '<queue>', '<stack>', '<iomanip>'
+]
+// IMPORTANT: Clang strictly requires C/C++ files to end with a newline!
+const PCH_CONTENT = PCH_HEADERS.map(h => `#include ${h}`).join('\n') + '\n'
+
+function buildFileTree(files: Record<string, string>): Record<string, unknown> {
     const tree: Record<string, unknown> = {}
-    const enc = new TextEncoder()
 
-    // Process and cache sysroot files globally to avoid encoding 1200+ headers per compile
-    if (sysrootFiles) {
-        const keys = Object.keys(sysrootFiles)
-        if (keys.length > 0 && (!cachedSysrootTree || keys.length !== cachedSysrootCount)) {
-            cachedSysrootTree = {}
-            for (const path of keys) {
-                insertIntoTree(cachedSysrootTree, path, enc.encode(sysrootFiles[path]))
-            }
-            cachedSysrootCount = keys.length
-        }
-    }
-
-    // Fast shallow copy of the cached sysroot tree
-    if (cachedSysrootTree) {
-        for (const [k, v] of Object.entries(cachedSysrootTree)) {
-            tree[k] = v
-        }
+    // Fast shallow copy of the seeded sysroot tree
+    for (const [k, v] of Object.entries(cachedSysrootTree)) {
+        tree[k] = v
     }
 
     for (const [path, content] of Object.entries(files)) {
@@ -102,51 +86,106 @@ function buildFileTree(files: Record<string, string>, sysrootFiles: Record<strin
     return tree
 }
 
-/** Extract assembly text from a tree node (may be String or Uint8Array). */
 function extractAssemblyText(rawData: unknown): string {
     if (typeof rawData === 'string') return rawData
-    if (rawData instanceof Uint8Array) return new TextDecoder().decode(rawData)
+    if (rawData instanceof Uint8Array) return dec.decode(rawData)
     if (isBufferLike(rawData)) {
-        const bytes = new Uint8Array(
-            (rawData as any).buffer || rawData, // eslint-disable-line @typescript-eslint/no-explicit-any
-            (rawData as any).byteOffset || 0,   // eslint-disable-line @typescript-eslint/no-explicit-any
-            (rawData as any).byteLength,         // eslint-disable-line @typescript-eslint/no-explicit-any
-        )
-        return new TextDecoder().decode(bytes)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const bytes = new Uint8Array((rawData as any).buffer || rawData, (rawData as any).byteOffset || 0, (rawData as any).byteLength)
+        return dec.decode(bytes)
     }
     return String(rawData)
 }
 
-// ── Message Handlers ───────────────────────────────────────────────
+// STRICT TYPING: Eliminate `any` payloads.
+export type CompilerMessage =
+    | { type: 'PRELOAD' }
+    | { type: 'SEED_SYSROOT'; sysrootFiles: Record<string, string> }
+    | { type: 'GENERATE_PCH' }
+    | { type: 'LOAD_PCH'; pchBinary: ArrayBuffer }
+    | { type: 'COMPILE_ONE'; src: string; files: Record<string, string>; requestId: string }
+    | { type: 'LINK_ASM'; asmEntries: Array<{ name: string; assembly: string }>; sysrootFiles: Record<string, string>; requestId: string }
+    | { type: 'COMPILE'; files: Record<string, string>; sysrootFiles: Record<string, string>; requestId: string };
 
-self.onmessage = async (e) => {
-    if (e.data.type === 'PRELOAD') return
+self.onmessage = async (e: MessageEvent<CompilerMessage>) => {
+    const data = e.data
+    if (data.type === 'PRELOAD') return
 
-    switch (e.data.type) {
-        case 'COMPILE': return handleCompile(e.data)
-        case 'COMPILE_ONE': return handleCompileOne(e.data)
-        case 'LINK_ASM': return handleLinkAsm(e.data)
+    switch (data.type) {
+        case 'SEED_SYSROOT': return handleSeedSysroot(data)
+        case 'GENERATE_PCH': return handleGeneratePCH()
+        case 'LOAD_PCH': return handleLoadPCH(data)
+        case 'COMPILE': return handleCompile(data)
+        case 'COMPILE_ONE': return handleCompileOne(data)
+        case 'LINK_ASM': return handleLinkAsm(data)
     }
 }
 
-/**
- * COMPILE — Release mode: single-pass .cpp → .wasm
- * Unchanged from the original implementation.
- */
-async function handleCompile(data: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const files: Record<string, string> = data.files
-    const sysrootFiles: Record<string, string> = data.sysrootFiles || {}
-    const decoder = new TextDecoder()
+function handleSeedSysroot(data: Extract<CompilerMessage, { type: 'SEED_SYSROOT' }>) {
+    cachedSysrootTree = {}
+    for (const [path, content] of Object.entries(data.sysrootFiles)) {
+        insertIntoTree(cachedSysrootTree, path, enc.encode(content))
+    }
+    self.postMessage({ type: 'SEED_SYSROOT_DONE' })
+}
+
+async function handleGeneratePCH() {
+    try {
+        let tree = buildFileTree({})
+        insertIntoTree(tree, '/workspace/nova_pch.h', enc.encode(PCH_CONTENT))
+
+        // FIXED: -Xclang propagates the -emit-pch command cleanly to cc1. Input source goes LAST.
+        const args = [
+            ...BASE_INCLUDES,
+            '-std=c++20', '-g', '-gdwarf-4', '-O0',
+            '-target', 'wasm32-wasip1',
+            '-Xclang', '-emit-pch', '-o', '/workspace/nova_pch.pch',
+            '-x', 'c++-header', '/workspace/nova_pch.h'
+        ]
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const outTree = await clangpp(args, tree as any, {
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: dec.decode(bytes, { stream: true }) })
+            }
+        }) as any
+
+        const pchBytes = getTreeNode(outTree, '/workspace/nova_pch.pch') as Uint8Array | undefined
+
+        if (pchBytes) {
+            // We need a local copy for this worker, and a transfer copy for the main thread.
+            // Using `slice()` on the buffer creates a new ArrayBuffer entirely.
+            const transferBuf = pchBytes.buffer.slice(pchBytes.byteOffset, pchBytes.byteOffset + pchBytes.byteLength)
+            globalPchBytes = new Uint8Array(transferBuf.slice(0))
+            self.postMessage({ type: 'GENERATE_PCH_DONE', pchBinary: transferBuf }, [transferBuf])
+        } else {
+            self.postMessage({ type: 'GENERATE_PCH_ERROR', errors: ['Failed to emit .pch binary'] })
+        }
+    } catch (err: unknown) {
+        self.postMessage({ type: 'GENERATE_PCH_ERROR', errors: [err instanceof Exit ? err.message : (err instanceof Error ? err.message : String(err))] })
+    }
+}
+
+function handleLoadPCH(data: Extract<CompilerMessage, { type: 'LOAD_PCH' }>) {
+    globalPchBytes = new Uint8Array(data.pchBinary)
+    self.postMessage({ type: 'LOAD_PCH_DONE' })
+}
+
+async function handleCompile(data: Extract<CompilerMessage, { type: 'COMPILE' }>) {
+    const { files, sysrootFiles, requestId } = data
 
     try {
-        let tree = buildFileTree(files, sysrootFiles)
-        const sources = Object.keys(files).filter(
-            (f) => f.endsWith('.cpp') && !f.includes('sysroot/'),
-        )
+        let tree: Record<string, unknown> = {}
+        for (const [path, content] of Object.entries(sysrootFiles)) {
+            insertIntoTree(tree, path, enc.encode(content))
+        }
+        for (const [path, content] of Object.entries(files)) {
+            insertIntoTree(tree, path, enc.encode(content))
+        }
+
+        const sources = Object.keys(files).filter(f => f.endsWith('.cpp') && !f.includes('sysroot/'))
 
         const args = [
-            ...sources,
-            '/sysroot/memory_tracker.cpp',
             ...BASE_INCLUDES,
             '-std=c++20', '-O2',
             '-Wl,--allow-undefined',
@@ -156,59 +195,61 @@ async function handleCompile(data: any) { // eslint-disable-line @typescript-esl
             '-Wl,--export=__nova_alloc_count',
             '-target', 'wasm32-wasip1',
             '-o', '/workspace/program.wasm',
+            ...sources,
+            '/sysroot/memory_tracker.cpp',
         ]
 
-        tree = await clangpp(args, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let outTree = await clangpp(args, tree as any, {
             stderr: (bytes: Uint8Array | null) => {
-                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', requestId, text: dec.decode(bytes, { stream: true }) })
             },
-        }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
+        }) as any
 
-        const wasmBytes = getTreeNode(tree, '/workspace/program.wasm') as Uint8Array | undefined
+        const wasmBytes = getTreeNode(outTree, '/workspace/program.wasm') as Uint8Array | undefined
         if (wasmBytes) {
             const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength)
-            self.postMessage({ type: 'COMPILE_DONE', wasmBinary: buf }, [buf])
+            self.postMessage({ type: 'COMPILE_DONE', requestId, wasmBinary: buf }, [buf])
         } else {
-            self.postMessage({ type: 'COMPILE_ERROR', errors: ['No output produced.'] })
+            self.postMessage({ type: 'COMPILE_ERROR', requestId, errors: ['No output produced.'] })
         }
     } catch (err: unknown) {
-        self.postMessage({ type: 'COMPILE_ERROR', errors: [err instanceof Exit ? err.message : (err instanceof Error ? err.message : String(err))] })
+        self.postMessage({ type: 'COMPILE_ERROR', requestId, errors: [err instanceof Exit ? err.message : (err instanceof Error ? err.message : String(err))] })
     }
 }
 
-/**
- * COMPILE_ONE — Debug mode: compile a single .cpp → .s assembly text.
- * Called in parallel across a pool of workers.
- */
-async function handleCompileOne(data: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const { src, files, sysrootFiles, requestId } = data
-    const decoder = new TextDecoder()
+async function handleCompileOne(data: Extract<CompilerMessage, { type: 'COMPILE_ONE' }>) {
+    const { src, files, requestId } = data
 
     try {
-        let tree = buildFileTree(files, sysrootFiles)
+        let tree = buildFileTree(files)
         const asmName = src.replace('.cpp', '.s')
 
         const args = [
-            src, ...BASE_INCLUDES,
-            '-std=c++20',
-            '-g', '-gdwarf-4', '-O0',
-            '-S',
+            ...BASE_INCLUDES,
+            '-std=c++20', '-g', '-gdwarf-4', '-O0',
             '-target', 'wasm32-wasip1',
-            '-o', asmName,
         ]
 
-        tree = await clangpp(args, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
-            stderr: (bytes: Uint8Array | null) => {
-                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
-            },
-        }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
-
-        // Extract the .s file from the output tree
-        let rawData = getTreeNode(tree, asmName)
-        if (rawData === undefined || rawData === null) {
-            rawData = findFileInTree(tree, asmName.split('/').pop()!)
+        if (globalPchBytes) {
+            insertIntoTree(tree, '/workspace/nova_pch.h', enc.encode(PCH_CONTENT))
+            insertIntoTree(tree, '/workspace/nova_pch.pch', globalPchBytes)
+            args.push('-include-pch', '/workspace/nova_pch.pch')
         }
 
+        args.push('-S', '-o', asmName, src)
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let outTree = await clangpp(args, tree as any, {
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', requestId, text: dec.decode(bytes, { stream: true }) })
+            },
+        }) as any
+
+        let rawData = getTreeNode(outTree, asmName)
+        if (rawData === undefined || rawData === null) {
+            rawData = findFileInTree(outTree, asmName.split('/').pop()!)
+        }
         if (rawData === undefined || rawData === null) {
             self.postMessage({ type: 'COMPILE_ONE_ERROR', requestId, errors: [`No assembly output for ${src}`] })
             return
@@ -221,31 +262,21 @@ async function handleCompileOne(data: any) { // eslint-disable-line @typescript-
     }
 }
 
-/**
- * LINK_ASM — Debug mode: link pre-instrumented .s files → .wasm.
- * Called once after all files are compiled and instrumented.
- */
-async function handleLinkAsm(data: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function handleLinkAsm(data: Extract<CompilerMessage, { type: 'LINK_ASM' }>) {
     const { asmEntries, sysrootFiles, requestId } = data
-    // asmEntries: Array<{ name: string, assembly: string }>
-    const decoder = new TextDecoder()
-    const enc = new TextEncoder()
 
     try {
-        // Build a tree with just sysroot + instrumented assembly files
         let tree: Record<string, unknown> = {}
-        for (const [path, content] of Object.entries(sysrootFiles as Record<string, string>)) {
+        for (const [path, content] of Object.entries(sysrootFiles)) {
             insertIntoTree(tree, path, enc.encode(content))
         }
         const asmNames: string[] = []
-        for (const entry of asmEntries as Array<{ name: string; assembly: string }>) {
+        for (const entry of asmEntries) {
             insertIntoTree(tree, entry.name, enc.encode(entry.assembly))
             asmNames.push(entry.name)
         }
 
         const linkArgs = [
-            ...asmNames,
-            '/sysroot/memory_tracker.cpp',
             '-O0',
             '-target', 'wasm32-wasip1',
             '-Wl,--allow-undefined',
@@ -255,15 +286,18 @@ async function handleLinkAsm(data: any) { // eslint-disable-line @typescript-esl
             '-Wl,--export=__nova_allocs',
             '-Wl,--export=__nova_alloc_count',
             '-o', '/workspace/program.wasm',
+            ...asmNames,
+            '/sysroot/memory_tracker.cpp', // Inputs last
         ]
 
-        tree = await clangpp(linkArgs, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let outTree = await clangpp(linkArgs, tree as any, {
             stderr: (bytes: Uint8Array | null) => {
-                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', requestId, text: dec.decode(bytes, { stream: true }) })
             },
-        }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
+        }) as any
 
-        const wasmBytes = getTreeNode(tree, '/workspace/program.wasm') as Uint8Array | undefined
+        const wasmBytes = getTreeNode(outTree, '/workspace/program.wasm') as Uint8Array | undefined
         if (wasmBytes) {
             const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength)
             self.postMessage({ type: 'LINK_ASM_DONE', requestId, wasmBinary: buf }, [buf])

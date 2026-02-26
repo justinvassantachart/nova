@@ -1,19 +1,5 @@
-// ── ASM Interceptor ────────────────────────────────────────────────
-// Architecture C: LLVM Assembly Intercept — Strict Token Lexer
-//
-// Reads the intermediate Clang `.s` assembly file and injects:
-// 1. `JS_debug_step(stepId)` calls at source-line boundaries
-// 2. `JS_notify_enter()` at function entry (after local declarations)
-// 3. `JS_notify_exit()` before function returns
-//
-// Uses a strict tokenizer that treats the assembly as a whitespace-
-// separated token stream. Deterministic and will never break.
-//
-// Key invariants:
-// 1. Pristine Source — student C++ is 100% untouched
-// 2. Perfect Stack Frames — waits for .loc prologue_end before injecting
-// 3. "Just My Code" — filters by .file ID so we skip std library
-// 4. Native Recursion — enter/exit calls paired with unique IDs in the worker
+//   ASM Interceptor  //
+// Architecture C: LLVM Assembly Intercept -> Strict Token Lexer
 
 export interface InstrumentResult {
     output: string
@@ -29,14 +15,13 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
     let inFunc = false; let stackReady = false; let currentLine = -1
     let currentFuncName = 'unknown'; let stepIdCounter = startStepId
     let injectedLines = new Set<number>()
-    let needsEnterCall = false // True after we see prologue_end in a user function
-    let enteredCurrentFunc = false // Whether we've injected enter for current function
-    let frameAllocSize = 0 // Frame size detected from prologue (i32.const N before i32.sub/global.set __stack_pointer)
-    let lastI32Const = 0 // Track last i32.const value to detect frame allocation
-    let updatedGlobalSp = false // Whether the function actually updated the global stack pointer
+    let needsEnterCall = false
+    let enteredCurrentFunc = false
+    let frameAllocSize = 0
+    let lastI32Const = 0
+    let updatedGlobalSp = false
     const userFileIds = new Set<string>()
 
-    // We need to skip injecting enter/exit for the memory tracker functions
     const skipInstrument = new Set([
         '__wrap_malloc', '__wrap_free',
         '__cyg_profile_func_enter', '__cyg_profile_func_exit',
@@ -51,10 +36,9 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
         const trimmed = line.trim()
         if (trimmed.length === 0) { output.push(line); continue }
 
-        // FAST LEXER: Extract opcode without allocating full split array.
-        // Only split into tokens lazily when we actually need parameters.
-        const spaceIdx = trimmed.indexOf('\t') !== -1 ? trimmed.indexOf('\t') : trimmed.indexOf(' ')
-        const opcode = spaceIdx === -1 ? trimmed : trimmed.substring(0, spaceIdx)
+        // ROBUST TOKENIZER FIX: Match the exact first whitespace regardless of space vs tab
+        const firstSpaceMatch = trimmed.match(/\s/)
+        const opcode = firstSpaceMatch ? trimmed.substring(0, firstSpaceMatch.index) : trimmed
 
         let tokens: string[] | null = null
         const getTokens = () => {
@@ -62,19 +46,18 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             return tokens
         }
 
-        // 1. Map Workspace Files
         if (opcode === '.file') {
             const tok = getTokens()
             const fileId = tok[1]
             const pathIdx = line.indexOf('"')
             if (pathIdx !== -1) {
                 const path = line.substring(pathIdx + 1, line.lastIndexOf('"'))
+                // JMC: Mark file as user code if it's not in the sysroot
                 if (path.includes('/workspace/') || path.includes('main.cpp') || !path.includes('/sysroot/')) {
                     userFileIds.add(fileId)
                 }
             }
         }
-        // 2. Track Function Boundaries & Demangle Names cleanly
         else if (opcode === '.functype' && !trimmed.includes('JS_debug_step') && !trimmed.includes('JS_notify_enter') && !trimmed.includes('JS_notify_exit')) {
             const tok = getTokens()
             let rawName = tok[1] || 'unknown'
@@ -92,35 +75,30 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             needsEnterCall = false; enteredCurrentFunc = false
             frameAllocSize = 0; lastI32Const = 0; updatedGlobalSp = false
         }
-        // 3. Track DWARF Lines
         else if (opcode === '.loc') {
             const tok = getTokens()
             const fileId = tok[1]
-            currentLine = userFileIds.has(fileId) ? parseInt(tok[2], 10) : -1
+            const isUserCode = userFileIds.has(fileId)
+            currentLine = isUserCode ? parseInt(tok[2], 10) : -1
+
             if (tok.includes('prologue_end')) {
                 stackReady = true
-                // Mark that we need to inject enter call before the next instruction
-                if (!enteredCurrentFunc && !skipInstrument.has(currentFuncName)) {
+                if (!enteredCurrentFunc && !skipInstrument.has(currentFuncName) && isUserCode) {
                     needsEnterCall = true
                 }
             }
         }
         else if (opcode === 'end_function') {
-            // Inject exit before end_function if we entered this function
             if (enteredCurrentFunc) {
                 output.push('\tcall\tJS_notify_exit')
             }
             inFunc = false; stackReady = false; enteredCurrentFunc = false
         }
 
-        // 4. Safe WASM Instruction Detection
         const isInstruction = !opcode.startsWith('.') && !opcode.startsWith('#') &&
             !opcode.startsWith('@') && !opcode.endsWith(':') &&
             opcode !== 'end_function' && /^[a-z_]/.test(opcode)
 
-        // 5. Detect frame allocation (i32.const N / i32.sub / global.set __stack_pointer)
-        // Only capture the FIRST i32.sub — that's the frame allocation.
-        // Subsequent i32.sub in the prologue compute sub-frame addresses (not the allocation).
         if (inFunc && !stackReady && isInstruction) {
             if (opcode === 'i32.const') {
                 const tok = getTokens()
@@ -133,7 +111,6 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             }
         }
 
-        // 6. Inject enter call at the first real instruction after prologue_end
         if (needsEnterCall && isInstruction) {
             output.push(`\ti32.const\t${frameAllocSize}`)
             output.push(`\ti32.const\t${updatedGlobalSp ? 1 : 0}`)
@@ -142,12 +119,10 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             enteredCurrentFunc = true
         }
 
-        // 6. Inject exit before return instruction
         if (inFunc && isInstruction && opcode === 'return' && enteredCurrentFunc) {
             output.push('\tcall\tJS_notify_exit')
         }
 
-        // 7. Inject Deterministic Breakpoint
         if (inFunc && stackReady && currentLine > 0 && isInstruction && !injectedLines.has(currentLine)) {
             stepMap[stepIdCounter] = { line: currentLine, func: currentFuncName }
             output.push(`\ti32.const\t${stepIdCounter}`)
@@ -155,6 +130,7 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             injectedLines.add(currentLine)
             stepIdCounter++
         }
+
         output.push(line)
     }
 
