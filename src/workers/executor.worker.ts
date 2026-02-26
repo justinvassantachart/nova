@@ -81,74 +81,89 @@ self.onmessage = async (e) => {
             },
 
             // ── Debug stepping (Safari-safe) ───────────────────────
-            // Protocol (1024-byte SAB):
+            // Protocol (4096-byte SAB):
             //   [0]  = control: 1=PAUSED, 2=STOP, 3=RESUME/RUNNING
             //   [1]  = current step ID
-            //   [2]  = (reserved)
+            //   [2]  = run mode: 0=Continue, 1=StepInto, 2=StepOver
             //   [3]  = call stack depth
-            //   [4..123] = interleaved (callId, sp) pairs — 60 max frames
+            //   [4..123] = interleaved (callId, sp, frameSize) triples
             //   [128] = __nova_alloc_count ptr
             //   [129] = __nova_allocs ptr
+            //   [130] = target call depth (for StepOver)
+            //   [200] = breakpoint count
+            //   [201..1000] = breakpoint line numbers
             JS_debug_step: (stepId: number) => {
                 if (!debugMode || !debugSab) return
                 const stateArr = new Int32Array(debugSab.buffer)
 
-                // 1. Clone live WASM memory into the shared snapshot buffer
-                if (e.data.memorySab) {
-                    const memArr = new Uint8Array(wasmMemory.buffer)
-                    const sabArr = new Uint8Array(e.data.memorySab as SharedArrayBuffer)
-                    sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
-
-                    // Diagnostic: verify memory content at SP address
-                    const spDiag = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                    const wView = new DataView(wasmMemory.buffer)
-                    const dataEnd = inst.exports.__data_end ? (inst.exports.__data_end as WebAssembly.Global).value as number : -1
-                    const heapBase = inst.exports.__heap_base ? (inst.exports.__heap_base as WebAssembly.Global).value as number : -1
-                    console.log(`[executor] DIAG: sp=0x${spDiag.toString(16)} __data_end=0x${dataEnd.toString(16)} __heap_base=0x${heapBase.toString(16)} wasmMem.len=${memArr.length}`)
-                    // Dump 64 bytes (16 i32s) starting from SP
-                    if (spDiag + 64 <= memArr.length) {
-                        const dump: string[] = []
-                        for (let i = 0; i < 16; i++) {
-                            dump.push(`${wView.getInt32(spDiag + i * 4, true)}`)
-                        }
-                        console.log(`[executor] WASM 64B at sp: [${dump.join(', ')}]`)
-                    }
-                    // Also check if values are at negative offsets from SP (stack frame starts ABOVE sp)
-                    if (spDiag >= 64) {
-                        const dump: string[] = []
-                        for (let i = 0; i < 16; i++) {
-                            dump.push(`${wView.getInt32(spDiag - 64 + i * 4, true)}`)
-                        }
-                        console.log(`[executor] WASM 64B BEFORE sp: [${dump.join(', ')}]`)
-                    }
+                // 1. Fast check for STOP
+                if (Atomics.load(stateArr, 0) === 2) {
+                    throw new Error('__debug_stop')
                 }
 
-                // 2. Update the active frame's function name (but NOT the sp — 
-                // the entry sp from JS_notify_enter is the correct frame base for DW_OP_fbreg)
-                const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
+                // 2. Update the active frame's function name
                 const mapEntry = stepMap[stepId]
                 const currentFunc = mapEntry ? mapEntry.func : 'unknown'
+                const line = mapEntry ? mapEntry.line : -1
 
+                const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
                 if (callStack.length > 0) {
                     callStack[callStack.length - 1].func = currentFunc
-                    // DO NOT overwrite .sp here — it was set at function entry (frame base)
                 } else {
                     callStack.push({ id: nextCallId++, func: currentFunc, sp, frameSize: 0 })
                 }
 
-                // 3. Write step ID + call stack into the SAB
+                // 3. Read run mode and breakpoints dynamically from SAB
+                const runMode = Atomics.load(stateArr, 2) // 0=Continue, 1=StepInto, 2=StepOver
+                const targetDepth = Atomics.load(stateArr, 130)
+
+                let isBreakpoint = false
+                const bpCount = Atomics.load(stateArr, 200)
+                for (let i = 0; i < bpCount; i++) {
+                    if (Atomics.load(stateArr, 201 + i) === line) {
+                        isBreakpoint = true
+                        break
+                    }
+                }
+
+                // 4. Evaluate if we should physically freeze the thread
+                let shouldPause = false
+                if (isBreakpoint) {
+                    shouldPause = true
+                } else if (runMode === 1) { // Step Into
+                    shouldPause = true
+                } else if (runMode === 2) { // Step Over
+                    if (callStack.length <= targetDepth) {
+                        shouldPause = true
+                    }
+                }
+                // runMode === 0 (Continue) → only pause at breakpoints
+
+                // FAST-PATH: skip the 16MB memory copy and run at native speed!
+                if (!shouldPause) {
+                    return
+                }
+
+                // ── PAUSING LOGIC ──────────────────────────────────────
+
+                // 5. Clone live WASM memory into the shared snapshot buffer
+                if (e.data.memorySab) {
+                    const memArr = new Uint8Array(wasmMemory.buffer)
+                    const sabArr = new Uint8Array(e.data.memorySab as SharedArrayBuffer)
+                    sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
+                }
+
+                // 6. Write step ID + call stack into the SAB
                 Atomics.store(stateArr, 1, stepId)
                 Atomics.store(stateArr, 3, callStack.length)
 
-                // Stream the entire hardware call stack back to the React UI
-                // 3 values per frame: (callId, sp, frameSize)
                 for (let i = 0; i < callStack.length && i < 40; i++) {
                     Atomics.store(stateArr, 4 + i * 3, callStack[i].id)
                     Atomics.store(stateArr, 4 + i * 3 + 1, callStack[i].sp)
                     Atomics.store(stateArr, 4 + i * 3 + 2, callStack[i].frameSize)
                 }
 
-                // 4. Export native heap tracker pointers
+                // 7. Export native heap tracker pointers
                 const getExportAddr = (name: string) => {
                     const exp = inst.exports[name]
                     if (typeof exp === 'number') return exp
@@ -158,16 +173,16 @@ self.onmessage = async (e) => {
                 Atomics.store(stateArr, 128, getExportAddr('__nova_alloc_count'))
                 Atomics.store(stateArr, 129, getExportAddr('__nova_allocs'))
 
-                // 5. Signal PAUSED state (1)
+                // 8. Signal PAUSED state (1)
                 Atomics.store(stateArr, 0, 1)
                 Atomics.notify(stateArr, 0, 1)
 
-                // 6. Safari-safe wait loop: spin until resumed (3) or stopped (2)
+                // 9. Safari-safe wait loop: spin until resumed (3) or stopped (2)
                 while (Atomics.load(stateArr, 0) === 1) {
                     Atomics.wait(stateArr, 0, 1)
                 }
 
-                // 7. Check if we should stop
+                // 10. Check if we should stop
                 if (Atomics.load(stateArr, 0) === 2) {
                     throw new Error('__debug_stop')
                 }

@@ -1,4 +1,4 @@
-import { Play, Square, Loader2, Bug, StepForward, SkipBack } from 'lucide-react'
+import { Play, Square, Loader2, Bug, StepForward, SkipBack, FastForward, ArrowDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -8,7 +8,7 @@ import { useCompilerStore } from '@/store/compiler-store'
 import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
 import { compile } from '@/engine/compiler'
-import { execute, stop, debugStep, debugStop } from '@/engine/executor'
+import { execute, stop, debugStepInto, debugStepOver, debugContinue, debugStop } from '@/engine/executor'
 
 export function Toolbar() {
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
@@ -102,24 +102,30 @@ export function Toolbar() {
 
             {/* Debug controls when paused */}
             {debugMode === 'paused' && (
-                <>
-                    <Button size="sm" onClick={stepBack} disabled={stepHistory.length === 0 || stepIndex === 0}
-                        className="gap-1 bg-zinc-700 hover:bg-zinc-600 text-white">
-                        <SkipBack className="h-3.5 w-3.5" /> Back
+                <div className="flex gap-1.5">
+                    <Button size="sm" onClick={debugContinue} className="gap-1 bg-green-600 hover:bg-green-500 text-white">
+                        <FastForward className="h-3.5 w-3.5" /> Continue
+                    </Button>
+                    <Button size="sm" onClick={debugStepOver} className="gap-1 bg-blue-600 hover:bg-blue-500 text-white">
+                        <StepForward className="h-3.5 w-3.5" /> Step Over
                     </Button>
                     <Button size="sm" onClick={() => {
                         if (stepIndex >= 0 && stepIndex < stepHistory.length - 1) {
                             stepForward()
                         } else {
-                            debugStep()
+                            debugStepInto()
                         }
-                    }} className="gap-1 bg-blue-600 hover:bg-blue-500 text-white">
-                        <StepForward className="h-3.5 w-3.5" /> Step
+                    }} className="gap-1 bg-indigo-600 hover:bg-indigo-500 text-white">
+                        <ArrowDown className="h-3.5 w-3.5" /> Step Into
+                    </Button>
+                    <Button size="sm" onClick={stepBack} disabled={stepHistory.length === 0 || stepIndex === 0}
+                        className="gap-1 bg-zinc-700 hover:bg-zinc-600 text-white">
+                        <SkipBack className="h-3.5 w-3.5" /> Back
                     </Button>
                     <Button size="sm" variant="destructive" onClick={debugStop} className="gap-1">
-                        <Square className="h-3.5 w-3.5" /> Stop Debug
+                        <Square className="h-3.5 w-3.5" /> Stop
                     </Button>
-                </>
+                </div>
             )}
 
             {/* Run / Debug / Stop */}

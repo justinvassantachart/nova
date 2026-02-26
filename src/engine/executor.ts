@@ -24,11 +24,13 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
         useDebugStore.getState().setKnownHeapTypes({})
         useDebugStore.getState().setMemorySnapshot(null)
 
-        debugSab = new SharedArrayBuffer(1024) // 256 Int32s — deep recursion support
+        debugSab = new SharedArrayBuffer(4096) // 1024 Int32s — room for breakpoints
         memorySab = new SharedArrayBuffer(16 * 1024 * 1024) // 16MB memory snapshot buffer
         const arr = new Int32Array(debugSab)
         arr[0] = 3 // 3 = Running
+        arr[2] = 1 // 1 = Step Into (pause on first instruction)
         useDebugStore.getState().setDebugMode('running')
+        syncBreakpoints() // Load initial breakpoints into SAB
 
         let lastStepId = -1
 
@@ -168,10 +170,52 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
     })
 }
 
-/** Resume the paused debugger (step to next line) */
-export function debugStep() {
+// ── Breakpoint & Step Controls ─────────────────────────────────────
+// SAB protocol slots:
+//   [2]  = run mode: 0=Continue, 1=StepInto, 2=StepOver
+//   [130] = target call depth (for StepOver)
+//   [200] = breakpoint count
+//   [201..1000] = breakpoint line numbers
+
+/** Push the current breakpoint set into the SAB so the worker reads them instantly */
+export function syncBreakpoints() {
     if (!debugSab) return
     const arr = new Int32Array(debugSab)
+    const bps = Array.from(useDebugStore.getState().breakpoints)
+    const count = Math.min(bps.length, 800)
+    Atomics.store(arr, 200, count)
+    for (let i = 0; i < count; i++) {
+        Atomics.store(arr, 201 + i, bps[i])
+    }
+}
+
+/** Step Into — pause on the very next source line */
+export function debugStepInto() {
+    if (!debugSab) return
+    const arr = new Int32Array(debugSab)
+    Atomics.store(arr, 2, 1) // 1 = Step Into
+    Atomics.store(arr, 0, 3) // 3 = Resume
+    Atomics.notify(arr, 0, 1)
+    useDebugStore.getState().setDebugMode('running')
+}
+
+/** Step Over — run until we return to the same call depth */
+export function debugStepOver() {
+    if (!debugSab) return
+    const arr = new Int32Array(debugSab)
+    const currentDepth = useDebugStore.getState().callStack.length
+    Atomics.store(arr, 130, currentDepth) // Save target depth constraint
+    Atomics.store(arr, 2, 2) // 2 = Step Over
+    Atomics.store(arr, 0, 3) // 3 = Resume
+    Atomics.notify(arr, 0, 1)
+    useDebugStore.getState().setDebugMode('running')
+}
+
+/** Continue — run until the next breakpoint or program end */
+export function debugContinue() {
+    if (!debugSab) return
+    const arr = new Int32Array(debugSab)
+    Atomics.store(arr, 2, 0) // 0 = Continue
     Atomics.store(arr, 0, 3) // 3 = Resume
     Atomics.notify(arr, 0, 1)
     useDebugStore.getState().setDebugMode('running')
