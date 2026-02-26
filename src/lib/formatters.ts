@@ -26,6 +26,7 @@ export const StdStringFormatter: TypeFormatter = {
     // Matches all possible DWARF names for std::string
     match: (type) => {
         const t = type.replace(/\s+/g, '')
+        if (t.endsWith('*') || t.endsWith('&')) return false;
         return t === 'std::string' || t === 'string' || t.includes('basic_string')
     },
     format: (ctx) => {
@@ -69,7 +70,11 @@ export const StdStringFormatter: TypeFormatter = {
 
 export const StdVectorFormatter: TypeFormatter = {
     // Matches std::vector
-    match: (type) => type.replace(/\s+/g, '').includes('vector<'),
+    match: (type) => {
+        const t = type.replace(/\s+/g, '')
+        if (t.endsWith('*') || t.endsWith('&')) return false;
+        return t.includes('vector<')
+    },
     format: (ctx) => {
         const { view, address, name, typeName, size, getTypeSize, tagHeap, readVar } = ctx
 

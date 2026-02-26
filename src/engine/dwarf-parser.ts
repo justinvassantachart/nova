@@ -6,7 +6,7 @@
 // This is NOT a full DWARF parser — it handles the subset needed
 // for our debugger: line number mappings and basic variable/type info.
 
-import type { DwarfInfo, LineMap, VariableInfo, StructInfo, StructMember } from './dwarf-types'
+import type { DwarfInfo, LineMap, VariableInfo, StructInfo } from './dwarf-types'
 import { EMPTY_DWARF } from './dwarf-types'
 
 // ── WASM Section Parsing ───────────────────────────────────────────
@@ -355,6 +355,8 @@ const DW_TAG_structure_type = 0x13
 const DW_TAG_class_type = 0x02
 const DW_TAG_member = 0x0d
 const DW_TAG_pointer_type = 0x0f
+const DW_TAG_reference_type = 0x10
+const DW_TAG_rvalue_reference_type = 0x42
 const _DW_TAG_base_type = 0x24
 const DW_TAG_typedef = 0x16
 const DW_TAG_subprogram = 0x2e
@@ -546,7 +548,7 @@ function parseDebugInfo(
 
     // Track type references for resolution
     const typeMap = new Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>()
-    const structMembers = new Map<number, StructMember[]>()
+    const pendingStructMembers = new Map<number, { name: string; offset: number; typeRef?: number }[]>()
 
     let offset = 0
 
@@ -691,7 +693,7 @@ function parseDebugInfo(
             if (abbrev.tag === DW_TAG_structure_type || abbrev.tag === DW_TAG_class_type) {
                 if (dieName && dieSize !== undefined) {
                     currentStructOffset = dieOffset
-                    structMembers.set(dieOffset, [])
+                    pendingStructMembers.set(dieOffset, [])
                     types[dieName] = {
                         name: dieName,
                         size: dieSize,
@@ -699,18 +701,12 @@ function parseDebugInfo(
                     }
                 }
             } else if (abbrev.tag === DW_TAG_member && currentStructOffset !== null) {
-                const members = structMembers.get(currentStructOffset)
+                const members = pendingStructMembers.get(currentStructOffset)
                 if (members && dieName !== undefined && dieMemberLoc !== undefined) {
-                    const memberType = dieTypeRef ? resolveTypeName(typeMap, dieTypeRef) : 'unknown'
-                    const memberSize = dieTypeRef ? resolveTypeSize(typeMap, dieTypeRef) : 0
-                    const isPtr = isPointerType(typeMap, dieTypeRef)
                     members.push({
                         name: dieName,
                         offset: dieMemberLoc,
-                        type: memberType,
-                        size: memberSize,
-                        isPointer: isPtr,
-                        pointeeType: isPtr && dieTypeRef ? resolvePointeeType(typeMap, dieTypeRef) : undefined,
+                        typeRef: dieTypeRef,
                     })
                 }
             } else if ((abbrev.tag === DW_TAG_variable || abbrev.tag === DW_TAG_formal_parameter) && dieName) {
@@ -761,11 +757,24 @@ function parseDebugInfo(
             })
         }
 
-        // Update struct members
-        for (const [structOff, members] of structMembers) {
+        // Deferred struct member type resolution
+        // Solves the forward-reference bug for recursive structures (e.g., Node* next)
+        for (const [structOff, members] of pendingStructMembers) {
             const info = typeMap.get(structOff)
             if (info?.name && types[info.name]) {
-                types[info.name].members = members
+                types[info.name].members = members.map(m => {
+                    const memberType = m.typeRef ? resolveTypeName(typeMap, m.typeRef) : 'unknown'
+                    const memberSize = m.typeRef ? resolveTypeSize(typeMap, m.typeRef) : 0
+                    const isPtr = isPointerType(typeMap, m.typeRef)
+                    return {
+                        name: m.name,
+                        offset: m.offset,
+                        type: memberType,
+                        size: memberSize,
+                        isPointer: isPtr,
+                        pointeeType: isPtr && m.typeRef ? resolvePointeeType(typeMap, m.typeRef) : undefined,
+                    }
+                })
             }
         }
 
@@ -807,6 +816,8 @@ function resolveTypeName(
     if (!info) return 'unknown'
 
     if (info.tag === DW_TAG_pointer_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}*`
+    if (info.tag === DW_TAG_reference_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}&`
+    if (info.tag === DW_TAG_rvalue_reference_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}&&`
 
     if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
         // For typedefs: try cleaning the name first; if it resolves to something useful, use it.
@@ -837,7 +848,7 @@ function resolveTypeSize(
 
     if (info.size !== undefined) return info.size
 
-    if (info.tag === DW_TAG_pointer_type) return 4 // WASM32
+    if (info.tag === DW_TAG_pointer_type || info.tag === DW_TAG_reference_type || info.tag === DW_TAG_rvalue_reference_type) return 4 // WASM32
 
     return resolveTypeSize(typeMap, info.typeRef, depth + 1)
 }
@@ -852,7 +863,7 @@ function isPointerType(
     const info = typeMap.get(offset)
     if (!info) return false
 
-    if (info.tag === DW_TAG_pointer_type) return true
+    if (info.tag === DW_TAG_pointer_type || info.tag === DW_TAG_reference_type || info.tag === DW_TAG_rvalue_reference_type) return true
     // Follow transparent type wrappers
     if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type
         || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
@@ -872,7 +883,7 @@ function resolvePointeeType(
     const info = typeMap.get(offset)
     if (!info) return undefined
 
-    if (info.tag === DW_TAG_pointer_type) {
+    if (info.tag === DW_TAG_pointer_type || info.tag === DW_TAG_reference_type || info.tag === DW_TAG_rvalue_reference_type) {
         return resolveTypeName(typeMap, info.typeRef, depth + 1)
     }
 

@@ -49,7 +49,7 @@ function beautifyTypeName(typeName: string): string {
 
 export function getResolvedTypeSize(dwarfInfo: DwarfInfo, typeName: string): number {
     const cleanType = beautifyTypeName(typeName);
-    if (cleanType.endsWith('*')) return 4;
+    if (cleanType.endsWith('*') || cleanType.endsWith('&')) return 4; // References are pointer-sized in WASM32
     if (['char', 'bool', 'int8_t', 'uint8_t'].includes(cleanType)) return 1;
     if (['short', 'int16_t', 'uint16_t'].includes(cleanType)) return 2;
     if (['int', 'long', 'float', 'int32_t', 'uint32_t'].includes(cleanType)) return 4;
@@ -245,6 +245,27 @@ function readVariable(
     let pointsTo: number | undefined; let isStruct = false; let members: MemoryValue[] | undefined;
 
     try {
+        // Auto-dereference C++ references so they expand natively in the Stack frame UI
+        if (cleanType.endsWith('&')) {
+            let ptrVal = 0;
+            try { ptrVal = view.getUint32(address, true); } catch { return null; }
+
+            if (ptrVal > 0) {
+                const baseType = cleanType.replace(/&+$/, '').trim();
+                const baseSize = getResolvedTypeSize(dwarfInfo, baseType) || 4;
+                const resolved = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, name, baseType, baseSize, ptrVal, baseType.endsWith('*'), undefined, depth + 1);
+
+                if (resolved) {
+                    resolved.type = cleanType; // Restore the reference signature for the UI
+                    return resolved;
+                }
+            } else {
+                return {
+                    name, type: cleanType, address, value: 'nullptr (invalid ref)', rawValue: 0, size: 4, isPointer: true, pointsTo: 0, isStruct: false
+                };
+            }
+        }
+
         if (isPointer || cleanType.endsWith('*')) {
             pointsTo = view.getUint32(address, true);
             rawValue = pointsTo;
