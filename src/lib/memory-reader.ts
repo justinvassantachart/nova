@@ -205,8 +205,9 @@ export function readMemorySnapshot(
             typedAllocations.set(ptr, ha);
         }
 
-        // Don't render raw string character arrays as heap boxes
-        if (heapTypesMap.get(ptr) !== 'std::string::data') {
+        // Don't render internal std library buffers as standalone heap boxes
+        const heapType = heapTypesMap.get(ptr)
+        if (heapType !== 'std::string::data' && heapType !== 'std::vector::data') {
             heapAllocations.push(typedAllocations.get(ptr)!);
         }
     }

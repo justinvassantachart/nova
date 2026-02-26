@@ -33,6 +33,7 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
     let enteredCurrentFunc = false // Whether we've injected enter for current function
     let frameAllocSize = 0 // Frame size detected from prologue (i32.const N before i32.sub/global.set __stack_pointer)
     let lastI32Const = 0 // Track last i32.const value to detect frame allocation
+    let updatedGlobalSp = false // Whether the function actually updated the global stack pointer
     const userFileIds = new Set<string>()
 
     // We need to skip injecting enter/exit for the memory tracker functions
@@ -43,7 +44,7 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
     ])
 
     output.push('\t.functype\tJS_debug_step (i32) -> ()')
-    output.push('\t.functype\tJS_notify_enter (i32) -> ()')
+    output.push('\t.functype\tJS_notify_enter (i32, i32) -> ()')
     output.push('\t.functype\tJS_notify_exit () -> ()')
 
     for (const line of lines) {
@@ -80,7 +81,7 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
 
             inFunc = true; stackReady = false; currentLine = -1; injectedLines.clear()
             needsEnterCall = false; enteredCurrentFunc = false
-            frameAllocSize = 0; lastI32Const = 0
+            frameAllocSize = 0; lastI32Const = 0; updatedGlobalSp = false
         }
         // 3. Track DWARF Lines
         else if (opcode === '.loc') {
@@ -115,12 +116,15 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
                 lastI32Const = parseInt(tokens[1], 10) || 0
             } else if (opcode === 'i32.sub' && frameAllocSize === 0) {
                 frameAllocSize = lastI32Const
+            } else if (opcode === 'global.set' && tokens[1] === '__stack_pointer') {
+                updatedGlobalSp = true
             }
         }
 
         // 6. Inject enter call at the first real instruction after prologue_end
         if (needsEnterCall && isInstruction) {
             output.push(`\ti32.const\t${frameAllocSize}`)
+            output.push(`\ti32.const\t${updatedGlobalSp ? 1 : 0}`)
             output.push('\tcall\tJS_notify_enter')
             needsEnterCall = false
             enteredCurrentFunc = true

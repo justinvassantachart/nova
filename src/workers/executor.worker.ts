@@ -56,11 +56,13 @@ self.onmessage = async (e) => {
             _ZSt28__throw_bad_array_new_lengthv: () => { throw new Error("Bad array length"); },
 
             // Hardware tells us exactly when a frame is pushed/popped!
-            JS_notify_enter: (frameSize: number) => {
+            JS_notify_enter: (frameSize: number, updated: number) => {
                 if (!debugMode) return
                 const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                console.log(`[executor] ENTER: depth=${callStack.length} sp=0x${sp.toString(16)} frameSize=${frameSize}`)
-                callStack.push({ id: nextCallId++, func: 'unknown', sp, frameSize })
+                // If it's a leaf function, the global pointer wasn't updated, so we subtract the size to get the true frame base
+                const trueSp = updated ? sp : sp - frameSize
+                console.log(`[executor] ENTER: depth=${callStack.length} sp=0x${trueSp.toString(16)} (global=0x${sp.toString(16)}, updated=${updated}) frameSize=${frameSize}`)
+                callStack.push({ id: nextCallId++, func: 'unknown', sp: trueSp, frameSize })
             },
             JS_notify_exit: () => {
                 if (!debugMode) return

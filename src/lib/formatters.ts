@@ -71,10 +71,10 @@ export const StdVectorFormatter: TypeFormatter = {
     // Matches std::vector
     match: (type) => type.replace(/\s+/g, '').includes('vector<'),
     format: (ctx) => {
-        const { view, address, name, typeName, size, getTypeSize, tagHeap } = ctx
+        const { view, address, name, typeName, size, getTypeSize, tagHeap, readVar } = ctx
 
         // Extract the inner type T from std::vector<T>
-        const match = typeName.match(/<([^,]+)/)
+        const match = typeName.match(/<([^>]+)/)
         const elementType = match ? match[1].trim() : 'unknown'
         const elementSize = getTypeSize(elementType) || 4
 
@@ -87,20 +87,31 @@ export const StdVectorFormatter: TypeFormatter = {
         const length = begin === 0 || elementSize === 0 ? 0 : (end - begin) / elementSize
         const capacity = begin === 0 || elementSize === 0 ? 0 : (cap - begin) / elementSize
 
-        // Instruct the Heap engine to format the vector's memory block as an Array
-        if (begin > 0) tagHeap(begin, `${elementType}[]`)
+        // Read elements inline into the stack frame
+        const members: MemoryValue[] = []
+        if (begin > 0 && length > 0 && length < 1000) {
+            // Tag as internal so it doesn't show up as a separate standalone heap box
+            tagHeap(begin, `std::vector::data`)
 
-        // Render as a true struct with _M_begin, _M_end, _M_cap for precise arrow placement
+            const count = Math.min(length, 50)
+            for (let i = 0; i < count; i++) {
+                const elAddr = begin + i * elementSize
+                if (ctx.depth < 10) {
+                    const elVal = readVar(`[${i}]`, elementType, elementSize, elAddr, ctx.depth + 1)
+                    if (elVal) members.push(elVal)
+                }
+            }
+            if (length > 50) {
+                members.push({ name: '...', type: '', address: 0, value: `(+${length - 50} more)`, rawValue: 0, size: 0, isPointer: false })
+            }
+        }
+
         return {
             name, type: `std::vector<${elementType}>`, address,
             value: `size=${length} cap=${capacity}`, rawValue: begin, size,
             isPointer: false,
             isStruct: true,
-            members: [
-                { name: '_M_begin', type: `${elementType}*`, address: address, value: begin === 0 ? 'nullptr' : `0x${begin.toString(16).padStart(6, '0')}`, rawValue: begin, size: 4, isPointer: begin > 0, pointsTo: begin > 0 ? begin : undefined, pointeeType: `${elementType}[]` },
-                { name: '_M_end', type: `${elementType}*`, address: address + 4, value: end === 0 ? 'nullptr' : `0x${end.toString(16).padStart(6, '0')}`, rawValue: end, size: 4, isPointer: false },
-                { name: '_M_cap', type: `${elementType}*`, address: address + 8, value: cap === 0 ? 'nullptr' : `0x${cap.toString(16).padStart(6, '0')}`, rawValue: cap, size: 4, isPointer: false },
-            ],
+            members,
         }
     }
 }

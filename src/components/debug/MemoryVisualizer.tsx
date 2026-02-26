@@ -88,37 +88,53 @@ function countRows(vars: MemoryValue[]): number {
 }
 
 function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
+    const stackNodes = nodes.filter(n => n.type === 'stackFrame')
+    const heapNodes = nodes.filter(n => n.type === 'heapNode')
+
+    // 1. Manually stack the frames perfectly in a vertical column at X = 0
+    let currentY = 0
+    stackNodes.forEach(node => {
+        const vars = node.data.variables as MemoryValue[];
+        const rows = countRows(vars);
+        const height = Math.max(60, rows * 28 + 40);
+        node.position = { x: 0, y: currentY }
+        currentY += height + 30
+    })
+
+    // 2. Feed only the Heap nodes to dagre so it builds tree-like structures to the right
     const g = new dagre.graphlib.Graph()
     g.setDefaultEdgeLabel(() => ({}))
     g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 120 })
 
-    nodes.forEach(node => {
-        const vars = node.type === 'stackFrame' ? (node.data.variables as MemoryValue[]) : (node.data.members as MemoryValue[]);
+    heapNodes.forEach(node => {
+        const vars = node.data.members as MemoryValue[];
         const rows = countRows(vars);
-        g.setNode(node.id, { width: 260, height: Math.max(60, rows * 28 + 40) })
+        g.setNode(node.id, { width: 220, height: Math.max(60, rows * 28 + 40) })
     })
 
-    edges.forEach(edge => g.setEdge(edge.source, edge.target))
+    edges.forEach(edge => {
+        if (edge.source.startsWith('heap-') && edge.target.startsWith('heap-')) {
+            g.setEdge(edge.source, edge.target)
+        }
+    })
+
     dagre.layout(g)
 
-    return nodes.map((node) => {
-        const pos = g.node(node.id)
-        return { ...node, position: { x: pos.x - 130, y: pos.y - (pos.height / 2) } }
+    // 3. Shift the heap layouts past the 260px stack frame column width + padding
+    heapNodes.forEach((node) => {
+        const pos = g.node(node.id) || { x: 0, y: 0, width: 220, height: 60 }
+        node.position = { x: pos.x + 360, y: pos.y - (pos.height / 2) }
     })
+
+    return [...stackNodes, ...heapNodes]
 }
 
+/** Find the x-coordinate boundary between the fixed stack column and the start of the heap nodes */
 function findSeparatorX(nodes: Node[]): number | null {
-    let maxStackX = -Infinity
-    let minHeapX = Infinity
-    for (const node of nodes) {
-        if (node.type === 'stackFrame') {
-            maxStackX = Math.max(maxStackX, (node.position?.x ?? 0) + 260)
-        } else if (node.type === 'heapNode') {
-            minHeapX = Math.min(minHeapX, node.position?.x ?? 0)
-        }
-    }
-    if (maxStackX === -Infinity || minHeapX === Infinity) return null
-    return (maxStackX + minHeapX) / 2
+    const hasStack = nodes.some(n => n.type === 'stackFrame')
+    const hasHeap = nodes.some(n => n.type === 'heapNode')
+    if (hasStack && hasHeap) return 300
+    return null
 }
 
 /** Viewport-aware separator that stays aligned with the ReactFlow coordinate system */
@@ -189,12 +205,7 @@ export function MemoryVisualizer() {
                 data: { id: frameData.id, label: `${frameData.funcName}()`, isActive: i === 0, variables: frameData.variables },
             })
 
-            if (i > 0) {
-                rawEdges.push({
-                    id: `stack-order-${i}`, source: reversedFrames[i - 1].id, target: frameData.id,
-                    type: 'straight', style: { stroke: 'transparent', strokeWidth: 0 },
-                })
-            }
+
 
             const extractEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string) => {
                 for (const v of vars) {
@@ -290,11 +301,6 @@ export function MemoryVisualizer() {
                 minZoom={0.2}
                 maxZoom={2}
                 proOptions={{ hideAttribution: true }}
-                panOnDrag={false}
-                panOnScroll={false}
-                zoomOnScroll={false}
-                zoomOnPinch={false}
-                zoomOnDoubleClick={false}
             >
                 <Background gap={16} size={0.5} color="#30363d" />
                 <Panel position="top-left" className="!m-0 !p-0">
