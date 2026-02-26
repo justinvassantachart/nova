@@ -1,4 +1,4 @@
-import { Play, Square, Loader2, Bug, StepForward } from 'lucide-react'
+import { Play, Square, Loader2, Bug, StepForward, SkipBack } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -13,7 +13,7 @@ import { execute, stop, debugStep, debugStop } from '@/engine/executor'
 export function Toolbar() {
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
-    const { debugMode, currentLine } = useDebugStore()
+    const { debugMode, currentLine, stepHistory, stepIndex, stepBack, stepForward } = useDebugStore()
     const compilerReady = cacheState === 'ready'
 
     const handleRun = async () => {
@@ -103,7 +103,17 @@ export function Toolbar() {
             {/* Debug controls when paused */}
             {debugMode === 'paused' && (
                 <>
-                    <Button size="sm" onClick={debugStep} className="gap-1 bg-blue-600 hover:bg-blue-500 text-white">
+                    <Button size="sm" onClick={stepBack} disabled={stepHistory.length === 0 || stepIndex === 0}
+                        className="gap-1 bg-zinc-700 hover:bg-zinc-600 text-white">
+                        <SkipBack className="h-3.5 w-3.5" /> Back
+                    </Button>
+                    <Button size="sm" onClick={() => {
+                        if (stepIndex >= 0 && stepIndex < stepHistory.length - 1) {
+                            stepForward()
+                        } else {
+                            debugStep()
+                        }
+                    }} className="gap-1 bg-blue-600 hover:bg-blue-500 text-white">
                         <StepForward className="h-3.5 w-3.5" /> Step
                     </Button>
                     <Button size="sm" variant="destructive" onClick={debugStop} className="gap-1">

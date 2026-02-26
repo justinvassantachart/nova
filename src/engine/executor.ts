@@ -30,6 +30,8 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
         arr[0] = 3 // 3 = Running
         useDebugStore.getState().setDebugMode('running')
 
+        let lastStepId = -1
+
         // Safari-safe polling loop: reads SAB state via requestAnimationFrame
         const pollDebug = () => {
             if (!debugSab || !memorySab) return
@@ -58,7 +60,8 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                 const line = mapEntry ? mapEntry.line : -1
                 const func = mapEntry ? mapEntry.func : 'unknown'
 
-                if (store.currentLine !== line || store.debugMode !== 'paused') {
+                if (lastStepId !== stepId || store.debugMode !== 'paused') {
+                    lastStepId = stepId
                     // Safari-safe: Use ArrayBuffer copy, NOT SharedArrayBuffer.slice()
                     const memCopy = new ArrayBuffer(memorySab.byteLength)
                     new Uint8Array(memCopy).set(new Uint8Array(memorySab))
@@ -91,6 +94,16 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     store.setCurrentFunc(func)
                     store.setStackPointer(framesData.length > 0 ? framesData[framesData.length - 1].sp : 0)
                     store.setDebugMode('paused')
+
+                    // Save step snapshot for back/forward debugging
+                    store.pushStep({
+                        currentLine: line,
+                        currentFunc: func,
+                        callStack: newCallStack,
+                        memorySnapshot: snapshot,
+                        knownHeapTypes: nextKnownTypes,
+                        stackPointer: framesData.length > 0 ? framesData[framesData.length - 1].sp : 0,
+                    })
                 }
             }
             debugRafId = requestAnimationFrame(pollDebug)

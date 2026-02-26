@@ -1,6 +1,7 @@
 // ── Debug Store ────────────────────────────────────────────────────
 // Zustand store for debugger state: DWARF data, pause/step control,
-// breakpoints, and current execution state.
+// breakpoints, current execution state, and step history for
+// back/forward debugging.
 
 import { create } from 'zustand'
 import type { DwarfInfo } from '@/engine/dwarf-types'
@@ -10,6 +11,16 @@ import type { MemorySnapshot } from '@/lib/memory-reader'
 export type DebugMode = 'idle' | 'compiling' | 'running' | 'paused'
 
 export interface StackFrame { id: string; func: string; line: number; sp: number; frameSize: number }
+
+/** Snapshot of one debug step — enough to fully restore the UI */
+export interface DebugStepEntry {
+    currentLine: number | null
+    currentFunc: string | null
+    callStack: StackFrame[]
+    memorySnapshot: MemorySnapshot | null
+    knownHeapTypes: Record<number, string>
+    stackPointer: number
+}
 
 export interface DebugState {
     /** Parsed DWARF debug info from the last compilation */
@@ -54,6 +65,12 @@ export interface DebugState {
     /** Known heap pointer→type map persisted across debug steps */
     knownHeapTypes: Record<number, string>
 
+    /** Step history for back/forward debugging */
+    stepHistory: DebugStepEntry[]
+
+    /** Current position in step history (-1 = live / at latest step) */
+    stepIndex: number
+
     /** Actions */
     setDwarfInfo: (info: DwarfInfo) => void
     setDebugMode: (mode: DebugMode) => void
@@ -69,10 +86,13 @@ export interface DebugState {
     setHeapPointers: (ptrs: { countPtr: number; allocsPtr: number }) => void
     setMemorySnapshot: (snapshot: MemorySnapshot | null) => void
     setKnownHeapTypes: (types: Record<number, string>) => void
+    pushStep: (entry: DebugStepEntry) => void
+    stepBack: () => void
+    stepForward: () => void
     reset: () => void
 }
 
-export const useDebugStore = create<DebugState>((set) => ({
+export const useDebugStore = create<DebugState>((set, get) => ({
     dwarfInfo: EMPTY_DWARF,
     debugMode: 'idle',
     currentLine: null,
@@ -87,6 +107,8 @@ export const useDebugStore = create<DebugState>((set) => ({
     heapPointers: { countPtr: 0, allocsPtr: 0 },
     memorySnapshot: null,
     knownHeapTypes: {},
+    stepHistory: [],
+    stepIndex: -1,
 
     setDwarfInfo: (info) => set({ dwarfInfo: info }),
     setDebugMode: (mode) => set({ debugMode: mode }),
@@ -111,6 +133,61 @@ export const useDebugStore = create<DebugState>((set) => ({
     setMemorySnapshot: (snapshot) => set({ memorySnapshot: snapshot }),
     setKnownHeapTypes: (types) => set({ knownHeapTypes: types }),
 
+    pushStep: (entry) => {
+        const s = get()
+        // If we stepped back and are now getting a new live step,
+        // truncate forward history (undo/redo semantics)
+        const history = s.stepIndex >= 0
+            ? s.stepHistory.slice(0, s.stepIndex + 1)
+            : [...s.stepHistory]
+        history.push(entry)
+        set({ stepHistory: history, stepIndex: -1 })
+    },
+
+    stepBack: () => {
+        const s = get()
+        if (s.stepHistory.length < 2 && s.stepIndex < 0) return
+        if (s.stepHistory.length === 0) return
+        console.log(s.stepHistory)
+        console.log(s.stepIndex)
+        // If at live edge (-1), the last entry IS the current state,
+        // so go to second-to-last to actually show a different step
+        const newIndex = s.stepIndex < 0
+            ? s.stepHistory.length - 2
+            : Math.max(0, s.stepIndex - 1)
+        if (newIndex < 0) return
+        const entry = s.stepHistory[newIndex]
+        set({
+            stepIndex: newIndex,
+            currentLine: entry.currentLine,
+            currentFunc: entry.currentFunc,
+            callStack: entry.callStack,
+            memorySnapshot: entry.memorySnapshot,
+            knownHeapTypes: entry.knownHeapTypes,
+            stackPointer: entry.stackPointer,
+        })
+    },
+
+    stepForward: () => {
+        const s = get()
+        if (s.stepIndex < 0) return // Already at live edge
+        const newIndex = s.stepIndex + 1
+        const isLiveEdge = newIndex >= s.stepHistory.length - 1
+        const entry = s.stepHistory[isLiveEdge ? s.stepHistory.length - 1 : newIndex]
+
+        if (!entry) return
+
+        set({
+            stepIndex: isLiveEdge ? -1 : newIndex,
+            currentLine: entry.currentLine,
+            currentFunc: entry.currentFunc,
+            callStack: entry.callStack,
+            memorySnapshot: entry.memorySnapshot,
+            knownHeapTypes: entry.knownHeapTypes,
+            stackPointer: entry.stackPointer,
+        })
+    },
+
     reset: () => set({
         debugMode: 'idle',
         currentLine: null,
@@ -124,5 +201,7 @@ export const useDebugStore = create<DebugState>((set) => ({
         heapPointers: { countPtr: 0, allocsPtr: 0 },
         memorySnapshot: null,
         knownHeapTypes: {},
+        stepHistory: [],
+        stepIndex: -1,
     }),
 }))
