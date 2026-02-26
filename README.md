@@ -1,73 +1,58 @@
-# React + TypeScript + Vite
+# Nova
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based C++ IDE with in-browser compilation, step-through debugging, and live memory visualization — no installs required.
 
-Currently, two official plugins are available:
+## Demo
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+<!-- Add a screen recording / GIF of the full workflow here -->
+<!-- ![Demo video](./assets/demo.mp4) -->
 
-## React Compiler
+<!-- Add screenshots below -->
+<!-- ![Editor view](./assets/editor.png) -->
+<!-- ![Memory visualizer](./assets/memory.png) -->
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+- **Monaco code editor** with C++ syntax highlighting and autocomplete
+- **In-browser compilation** via Clang compiled to WebAssembly (YoWasp)
+- **Step-through debugger** with breakpoints, step-in/over/out, and full execution history
+- **Live memory visualizer** — interactive graph of stack frames, heap allocations, and pointer relationships
+- **Integrated terminal** for program I/O
+- **Canvas output** for graphics programs
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Architecture
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+Source code → Clang (WASM) → Assembly → Instrumentation → WASM binary
+                                                            ↓
+                                          SharedArrayBuffer debugger
+                                                            ↓
+                                           DWARF line maps + variable info
+                                                            ↓
+                                              Memory snapshots → Visualizer
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Getting Started
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| UI | React, Tailwind CSS, Radix UI |
+| Editor | Monaco Editor |
+| Compiler | YoWasp Clang (WebAssembly) |
+| Debugger | Custom ASM instrumentation + SharedArrayBuffer |
+| Visualizer | React Flow (xyflow) + dagre layout |
+| State | Zustand |
+| Terminal | xterm.js |
+
+## License
+
+MIT
