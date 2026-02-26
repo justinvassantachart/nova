@@ -130,7 +130,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     resolve()
                     break
                 case 'ERROR':
-                    term?.writeln(`\x1b[1;31m✗ Runtime error: ${msg.data.message}\x1b[0m`)
+                    term?.writeln(`\x1b[1;31mRuntime error: ${msg.data.message}\x1b[0m`)
                     useExecutionStore.getState().setIsRunning(false)
                     if (debugMode) useDebugStore.getState().setDebugMode('idle')
                     resolve()
@@ -138,7 +138,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
             }
         }
         executorWorker!.onerror = (err) => {
-            term?.writeln(`\x1b[1;31m✗ Worker error: ${err.message}\x1b[0m`)
+            term?.writeln(`\x1b[1;31mWorker error: ${err.message}\x1b[0m`)
             useExecutionStore.getState().setIsRunning(false)
             if (debugMode) useDebugStore.getState().setDebugMode('idle')
             resolve()

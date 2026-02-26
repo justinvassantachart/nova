@@ -17,7 +17,7 @@ export function RightPanel() {
                         }`}
                     onClick={() => setActiveTab('canvas')}
                 >
-                    🎮 Game Screen
+                    Canvas
                 </button>
                 <button
                     className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'memory'
@@ -26,7 +26,7 @@ export function RightPanel() {
                         }`}
                     onClick={() => setActiveTab('memory')}
                 >
-                    🧠 Memory
+                    Memory
                 </button>
             </div>
 

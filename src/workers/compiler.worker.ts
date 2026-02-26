@@ -2,14 +2,35 @@
 declare const self: DedicatedWorkerGlobalScope
 
 import { commands, Exit } from '@yowasp/clang'
-import { instrumentAssemblyDetailed } from '@/engine/asm-interceptor'
 
 const clangpp = commands['clang++']
 
 // Notify main thread that the WASM is loaded (import succeeded)
 self.postMessage({ type: 'PRELOAD_DONE' })
 
-// Helper: insert a file into a nested tree structure
+// ── Message Protocol ───────────────────────────────────────────────
+//
+// COMPILE      — Release mode: single-pass .cpp → .wasm (unchanged)
+// COMPILE_ONE  — Debug mode:   compile one .cpp → .s assembly text
+// LINK_ASM     — Debug mode:   link pre-instrumented .s files → .wasm
+//
+// The debug pipeline is orchestrated by the main thread (compiler.ts),
+// which fans out COMPILE_ONE messages across a pool of workers, then
+// sends LINK_ASM to one worker for the final link step.
+
+// ── Shared Constants ───────────────────────────────────────────────
+
+const BASE_INCLUDES = [
+    '-I/workspace/',
+    '-I/sysroot/',
+    '-isystem', '/sysroot/include/c++/v1',
+    '-isystem', '/sysroot/include',
+    '-fno-exceptions',
+    '-fno-rtti',
+]
+
+// ── Virtual Filesystem Helpers ─────────────────────────────────────
+
 function insertIntoTree(tree: Record<string, unknown>, path: string, data: Uint8Array) {
     const parts = (path.startsWith('/') ? path.slice(1) : path).split('/')
     let node: Record<string, unknown> = tree
@@ -20,7 +41,6 @@ function insertIntoTree(tree: Record<string, unknown>, path: string, data: Uint8
     node[parts[parts.length - 1]] = data
 }
 
-// Traverse a nested tree to get a node by path
 function getTreeNode(tree: Record<string, unknown>, path: string): unknown {
     const parts = (path.startsWith('/') ? path.slice(1) : path).split('/')
     let node: unknown = tree
@@ -31,7 +51,6 @@ function getTreeNode(tree: Record<string, unknown>, path: string): unknown {
     return node
 }
 
-// Recursively search the tree for a file with the given name
 function findFileInTree(tree: Record<string, unknown>, filename: string): unknown {
     for (const [key, value] of Object.entries(tree)) {
         if (key === filename && isBufferLike(value)) return value
@@ -43,199 +62,196 @@ function findFileInTree(tree: Record<string, unknown>, filename: string): unknow
     return undefined
 }
 
-// Duck-type check for ArrayBuffer views (handles cross-realm typed arrays)
 function isBufferLike(value: unknown): boolean {
     if (!value || typeof value !== 'object') return false
     return ArrayBuffer.isView(value) || value instanceof ArrayBuffer
         || (typeof (value as any).byteLength === 'number' && typeof (value as any).buffer === 'object') // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
-self.onmessage = async (e) => {
-    if (e.data.type === 'PRELOAD') return // Already loaded via static import
+/** Build the full virtual filesystem tree from workspace + sysroot files. */
+function buildFileTree(files: Record<string, string>, sysrootFiles: Record<string, string>): Record<string, unknown> {
+    const tree: Record<string, unknown> = {}
+    const enc = new TextEncoder()
+    for (const [path, content] of Object.entries(files)) {
+        insertIntoTree(tree, path, enc.encode(content))
+    }
+    for (const [path, content] of Object.entries(sysrootFiles)) {
+        insertIntoTree(tree, path, enc.encode(content))
+    }
+    return tree
+}
 
-    if (e.data.type !== 'COMPILE') return
-    const files: Record<string, string> = e.data.files
-    const sysrootFiles: Record<string, string> = e.data.sysrootFiles || {}
-    const isDebug = e.data.debugMode === true
+/** Extract assembly text from a tree node (may be String or Uint8Array). */
+function extractAssemblyText(rawData: unknown): string {
+    if (typeof rawData === 'string') return rawData
+    if (rawData instanceof Uint8Array) return new TextDecoder().decode(rawData)
+    if (isBufferLike(rawData)) {
+        const bytes = new Uint8Array(
+            (rawData as any).buffer || rawData, // eslint-disable-line @typescript-eslint/no-explicit-any
+            (rawData as any).byteOffset || 0,   // eslint-disable-line @typescript-eslint/no-explicit-any
+            (rawData as any).byteLength,         // eslint-disable-line @typescript-eslint/no-explicit-any
+        )
+        return new TextDecoder().decode(bytes)
+    }
+    return String(rawData)
+}
+
+// ── Message Handlers ───────────────────────────────────────────────
+
+self.onmessage = async (e) => {
+    if (e.data.type === 'PRELOAD') return
+
+    switch (e.data.type) {
+        case 'COMPILE': return handleCompile(e.data)
+        case 'COMPILE_ONE': return handleCompileOne(e.data)
+        case 'LINK_ASM': return handleLinkAsm(e.data)
+    }
+}
+
+/**
+ * COMPILE — Release mode: single-pass .cpp → .wasm
+ * Unchanged from the original implementation.
+ */
+async function handleCompile(data: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const files: Record<string, string> = data.files
+    const sysrootFiles: Record<string, string> = data.sysrootFiles || {}
+    const decoder = new TextDecoder()
 
     try {
-        // Build input tree
-        let tree: Record<string, unknown> = {}
-        const enc = new TextEncoder()
-        const decoder = new TextDecoder()
-
-        // Workspace + custom sysroot files (nova.h, memory_tracker.cpp)
-        for (const [path, content] of Object.entries(files)) {
-            insertIntoTree(tree, path, enc.encode(content))
-        }
-
-        // Standard library sysroot headers
-        for (const [path, content] of Object.entries(sysrootFiles)) {
-            insertIntoTree(tree, path, enc.encode(content))
-        }
-
-        // Collect .cpp sources (exclude sysroot — it's headers + memory_tracker)
+        let tree = buildFileTree(files, sysrootFiles)
         const sources = Object.keys(files).filter(
             (f) => f.endsWith('.cpp') && !f.includes('sysroot/'),
         )
 
-        const baseIncludes = [
-            '-I/workspace/',
-            '-I/sysroot/',
-            '-isystem', '/sysroot/include/c++/v1',
-            '-isystem', '/sysroot/include',
-            '-fno-exceptions', // Strips exception unwinding from WASM
-            '-fno-rtti',       // Strips runtime type info overhead
+        const args = [
+            ...sources,
+            '/sysroot/memory_tracker.cpp',
+            ...BASE_INCLUDES,
+            '-std=c++20', '-O2',
+            '-Wl,--allow-undefined',
+            '-Wl,--wrap=malloc',
+            '-Wl,--wrap=free',
+            '-Wl,--export=__nova_allocs',
+            '-Wl,--export=__nova_alloc_count',
+            '-target', 'wasm32-wasip1',
+            '-o', '/workspace/program.wasm',
         ]
 
-        let finalWasmBytes: Uint8Array | undefined
-        let globalStepMap: Record<number, { line: number; func: string }> = {}
+        tree = await clangpp(args, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
+            },
+        }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
-        if (isDebug) {
-            // ════════════════════════════════════════════
-            // DEBUG PIPELINE: C++ → .s → Intercept → .wasm
-            // ════════════════════════════════════════════
-            const asmFiles: string[] = []
-
-            // STAGE 1: Compile each C++ source to WebAssembly Assembly (.s)
-            for (const src of sources) {
-                const asmName = src.replace('.cpp', '.s')
-                asmFiles.push(asmName)
-
-                self.postMessage({ type: 'COMPILE_PROGRESS', message: `Generating assembly for ${src}…` })
-
-                const compileArgs = [
-                    src, ...baseIncludes,
-                    '-std=c++20',
-                    '-g', '-gdwarf-4', '-O0',
-                    '-S',
-                    '-target', 'wasm32-wasip1',
-                    '-o', asmName,
-                ]
-
-                tree = await clangpp(compileArgs, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
-                    stderr: (bytes: Uint8Array | null) => {
-                        if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
-                    },
-                }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
-            }
-
-            // STAGE 2: Instrument the assembly with JS_debug_step calls
-            // NOTE: @yowasp/clang returns text output files (.s) as plain
-            // JavaScript strings, NOT Uint8Array. Handle both types.
-            self.postMessage({ type: 'COMPILE_PROGRESS', message: '🔍 Instrumenting assembly…' })
-
-            let currentStepId = 1
-
-            for (const asmName of asmFiles) {
-                // Look up the .s file in the tree (may be String or Uint8Array)
-                let rawData = getTreeNode(tree, asmName)
-
-                // Fallback: search the tree recursively
-                if (rawData === undefined || rawData === null) {
-                    const basename = asmName.split('/').pop()!
-                    rawData = findFileInTree(tree, basename)
-                }
-
-                if (rawData === undefined || rawData === null) {
-                    self.postMessage({ type: 'COMPILE_PROGRESS', message: `⚠ Could not find assembly file: ${asmName}, skipping instrumentation` })
-                    continue
-                }
-
-                // Convert to string: @yowasp/clang may return String or Uint8Array
-                let rawAsm: string
-                if (typeof rawData === 'string') {
-                    rawAsm = rawData
-                } else if (rawData instanceof Uint8Array) {
-                    rawAsm = decoder.decode(rawData)
-                } else if (isBufferLike(rawData)) {
-                    const bytes = new Uint8Array((rawData as any).buffer || rawData, (rawData as any).byteOffset || 0, (rawData as any).byteLength) // eslint-disable-line @typescript-eslint/no-explicit-any
-                    rawAsm = decoder.decode(bytes)
-                } else {
-                    rawAsm = String(rawData)
-                }
-
-                const result = instrumentAssemblyDetailed(rawAsm, currentStepId)
-                const instrumentedAsm = result.output
-                currentStepId += result.injectedCount
-                Object.assign(globalStepMap, result.stepMap)
-
-                self.postMessage({ type: 'COMPILE_PROGRESS', message: `Injected ${result.injectedCount} debug breakpoints into ${asmName.split('/').pop()}` })
-
-                // Overwrite the .s file in the virtual tree with instrumented version
-                insertIntoTree(tree, asmName, enc.encode(instrumentedAsm))
-            }
-
-            // STAGE 3: Assemble + link the instrumented .s files into .wasm
-            self.postMessage({ type: 'COMPILE_PROGRESS', message: 'Assembling debug binary…' })
-
-            const linkArgs = [
-                ...asmFiles,
-                '/sysroot/memory_tracker.cpp',
-                ...baseIncludes,
-                '-g', '-gdwarf-4', '-O0',
-                '-target', 'wasm32-wasip1',
-                '-Wl,--allow-undefined',
-                '-Wl,--wrap=malloc',
-                '-Wl,--wrap=free',
-                '-Wl,--export=__stack_pointer',
-                '-Wl,--export=__nova_allocs',
-                '-Wl,--export=__nova_alloc_count',
-                '-o', '/workspace/program.wasm',
-            ]
-
-            tree = await clangpp(linkArgs, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
-                stderr: (bytes: Uint8Array | null) => {
-                    if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
-                },
-            }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
-
-            finalWasmBytes = getTreeNode(tree, '/workspace/program.wasm') as Uint8Array | undefined
-
-        } else {
-            // ════════════════════════════════════════════
-            // RELEASE PIPELINE: Standard 1-pass compile
-            // ════════════════════════════════════════════
-            const args = [
-                ...sources,
-                '/sysroot/memory_tracker.cpp',
-                ...baseIncludes,
-                '-std=c++20', '-O2',
-                '-Wl,--allow-undefined',
-                '-Wl,--wrap=malloc',
-                '-Wl,--wrap=free',
-                '-Wl,--export=__nova_allocs',
-                '-Wl,--export=__nova_alloc_count',
-                '-target', 'wasm32-wasip1',
-                '-o', '/workspace/program.wasm',
-            ]
-
-            tree = await clangpp(args, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
-                stderr: (bytes: Uint8Array | null) => {
-                    if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
-                },
-            }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
-
-            finalWasmBytes = getTreeNode(tree, '/workspace/program.wasm') as Uint8Array | undefined
-        }
-
-        if (finalWasmBytes) {
-            const buf = finalWasmBytes.buffer.slice(finalWasmBytes.byteOffset, finalWasmBytes.byteOffset + finalWasmBytes.byteLength)
-            self.postMessage({
-                type: 'COMPILE_DONE',
-                wasmBinary: buf,
-                stepMap: isDebug ? globalStepMap : undefined,
-            }, [buf])
+        const wasmBytes = getTreeNode(tree, '/workspace/program.wasm') as Uint8Array | undefined
+        if (wasmBytes) {
+            const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength)
+            self.postMessage({ type: 'COMPILE_DONE', wasmBinary: buf }, [buf])
         } else {
             self.postMessage({ type: 'COMPILE_ERROR', errors: ['No output produced.'] })
         }
     } catch (err: unknown) {
-        if (err instanceof Exit) {
-            self.postMessage({ type: 'COMPILE_ERROR', errors: [err.message] })
-        } else {
-            const msg = err instanceof Error ? err.message : String(err)
-            self.postMessage({ type: 'COMPILE_ERROR', errors: [msg] })
+        self.postMessage({ type: 'COMPILE_ERROR', errors: [err instanceof Exit ? err.message : (err instanceof Error ? err.message : String(err))] })
+    }
+}
+
+/**
+ * COMPILE_ONE — Debug mode: compile a single .cpp → .s assembly text.
+ * Called in parallel across a pool of workers.
+ */
+async function handleCompileOne(data: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const { src, files, sysrootFiles, requestId } = data
+    const decoder = new TextDecoder()
+
+    try {
+        let tree = buildFileTree(files, sysrootFiles)
+        const asmName = src.replace('.cpp', '.s')
+
+        const args = [
+            src, ...BASE_INCLUDES,
+            '-std=c++20',
+            '-g', '-gdwarf-4', '-O0',
+            '-S',
+            '-target', 'wasm32-wasip1',
+            '-o', asmName,
+        ]
+
+        tree = await clangpp(args, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
+            },
+        }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
+
+        // Extract the .s file from the output tree
+        let rawData = getTreeNode(tree, asmName)
+        if (rawData === undefined || rawData === null) {
+            rawData = findFileInTree(tree, asmName.split('/').pop()!)
         }
+
+        if (rawData === undefined || rawData === null) {
+            self.postMessage({ type: 'COMPILE_ONE_ERROR', requestId, errors: [`No assembly output for ${src}`] })
+            return
+        }
+
+        const assembly = extractAssemblyText(rawData)
+        self.postMessage({ type: 'COMPILE_ONE_DONE', requestId, src, assembly })
+    } catch (err: unknown) {
+        self.postMessage({ type: 'COMPILE_ONE_ERROR', requestId, errors: [err instanceof Exit ? err.message : (err instanceof Error ? err.message : String(err))] })
+    }
+}
+
+/**
+ * LINK_ASM — Debug mode: link pre-instrumented .s files → .wasm.
+ * Called once after all files are compiled and instrumented.
+ */
+async function handleLinkAsm(data: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const { asmEntries, sysrootFiles, requestId } = data
+    // asmEntries: Array<{ name: string, assembly: string }>
+    const decoder = new TextDecoder()
+    const enc = new TextEncoder()
+
+    try {
+        // Build a tree with just sysroot + instrumented assembly files
+        let tree: Record<string, unknown> = {}
+        for (const [path, content] of Object.entries(sysrootFiles as Record<string, string>)) {
+            insertIntoTree(tree, path, enc.encode(content))
+        }
+        const asmNames: string[] = []
+        for (const entry of asmEntries as Array<{ name: string; assembly: string }>) {
+            insertIntoTree(tree, entry.name, enc.encode(entry.assembly))
+            asmNames.push(entry.name)
+        }
+
+        const linkArgs = [
+            ...asmNames,
+            '/sysroot/memory_tracker.cpp',
+            ...BASE_INCLUDES,
+            '-g', '-gdwarf-4', '-O0',
+            '-target', 'wasm32-wasip1',
+            '-Wl,--allow-undefined',
+            '-Wl,--wrap=malloc',
+            '-Wl,--wrap=free',
+            '-Wl,--export=__stack_pointer',
+            '-Wl,--export=__nova_allocs',
+            '-Wl,--export=__nova_alloc_count',
+            '-o', '/workspace/program.wasm',
+        ]
+
+        tree = await clangpp(linkArgs, tree as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) self.postMessage({ type: 'COMPILE_STDERR', text: decoder.decode(bytes, { stream: true }) })
+            },
+        }) as any // eslint-disable-line @typescript-eslint/no-explicit-any
+
+        const wasmBytes = getTreeNode(tree, '/workspace/program.wasm') as Uint8Array | undefined
+        if (wasmBytes) {
+            const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength)
+            self.postMessage({ type: 'LINK_ASM_DONE', requestId, wasmBinary: buf }, [buf])
+        } else {
+            self.postMessage({ type: 'LINK_ASM_ERROR', requestId, errors: ['No output produced during linking.'] })
+        }
+    } catch (err: unknown) {
+        self.postMessage({ type: 'LINK_ASM_ERROR', requestId, errors: [err instanceof Exit ? err.message : (err instanceof Error ? err.message : String(err))] })
     }
 }
 

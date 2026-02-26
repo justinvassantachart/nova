@@ -21,21 +21,21 @@ export function Toolbar() {
         if (!term) return
         try {
             term.clear()
-            term.writeln('\x1b[1;33m⏳ Compiling…\x1b[0m')
+            term.writeln('\x1b[1;33mCompiling…\x1b[0m')
             setIsCompiling(true)
             const result = await compile(getAllFiles())
             setIsCompiling(false)
             if (!result.success) {
-                term.writeln('\x1b[1;31m✗ Compilation failed:\x1b[0m')
+                term.writeln('\x1b[1;31mCompilation failed:\x1b[0m')
                 result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
                 return
             }
-            term.writeln('\x1b[1;32m✓ Compiled successfully\x1b[0m')
+            term.writeln('\x1b[1;32mCompiled successfully\x1b[0m')
             term.writeln('\x1b[90m─────────────────────────\x1b[0m')
             setIsRunning(true)
             await execute(result.wasmBinary!)
         } catch (err: unknown) {
-            term.writeln(`\x1b[1;31m✗ ${err instanceof Error ? err.message : err}\x1b[0m`)
+            term.writeln(`\x1b[1;31m${err instanceof Error ? err.message : err}\x1b[0m`)
         } finally {
             setIsCompiling(false)
             setIsRunning(false)
@@ -47,26 +47,24 @@ export function Toolbar() {
         if (!term) return
         try {
             term.clear()
-            term.writeln('\x1b[1;35m🐛 Compiling in Debug Mode…\x1b[0m')
+            term.writeln('\x1b[1;35mDebug build starting…\x1b[0m')
             setIsCompiling(true)
 
-            // Pass TRUE to trigger the 3-stage Assembly Intercept pipeline
             const result = await compile(getAllFiles(), true)
             setIsCompiling(false)
 
             if (!result.success) {
-                term.writeln('\x1b[1;31m✗ Compilation failed:\x1b[0m')
+                term.writeln('\x1b[1;31mCompilation failed:\x1b[0m')
                 result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
                 return
             }
-            term.writeln('\x1b[1;32m✓ Debug build ready\x1b[0m')
+            term.writeln('\x1b[1;32mDebug build ready\x1b[0m')
             term.writeln('\x1b[90m─────────────────────────\x1b[0m')
             setIsRunning(true)
 
-            // Execute with debugMode — the WASM already has JS_debug_step calls baked in
             await execute(result.wasmBinary!, true)
         } catch (err: unknown) {
-            term.writeln(`\x1b[1;31m✗ ${err instanceof Error ? err.message : err}\x1b[0m`)
+            term.writeln(`\x1b[1;31m${err instanceof Error ? err.message : err}\x1b[0m`)
         } finally {
             setIsCompiling(false)
             setIsRunning(false)
@@ -77,8 +75,8 @@ export function Toolbar() {
 
     return (
         <div className="flex items-center h-10 px-3 gap-2 border-b bg-card">
-            <span className="font-bold text-sm tracking-wide bg-gradient-to-r from-primary to-purple-400 bg-clip-text text-transparent mr-auto">
-                ✦ NOVA
+            <span className="font-bold text-sm tracking-wide text-foreground mr-auto">
+                NOVA
             </span>
 
             {/* Compiler download progress */}
@@ -93,13 +91,13 @@ export function Toolbar() {
             {/* Debug status */}
             {debugMode === 'paused' && (
                 <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-400">
-                    ⏸ Paused @ line {currentLine}
+                    Paused at line {currentLine}
                 </Badge>
             )}
 
             {/* Status badge */}
             <Badge variant={isCompiling ? 'default' : isRunning ? 'default' : 'secondary'} className="text-xs">
-                {isCompiling ? '⏳ Compiling' : isRunning ? '▶ Running' : '● Ready'}
+                {isCompiling ? 'Compiling' : isRunning ? 'Running' : 'Ready'}
             </Badge>
 
             {/* Debug controls when paused */}

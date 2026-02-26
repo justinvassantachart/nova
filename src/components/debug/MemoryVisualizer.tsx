@@ -188,7 +188,7 @@ export function MemoryVisualizer() {
     const onEdgesChange = useCallback(() => { }, [])
 
     if (debugMode === 'idle') return <div className="flex h-full items-center justify-center text-[#8b949e] font-mono text-xs bg-[#010409]">Click Debug to inspect memory</div>
-    if (debugMode === 'compiling' || debugMode === 'running') return <div className="flex h-full items-center justify-center text-[#8b949e] font-mono text-xs bg-[#010409]">⏳ {debugMode === 'compiling' ? 'Compiling...' : 'Running...'}</div>
+    if (debugMode === 'compiling' || debugMode === 'running') return <div className="flex h-full items-center justify-center text-[#8b949e] font-mono text-xs bg-[#010409]">{debugMode === 'compiling' ? 'Compiling...' : 'Running...'}</div>
 
     return (
         <div className="w-full h-full bg-[#010409]">

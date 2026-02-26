@@ -27,8 +27,8 @@ export function Terminal() {
         term.open(containerRef.current)
         fit.fit()
 
-        term.writeln('\x1b[1;36m✦ Nova Terminal\x1b[0m')
-        term.writeln('\x1b[90mReady — click Run to compile & execute.\x1b[0m')
+        term.writeln('\x1b[1;36mNova Terminal\x1b[0m')
+        term.writeln('\x1b[90mReady\x1b[0m')
         term.writeln('')
 
         termRef.current = term
