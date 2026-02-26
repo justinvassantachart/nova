@@ -1,5 +1,8 @@
 //   Compiler Pool  //
 
+import { getSysrootHash } from './compile-cache'
+import { loadPchFromOPFS, savePchToOPFS } from '@/vfs/opfs-sync'
+
 type ProgressCallback = (message: string) => void
 type StderrCallback = (text: string) => void
 
@@ -172,16 +175,38 @@ export class CompilerPool {
     }
 
     generatePCH(onProgress?: ProgressCallback, onStderr?: StderrCallback): Promise<boolean> {
-        if (this.#pchTask) return this.#pchTask
+        if (this.#pchTask) {
+            // Signal to UI if the user aggressively hit "Debug" during background prep
+            if (!this.#pchBinary) onProgress?.('Waiting for background PCH generation...')
+            return this.#pchTask
+        }
 
         this.#pchTask = (async () => {
             if (this.#pool.length === 0) return false
             const primaryNode = this.#pool[0]
             await primaryNode.ready
 
-            onProgress?.('Generating Precompiled Header (PCH) for standard library...')
-
             try {
+                if (!this.#sysrootFiles) return false
+                const hash = await getSysrootHash(this.#sysrootFiles)
+
+                // 1. Check OPFS persistent cache instantly
+                const cached = await loadPchFromOPFS(hash)
+
+                if (cached) {
+                    onProgress?.('Loaded cached standard library headers.')
+                    this.#pchBinary = cached
+
+                    // The primary worker didn't generate this, so we must manually load it
+                    await this.#loadPchWorker(primaryNode, this.#pchBinary)
+
+                    const broadcastPromises = this.#pool.slice(1).map(w => this.#loadPchWorker(w, this.#pchBinary!))
+                    await Promise.all(broadcastPromises)
+                    return true
+                }
+
+                // 2. Generate on cache miss
+                onProgress?.('Generating Precompiled Header (PCH) for standard library...')
                 const res = await requestWorker<{ pchBinary: ArrayBuffer }>(
                     primaryNode.worker,
                     { type: 'GENERATE_PCH' },
@@ -190,12 +215,17 @@ export class CompilerPool {
                     'GENERATE_PCH_ERROR',
                     onStderr
                 )
+
                 this.#pchBinary = res.pchBinary
                 primaryNode.hasPch = true
+
+                // 3. Save to OPFS for instant load on next refresh (fire-and-forget)
+                savePchToOPFS(hash, this.#pchBinary).catch(e => console.warn(e))
 
                 // Broadcast PCH to remaining scaled workers
                 const broadcastPromises = this.#pool.slice(1).map(w => this.#loadPchWorker(w, this.#pchBinary!))
                 await Promise.all(broadcastPromises)
+
                 return true
             } catch (err: unknown) {
                 if (onStderr) {

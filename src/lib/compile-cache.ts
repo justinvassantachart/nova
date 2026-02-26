@@ -41,16 +41,24 @@ export function clearCache(): void {
 }
 
 /**
+ * Lazily compute and cache the sysroot hash (it never changes per session).
+ * Exposed so other modules (e.g. OPFS PCH cache) can version against it.
+ */
+export async function getSysrootHash(sysrootFiles: Record<string, string>): Promise<string> {
+    if (!sysrootHash) {
+        sysrootHash = await sha256(Object.keys(sysrootFiles).sort().join('\n'))
+    }
+    return sysrootHash
+}
+
+/**
  * Compute a SHA-256 hash for a source file's content combined with
  * the sysroot fingerprint. Two files with identical source + sysroot
  * will always produce identical assembly.
  */
 export async function computeSourceHash(sourceContent: string, sysrootFiles: Record<string, string>): Promise<string> {
-    // Lazily compute and cache the sysroot hash (it never changes per session)
-    if (!sysrootHash) {
-        sysrootHash = await sha256(Object.keys(sysrootFiles).sort().join('\n'))
-    }
-    return sha256(sourceContent + '\0' + sysrootHash)
+    const sHash = await getSysrootHash(sysrootFiles)
+    return sha256(sourceContent + '\0' + sHash)
 }
 
 // ── Internals ──────────────────────────────────────────────────────

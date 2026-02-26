@@ -28,6 +28,9 @@ export function preloadCompiler() {
             isPreloaded = true
             store.setCacheState('ready')
             store.setDownloadProgress(100)
+
+            // Immediately trigger background PCH compiler warmup
+            import('@/engine/compiler').then(m => m.prepareBackgroundPCH())
         } else if (type === 'PRELOAD_PROGRESS') {
             store.setDownloadProgress(e.data.percent)
         }

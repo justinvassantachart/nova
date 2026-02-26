@@ -94,6 +94,29 @@ async function compileRelease(files: Record<string, string>): Promise<CompileRes
 // --- SECURE DEBUG MODE PIPELINE ---
 let debugPool: CompilerPool | null = null
 
+/**
+ * Initializes the compiler pool and pregenerates the PCH in the background
+ * using idle thread cycles before the user even clicks "Debug".
+ */
+export async function prepareBackgroundPCH() {
+    try {
+        if (!isSysrootLoaded()) {
+            await loadSysroot()
+        }
+        const sysrootFiles = getSysrootFiles()
+
+        if (!debugPool) {
+            // Keep pool size to 1 so background compilation uses minimal system resources
+            debugPool = createPool(1, takePreloadedWorker())
+        }
+
+        await debugPool.seedSysroot(sysrootFiles)
+        await debugPool.generatePCH() // Runs silently
+    } catch (err) {
+        console.warn('[compiler] Background PCH preparation failed:', err)
+    }
+}
+
 function takePreloadedWorker(): Worker | undefined {
     if (releaseWorker && activeReleaseRequests.size === 0) {
         const w = releaseWorker

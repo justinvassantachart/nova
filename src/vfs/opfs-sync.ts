@@ -80,3 +80,39 @@ async function walk(dir: FileSystemDirectoryHandle, base: string) {
         }
     }
 }
+
+// ── PCH OPFS Cache ────────────────────────────────────────────────
+
+export async function savePchToOPFS(hash: string, buffer: ArrayBuffer) {
+    try {
+        const root = await navigator.storage.getDirectory()
+        const cacheDir = await root.getDirectoryHandle('.compiler_cache', { create: true })
+
+        // Clean up old PCH files to save space silently
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for await (const name of (cacheDir as any).keys()) {
+            if (name.endsWith('.pch') && name !== `nova_${hash}.pch`) {
+                await cacheDir.removeEntry(name).catch(() => { })
+            }
+        }
+
+        const handle = await cacheDir.getFileHandle(`nova_${hash}.pch`, { create: true })
+        const writable = await handle.createWritable()
+        await writable.write(buffer.slice(0))
+        await writable.close()
+    } catch (err) {
+        console.warn('[OPFS] save PCH failed:', err)
+    }
+}
+
+export async function loadPchFromOPFS(hash: string): Promise<ArrayBuffer | null> {
+    try {
+        const root = await navigator.storage.getDirectory()
+        const cacheDir = await root.getDirectoryHandle('.compiler_cache')
+        const handle = await cacheDir.getFileHandle(`nova_${hash}.pch`)
+        const file = await handle.getFile()
+        return await file.arrayBuffer()
+    } catch {
+        return null // Cache miss
+    }
+}
