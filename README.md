@@ -6,6 +6,7 @@ A browser-based C++ IDE with in-browser compilation, step-through debugging, and
 
 <!-- Add a screen recording / GIF of the full workflow here -->
 <!-- ![Demo video](./assets/demo.mp4) -->
+<iframe width="560" height="315" src="https://www.youtube.com/embed/HFhQspCLCtA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 <!-- Add screenshots below -->
 <!-- ![Editor view](./assets/editor.png) -->
