@@ -9,8 +9,28 @@ export const vol = new Volume()
 // ── Templates ──────────────────────────────────────────────────
 const DEFAULT_MAIN = `#include <iostream>
 
+struct Node {
+    int data;
+    Node* next;
+};
+
 int main() {
-    std::cout << "Hello, Nova!" << std::endl;
+    // Build a linked list: 10 -> 20 -> 30
+    Node* head = new Node{10, nullptr};
+    head->next = new Node{20, nullptr};
+    head->next->next = new Node{30, nullptr};
+
+    // Traverse and print
+    Node* current = head;
+    while (current != nullptr) {
+        std::cout << current->data << " -> ";
+        current = current->next;
+    }
+    std::cout << "null" << std::endl;
+
+    // BUG: only free the head -- leak the rest!
+    delete head;
+
     return 0;
 }
 `
