@@ -6,20 +6,29 @@ A browser-based C++ IDE with in-browser compilation, step-through debugging, and
 
 <!-- Add a screen recording / GIF of the full workflow here -->
 <!-- ![Demo video](./assets/demo.mp4) -->
+- Video Demo
 [![Video Thumbnail](./assets/video_thumbnail.png)](https://www.youtube.com/watch?v=HFhQspCLCtA)
+- Live Demo [https://nova-ide.netlify.app](https://nova-ide.netlify.app)
 
-
-![Memory & heap visualization](./assets/demo_memory-heap.png)
-![Canvas output](./assets/demo_canvas.png)
 
 ## Features
 
 - **Monaco code editor** with C++ syntax highlighting and autocomplete
 - **In-browser compilation** via Clang compiled to WebAssembly (YoWasp)
 - **Step-through debugger** with breakpoints, step-in/over/out, and full execution history
-- **Live memory visualizer** — interactive graph of stack frames, heap allocations, and pointer relationships
+- **Live memory visualizer** - interactive graph of stack frames, heap allocations, and pointer relationships
+![Memory & heap visualization](./assets/demo_memory-heap.png)
 - **Integrated terminal** for program I/O
+- **Multiple Files + Classes** - virtual filesystem is auto-saved locally and files can be included in programs like normal.
+![Classes](./assets/demo_classes.png)
 - **Canvas output** for graphics programs
+![Canvas output](./assets/demo_canvas.png)
+
+## TODO
+
+- [ ] Connect terminal to STDIN
+- [ ] Add intellisense
+- [ ] Flesh out the graphics library
 
 ## Architecture
 
