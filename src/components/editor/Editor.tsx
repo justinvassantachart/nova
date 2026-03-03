@@ -18,6 +18,9 @@ export function Editor() {
     // Breakpoint glyph decorations (separate collection so they don't conflict)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bpDecorationsRef = useRef<any>(null)
+    // Ghost breakpoint decoration (hover preview in gutter)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hoverDecRef = useRef<any>(null)
     // Per-file debounce timers to prevent data loss when switching files
     const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
@@ -27,6 +30,7 @@ export function Editor() {
         if (editor.createDecorationsCollection) {
             decorationsRef.current = editor.createDecorationsCollection([])
             bpDecorationsRef.current = editor.createDecorationsCollection([])
+            hoverDecRef.current = editor.createDecorationsCollection([])
         }
 
         // Detect clicks in the gutter to toggle breakpoints
@@ -39,6 +43,31 @@ export function Editor() {
                 if (line) toggleBreakpoint(line)
             }
         })
+
+        // Ghost breakpoint: show faded dot when hovering gutter on empty lines
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        editor.onMouseMove((e: any) => {
+            if (!hoverDecRef.current) return
+            const isGutter = e.target.type === 2 || e.target.type === 3 ||
+                (monacoInstance && e.target.type === monacoInstance.editor.MouseTargetType.GUTTER_GLYPH_MARGIN)
+
+            if (isGutter && e.target.position) {
+                const line = e.target.position.lineNumber
+                const bps = useDebugStore.getState().breakpoints
+                if (!bps.has(line)) {
+                    hoverDecRef.current.set([{
+                        range: new monacoInstance.Range(line, 1, line, 1),
+                        options: { isWholeLine: false, glyphMarginClassName: 'breakpoint-ghost' },
+                    }])
+                    return
+                }
+            }
+            hoverDecRef.current.set([])
+        })
+
+        editor.onMouseLeave(() => {
+            hoverDecRef.current?.set([])
+        })
     }
 
     // ── Breakpoint visual markers (red dots in gutter) ─────────────
@@ -49,7 +78,7 @@ export function Editor() {
             range: new monaco.Range(line, 1, line, 1),
             options: {
                 isWholeLine: false,
-                glyphMarginClassName: 'bg-destructive rounded-full w-2.5 h-2.5 ml-1.5 mt-1.5 cursor-pointer',
+                glyphMarginClassName: 'breakpoint-dot',
             }
         }))
         bpDecorationsRef.current.set(newDecorations)
@@ -70,7 +99,7 @@ export function Editor() {
                 options: {
                     isWholeLine: true,
                     className: 'debug-line-highlight',
-                    glyphMarginClassName: 'bg-primary rounded-full w-2.5 h-2.5 ml-1.5 mt-1.5 shadow-[0_0_8px_rgba(191,28,230,0.8)] z-10',
+                    glyphMarginClassName: 'debug-paused-dot',
                 },
             }])
             editorRef.current.revealLineInCenter(currentLine)

@@ -73,8 +73,55 @@ body,
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0.4 0 0);
 }
+
 /* Monaco Debugger Highlight */
 .debug-line-highlight {
   background-color: oklch(0.75 0.12 230 / 0.25) !important;
   border-left: 4px solid oklch(0.75 0.12 230) !important;
+}
+
+/* ── Breakpoint dots ───────────────────────────────── */
+.breakpoint-dot {
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--color-destructive);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.breakpoint-dot:hover {
+  transform: scale(1.35);
+  box-shadow: 0 0 8px oklch(0.55 0.2 27 / 0.6);
+}
+
+/* Ghost breakpoint (faded dot on gutter hover) */
+.breakpoint-ghost {
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--color-destructive);
+  opacity: 0.35;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.breakpoint-ghost:hover {
+  opacity: 0.55;
+}
+
+/* Debug paused indicator (purple glow) */
+.debug-paused-dot {
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 8px oklch(0.75 0.12 230 / 0.8);
+  z-index: 10;
 }
