@@ -11,15 +11,6 @@ export function RightPanel() {
             {/* Tab bar */}
             <div className="flex border-b bg-card">
                 <button
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'canvas'
-                        ? 'border-b-2 border-primary text-primary'
-                        : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                    onClick={() => setActiveTab('canvas')}
-                >
-                    Canvas
-                </button>
-                <button
                     className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'memory'
                         ? 'border-b-2 border-primary text-primary'
                         : 'text-muted-foreground hover:text-foreground'
@@ -27,6 +18,15 @@ export function RightPanel() {
                     onClick={() => setActiveTab('memory')}
                 >
                     Memory
+                </button>
+                <button
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'canvas'
+                        ? 'border-b-2 border-primary text-primary'
+                        : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                    onClick={() => setActiveTab('canvas')}
+                >
+                    Canvas
                 </button>
             </div>
 

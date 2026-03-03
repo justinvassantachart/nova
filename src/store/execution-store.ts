@@ -20,7 +20,7 @@ interface ExecutionState {
 export const useExecutionStore = create<ExecutionState>((set) => ({
     isCompiling: false,
     isRunning: false,
-    rightTab: 'canvas',
+    rightTab: 'memory',
     drawQueue: [],
 
     setIsCompiling: (v) => set({ isCompiling: v }),
