@@ -6,11 +6,11 @@ A browser-based C++ IDE with in-browser compilation, step-through debugging, and
 
 <!-- Add a screen recording / GIF of the full workflow here -->
 <!-- ![Demo video](./assets/demo.mp4) -->
-<iframe width="560" height="315" src="https://www.youtube.com/embed/HFhQspCLCtA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+[![Video Thumbnail](./assets/video_thumbnail.png)](https://www.youtube.com/watch?v=HFhQspCLCtA)
 
-<!-- Add screenshots below -->
-<!-- ![Editor view](./assets/editor.png) -->
-<!-- ![Memory visualizer](./assets/memory.png) -->
+
+![Memory & heap visualization](./assets/demo_memory-heap.png)
+![Canvas output](./assets/demo_canvas.png)
 
 ## Features
 
@@ -54,6 +54,3 @@ Open [http://localhost:5173](http://localhost:5173).
 | State | Zustand |
 | Terminal | xterm.js |
 
-## License
-
-MIT
