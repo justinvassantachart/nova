@@ -14,7 +14,7 @@ import { DebugControls } from './DebugControls'
 export function Toolbar() {
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
-    const { debugMode, currentLine } = useDebugStore()
+    const { debugMode, currentLine, currentFile } = useDebugStore()
     const compilerReady = cacheState === 'ready'
 
     const handleRun = async () => {
@@ -92,7 +92,7 @@ export function Toolbar() {
             {/* Debug status */}
             {debugMode === 'paused' && (
                 <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-400">
-                    Paused at line {currentLine}
+                    Paused in {currentFile ? currentFile.split('/').pop() : 'unknown'} at line {currentLine}
                 </Badge>
             )}
 

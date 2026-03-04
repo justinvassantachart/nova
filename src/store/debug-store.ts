@@ -16,6 +16,7 @@ export interface StackFrame { id: string; func: string; line: number; sp: number
 export interface DebugStepEntry {
     currentLine: number | null
     currentFunc: string | null
+    currentFile: string | null
     callStack: StackFrame[]
     memorySnapshot: MemorySnapshot | null
     knownHeapTypes: Record<number, string>
@@ -35,11 +36,14 @@ export interface DebugState {
     /** Current function name (from stepMap) */
     currentFunc: string | null
 
-    /** Step ID → (line, func) mapping from the asm-interceptor */
-    stepMap: Record<number, { line: number; func: string }>
+    /** Current file name (from stepMap) */
+    currentFile: string | null
 
-    /** User-set breakpoints (line numbers) */
-    breakpoints: Set<number>
+    /** Step ID → (line, func, file) mapping from the asm-interceptor */
+    stepMap: Record<number, { line: number; func: string; file: string }>
+
+    /** User-set breakpoints (file:line string format) */
+    breakpoints: Set<string>
 
     /** The raw compiled WASM binary (with debug info) */
     wasmBinary: Uint8Array | null
@@ -76,8 +80,9 @@ export interface DebugState {
     setDebugMode: (mode: DebugMode) => void
     setCurrentLine: (line: number | null) => void
     setCurrentFunc: (func: string | null) => void
-    setStepMap: (map: Record<number, { line: number; func: string }>) => void
-    toggleBreakpoint: (line: number) => void
+    setCurrentFile: (file: string | null) => void
+    setStepMap: (map: Record<number, { line: number; func: string; file: string }>) => void
+    toggleBreakpoint: (file: string, line: number) => void
     setWasmBinary: (binary: Uint8Array | null) => void
     setMemoryBuffer: (buf: ArrayBuffer | null) => void
     setStackPointer: (sp: number) => void
@@ -97,6 +102,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
     debugMode: 'idle',
     currentLine: null,
     currentFunc: null,
+    currentFile: null,
     stepMap: {},
     breakpoints: new Set(),
     wasmBinary: null,
@@ -114,13 +120,15 @@ export const useDebugStore = create<DebugState>((set, get) => ({
     setDebugMode: (mode) => set({ debugMode: mode }),
     setCurrentLine: (line) => set({ currentLine: line }),
     setCurrentFunc: (func) => set({ currentFunc: func }),
+    setCurrentFile: (file) => set({ currentFile: file }),
     setStepMap: (map) => set({ stepMap: map }),
 
-    toggleBreakpoint: (line) =>
+    toggleBreakpoint: (file, line) =>
         set((s) => {
             const next = new Set(s.breakpoints)
-            if (next.has(line)) next.delete(line)
-            else next.add(line)
+            const key = `${file}:${line}`
+            if (next.has(key)) next.delete(key)
+            else next.add(key)
             return { breakpoints: next }
         }),
 
@@ -161,6 +169,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
             stepIndex: newIndex,
             currentLine: entry.currentLine,
             currentFunc: entry.currentFunc,
+            currentFile: entry.currentFile,
             callStack: entry.callStack,
             memorySnapshot: entry.memorySnapshot,
             knownHeapTypes: entry.knownHeapTypes,
@@ -181,6 +190,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
             stepIndex: isLiveEdge ? -1 : newIndex,
             currentLine: entry.currentLine,
             currentFunc: entry.currentFunc,
+            currentFile: entry.currentFile,
             callStack: entry.callStack,
             memorySnapshot: entry.memorySnapshot,
             knownHeapTypes: entry.knownHeapTypes,
@@ -192,6 +202,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         debugMode: 'idle',
         currentLine: null,
         currentFunc: null,
+        currentFile: null,
         stepMap: {},
         liveVariables: {},
         wasmBinary: null,

@@ -1,14 +1,14 @@
 import MonacoEditor, { useMonaco } from '@monaco-editor/react'
 import { useEditorStore } from '@/store/editor-store'
 import { useDebugStore } from '@/store/debug-store'
-import { useCallback, useRef, useEffect } from 'react'
-import { writeFile, getProjectId } from '@/vfs/volume'
+import { useCallback, useRef, useEffect, useState } from 'react'
+import { writeFile, getProjectId, fileExists, readFile } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 import { syncBreakpoints } from '@/engine/executor'
 
 export function Editor() {
-    const { activeFile, activeFileContent, setActiveFileContent } = useEditorStore()
-    const { currentLine, debugMode, breakpoints, toggleBreakpoint } = useDebugStore()
+    const { activeFile, activeFileContent, setActiveFileContent, setActiveFile } = useEditorStore()
+    const { currentLine, currentFile, debugMode, breakpoints, toggleBreakpoint } = useDebugStore()
     const monaco = useMonaco()
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,6 +23,26 @@ export function Editor() {
     const hoverDecRef = useRef<any>(null)
     // Per-file debounce timers to prevent data loss when switching files
     const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+    const [mountCount, setMountCount] = useState(0)
+
+    // Auto-switch to paused file gracefully
+    const lastDebugState = useRef({ file: null as string | null, line: null as number | null })
+
+    useEffect(() => {
+        if (debugMode === 'paused' && currentFile && currentLine !== null) {
+            const stepped = lastDebugState.current.file !== currentFile || lastDebugState.current.line !== currentLine
+            if (stepped) {
+                lastDebugState.current = { file: currentFile, line: currentLine }
+                if (currentFile !== useEditorStore.getState().activeFile) {
+                    if (fileExists(currentFile)) {
+                        setActiveFile(currentFile, readFile(currentFile))
+                    }
+                }
+            }
+        } else if (debugMode !== 'paused') {
+            lastDebugState.current = { file: null, line: null }
+        }
+    }, [debugMode, currentFile, currentLine, setActiveFile])
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleMount = (editor: any, monacoInstance: any) => {
@@ -40,7 +60,8 @@ export function Editor() {
             if (e.target.type === 2 || e.target.type === 3 ||
                 (monacoInstance && e.target.type === monacoInstance.editor.MouseTargetType.GUTTER_GLYPH_MARGIN)) {
                 const line = e.target.position?.lineNumber
-                if (line) toggleBreakpoint(line)
+                const file = useEditorStore.getState().activeFile
+                if (line && file) toggleBreakpoint(file, line)
             }
         })
 
@@ -53,8 +74,10 @@ export function Editor() {
 
             if (isGutter && e.target.position) {
                 const line = e.target.position.lineNumber
+                const file = useEditorStore.getState().activeFile
                 const bps = useDebugStore.getState().breakpoints
-                if (!bps.has(line)) {
+                const key = file ? `${file}:${line}` : ''
+                if (key && !bps.has(key)) {
                     hoverDecRef.current.set([{
                         range: new monacoInstance.Range(line, 1, line, 1),
                         options: { isWholeLine: false, glyphMarginClassName: 'breakpoint-ghost' },
@@ -68,24 +91,31 @@ export function Editor() {
         editor.onMouseLeave(() => {
             hoverDecRef.current?.set([])
         })
+
+        setMountCount(c => c + 1)
     }
 
     // ── Breakpoint visual markers (red dots in gutter) ─────────────
     useEffect(() => {
-        if (!editorRef.current || !monaco || !bpDecorationsRef.current) return
+        if (!editorRef.current || !monaco || !bpDecorationsRef.current || !activeFile) return
 
-        const newDecorations = Array.from(breakpoints).map(line => ({
-            range: new monaco.Range(line, 1, line, 1),
-            options: {
-                isWholeLine: false,
-                glyphMarginClassName: 'breakpoint-dot',
-            }
-        }))
+        const newDecorations = Array.from(breakpoints)
+            .filter(bp => bp.startsWith(`${activeFile}:`))
+            .map(bp => {
+                const line = parseInt(bp.substring(bp.lastIndexOf(':') + 1), 10)
+                return {
+                    range: new monaco.Range(line, 1, line, 1),
+                    options: {
+                        isWholeLine: false,
+                        glyphMarginClassName: 'breakpoint-dot',
+                    }
+                }
+            })
         bpDecorationsRef.current.set(newDecorations)
 
         // Push breakpoints to the SAB so the worker reads them instantly
         syncBreakpoints()
-    }, [breakpoints, monaco])
+    }, [breakpoints, monaco, activeFile, mountCount])
 
     // ── Debug line highlighting ────────────────────────────────────
     // Uses Monaco's createDecorationsCollection API to highlight the
@@ -93,7 +123,7 @@ export function Editor() {
     useEffect(() => {
         if (!editorRef.current || !monaco || !decorationsRef.current) return
 
-        if (debugMode === 'paused' && currentLine) {
+        if (debugMode === 'paused' && currentLine && currentFile === activeFile) {
             decorationsRef.current.set([{
                 range: new monaco.Range(currentLine, 1, currentLine, 1),
                 options: {
@@ -106,7 +136,7 @@ export function Editor() {
         } else {
             decorationsRef.current.set([])
         }
-    }, [debugMode, currentLine, monaco])
+    }, [debugMode, currentLine, currentFile, activeFile, monaco, mountCount])
 
     const handleChange = useCallback((value: string | undefined) => {
         if (!value || !activeFile) return

@@ -61,6 +61,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                 const mapEntry = store.stepMap[stepId]
                 const line = mapEntry ? mapEntry.line : -1
                 const func = mapEntry ? mapEntry.func : 'unknown'
+                const file = mapEntry ? mapEntry.file : null
 
                 if (lastStepId !== stepId || store.debugMode !== 'paused') {
                     lastStepId = stepId
@@ -94,6 +95,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     store.setMemorySnapshot(snapshot)
                     store.setCurrentLine(line)
                     store.setCurrentFunc(func)
+                    store.setCurrentFile(file)
                     store.setStackPointer(framesData.length > 0 ? framesData[framesData.length - 1].sp : 0)
                     store.setDebugMode('paused')
 
@@ -101,6 +103,7 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                     store.pushStep({
                         currentLine: line,
                         currentFunc: func,
+                        currentFile: file,
                         callStack: newCallStack,
                         memorySnapshot: snapshot,
                         knownHeapTypes: nextKnownTypes,
@@ -181,11 +184,25 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
 export function syncBreakpoints() {
     if (!debugSab) return
     const arr = new Int32Array(debugSab)
-    const bps = Array.from(useDebugStore.getState().breakpoints)
-    const count = Math.min(bps.length, 800)
+    const store = useDebugStore.getState()
+    const bps = store.breakpoints
+    const stepMap = store.stepMap
+
+    // Convert "file:line" breakpoints into exact raw stepIds dynamically
+    // This allows the worker to just check integers natively, with 0 string passing
+    const activeStepIds: number[] = []
+    for (const [idStr, info] of Object.entries(stepMap)) {
+        const stepId = parseInt(idStr, 10)
+        const key = `${info.file}:${info.line}`
+        if (bps.has(key)) {
+            activeStepIds.push(stepId)
+        }
+    }
+
+    const count = Math.min(activeStepIds.length, 800)
     Atomics.store(arr, 200, count)
     for (let i = 0; i < count; i++) {
-        Atomics.store(arr, 201 + i, bps[i])
+        Atomics.store(arr, 201 + i, activeStepIds[i])
     }
 }
 

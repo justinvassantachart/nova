@@ -12,7 +12,7 @@ export interface CompileResult {
     success: boolean
     errors: string[]
     wasmBinary: Uint8Array | null
-    stepMap?: Record<number, { line: number; func: string }>
+    stepMap?: Record<number, { line: number; func: string; file: string }>
 }
 
 // --- SECURE RELEASE MODE PIPELINE ---
@@ -233,10 +233,10 @@ function instrumentAllAssembly(
     progress: (msg: string) => void,
 ): {
     asmEntries: Array<{ name: string; assembly: string }>
-    globalStepMap: Record<number, { line: number; func: string }>
+    globalStepMap: Record<number, { line: number; func: string; file: string }>
 } {
     const asmEntries: Array<{ name: string; assembly: string }> = []
-    const globalStepMap: Record<number, { line: number; func: string }> = {}
+    const globalStepMap: Record<number, { line: number; func: string; file: string }> = {}
 
     let currentStepId = 1
     for (const [src, rawAsm] of assemblyMap) {

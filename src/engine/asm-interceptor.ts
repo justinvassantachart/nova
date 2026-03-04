@@ -4,23 +4,24 @@
 export interface InstrumentResult {
     output: string
     injectedCount: number
-    stepMap: Record<number, { line: number; func: string }>
+    stepMap: Record<number, { line: number; func: string; file: string }>
 }
 
 export function instrumentAssemblyDetailed(asmText: string, startStepId: number = 1): InstrumentResult {
     const lines = asmText.split('\n')
     const output: string[] = []
-    const stepMap: Record<number, { line: number; func: string }> = {}
+    const stepMap: Record<number, { line: number; func: string; file: string }> = {}
 
     let inFunc = false; let stackReady = false; let currentLine = -1
     let currentFuncName = 'unknown'; let stepIdCounter = startStepId
-    let injectedLines = new Set<number>()
+    let currentFile = ''
+    let injectedLines = new Set<string>()
     let needsEnterCall = false
     let enteredCurrentFunc = false
     let frameAllocSize = 0
     let lastI32Const = 0
     let updatedGlobalSp = false
-    const userFileIds = new Set<string>()
+    const userFileMap = new Map<string, string>()
 
     const skipInstrument = new Set([
         '__wrap_malloc', '__wrap_free',
@@ -49,12 +50,17 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
         if (opcode === '.file') {
             const tok = getTokens()
             const fileId = tok[1]
-            const pathIdx = line.indexOf('"')
-            if (pathIdx !== -1) {
-                const path = line.substring(pathIdx + 1, line.lastIndexOf('"'))
+            const matches = [...line.matchAll(/"([^"]+)"/g)].map(m => m[1])
+            if (matches.length > 0) {
+                let path = matches.length > 1 ? `${matches[0]}/${matches[1]}` : matches[0]
+                path = path.replace(/\/+/g, '/')
                 // JMC: Mark file as user code if it's not in the sysroot
                 if (path.includes('/workspace/') || path.includes('main.cpp') || !path.includes('/sysroot/')) {
-                    userFileIds.add(fileId)
+                    if (!path.startsWith('/workspace/')) {
+                        const base = path.replace(/^(\.\/)+ /, '')
+                        path = `/workspace/${base}`
+                    }
+                    userFileMap.set(fileId, path)
                 }
             }
         }
@@ -71,15 +77,16 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
                 } else currentFuncName = rawName
             } else currentFuncName = rawName
 
-            inFunc = true; stackReady = false; currentLine = -1; injectedLines.clear()
+            inFunc = true; stackReady = false; currentLine = -1; currentFile = ''; injectedLines.clear()
             needsEnterCall = false; enteredCurrentFunc = false
             frameAllocSize = 0; lastI32Const = 0; updatedGlobalSp = false
         }
         else if (opcode === '.loc') {
             const tok = getTokens()
             const fileId = tok[1]
-            const isUserCode = userFileIds.has(fileId)
+            const isUserCode = userFileMap.has(fileId)
             currentLine = isUserCode ? parseInt(tok[2], 10) : -1
+            if (isUserCode) currentFile = userFileMap.get(fileId)!
 
             if (tok.includes('prologue_end')) {
                 stackReady = true
@@ -123,11 +130,12 @@ export function instrumentAssemblyDetailed(asmText: string, startStepId: number 
             output.push('\tcall\tJS_notify_exit')
         }
 
-        if (inFunc && stackReady && currentLine > 0 && isInstruction && !injectedLines.has(currentLine)) {
-            stepMap[stepIdCounter] = { line: currentLine, func: currentFuncName }
+        const lineKey = `${currentFile}:${currentLine}`
+        if (inFunc && stackReady && currentLine > 0 && currentFile && isInstruction && !injectedLines.has(lineKey)) {
+            stepMap[stepIdCounter] = { line: currentLine, func: currentFuncName, file: currentFile }
             output.push(`\ti32.const\t${stepIdCounter}`)
             output.push(`\tcall\tJS_debug_step`)
-            injectedLines.add(currentLine)
+            injectedLines.add(lineKey)
             stepIdCounter++
         }
 

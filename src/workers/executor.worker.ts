@@ -11,7 +11,7 @@ self.onmessage = async (e) => {
     const debugSab = e.data.debugSab
         ? new Int32Array(e.data.debugSab as SharedArrayBuffer)
         : null
-    const stepMap: Record<number, { line: number; func: string }> = e.data.stepMap || {}
+    const stepMap: Record<number, { line: number; func: string; file: string }> = e.data.stepMap || {}
     let drawQueue: Array<Record<string, unknown>> = []
     let exitCode = 0
     let inst: WebAssembly.Instance
@@ -120,7 +120,7 @@ self.onmessage = async (e) => {
                 let isBreakpoint = false
                 const bpCount = Atomics.load(stateArr, 200)
                 for (let i = 0; i < bpCount; i++) {
-                    if (Atomics.load(stateArr, 201 + i) === line) {
+                    if (Atomics.load(stateArr, 201 + i) === stepId) { // Check stepId natively instead of line number
                         isBreakpoint = true
                         break
                     }
