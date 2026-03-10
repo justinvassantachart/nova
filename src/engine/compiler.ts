@@ -4,7 +4,6 @@ import { getCompilerWorker, popPreloadWorker } from '@/lib/compiler-cache'
 import { CompilerPool, createPool } from '@/lib/compiler-pool'
 import { computeSourceHash, getCached, setCached } from '@/lib/compile-cache'
 import { getSysrootFiles, isSysrootLoaded, loadSysroot } from '@/vfs/sysroot-loader'
-import { instrumentAssemblyDetailed } from './asm-interceptor'
 import { parseDwarf } from './dwarf-parser'
 import { useDebugStore } from '@/store/debug-store'
 
@@ -141,20 +140,16 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
         }
 
         const sysrootFiles = getSysrootFiles()
-        const sources = Object.keys(files).filter(
-            (f) => f.endsWith('.cpp') && !f.includes('sysroot/'),
-        )
+        const sources = Object.keys(files).filter(f => f.endsWith('.cpp') && !f.includes('sysroot/'))
 
         const cpuCount = navigator.hardwareConcurrency || 2
         const targetPoolSize = Math.max(1, Math.min(cpuCount, sources.length, 4))
 
-        if (!debugPool) {
-            debugPool = createPool(targetPoolSize, takePreloadedWorker())
-        } else {
-            await debugPool.ensureSize(targetPoolSize)
-        }
+        if (!debugPool) debugPool = createPool(targetPoolSize, takePreloadedWorker())
+        else await debugPool.ensureSize(targetPoolSize)
 
-        const assemblyMap = new Map<string, string>()
+        const objMap = new Map<string, ArrayBuffer>()
+        const globalStepMap: Record<number, { line: number; func: string; file: string }> = {}
         const uncachedSources: string[] = []
 
         for (const src of sources) {
@@ -165,7 +160,8 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
 
             if (cached) {
                 progress(`Cache hit: ${src.split('/').pop()}`)
-                assemblyMap.set(src, cached.assembly)
+                objMap.set(src, cached.objectData)
+                Object.assign(globalStepMap, cached.stepMap)
             } else {
                 uncachedSources.push(src)
             }
@@ -173,38 +169,40 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
 
         if (uncachedSources.length > 0) {
             await debugPool.seedSysroot(sysrootFiles)
-
             const pchGenerated = await debugPool.generatePCH(progress, stderr)
-            if (!pchGenerated) {
-                progress('Proceeding without PCH cache.')
-            }
+            if (!pchGenerated) progress('Proceeding without PCH cache.')
 
             progress(`Compiling ${uncachedSources.length}/${sources.length} files...`)
-            const freshResults = await debugPool.compileAll(
-                uncachedSources, files, progress, stderr
-            )
+            const freshResults = await debugPool.compileAll(uncachedSources, files, progress, stderr)
 
-            for (const [src, asm] of freshResults) {
+            for (const [src, result] of freshResults) {
                 const content = files[src]
                 if (content) {
                     const hash = await computeSourceHash(content, sysrootFiles)
-                    setCached(hash, { assembly: asm, sourceHash: hash })
+                    setCached(hash, { objectData: result.objectData.slice(0), stepMap: result.stepMap, sourceHash: hash })
                 }
-                assemblyMap.set(src, asm)
+                objMap.set(src, result.objectData)
+                Object.assign(globalStepMap, result.stepMap)
             }
         } else {
             progress('All files cached, no compilation needed')
         }
 
-        progress('Instrumenting assembly...')
-        const { asmEntries, globalStepMap } = instrumentAllAssembly(assemblyMap, progress)
+        progress('Linking debug binary...')
 
         const linkSysrootFiles: Record<string, string> = {}
         for (const key of Object.keys(sysrootFiles)) {
+            // Memory Tracker headers might still be needed by sysroot
             if (key.includes('memory_tracker')) linkSysrootFiles[key] = sysrootFiles[key]
         }
 
-        const wasmBinaryResult = await debugPool.linkAssembly(asmEntries, linkSysrootFiles, progress, stderr)
+        const objEntries = Array.from(objMap.entries()).map(([src, obj]) => ({
+            name: src.replace('.cpp', '.o'),
+            objectData: obj
+        }))
+
+        // The worker handles automatically injecting memory_tracker.o!
+        const wasmBinaryResult = await debugPool.linkObjects(objEntries, linkSysrootFiles, progress, stderr)
         const wasmBinary = new Uint8Array(wasmBinaryResult.wasmBinary)
 
         try {
@@ -216,37 +214,10 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
             console.warn('[compiler] DWARF parse failed:', err)
         }
 
-        return {
-            success: true,
-            errors: [],
-            wasmBinary,
-            stepMap: globalStepMap,
-        }
+        return { success: true, errors: [], wasmBinary, stepMap: globalStepMap }
+
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
         return { success: false, errors: [msg], wasmBinary: null }
     }
-}
-
-function instrumentAllAssembly(
-    assemblyMap: Map<string, string>,
-    progress: (msg: string) => void,
-): {
-    asmEntries: Array<{ name: string; assembly: string }>
-    globalStepMap: Record<number, { line: number; func: string; file: string }>
-} {
-    const asmEntries: Array<{ name: string; assembly: string }> = []
-    const globalStepMap: Record<number, { line: number; func: string; file: string }> = {}
-
-    let currentStepId = 1
-    for (const [src, rawAsm] of assemblyMap) {
-        const asmName = src.replace('.cpp', '.s')
-        const result = instrumentAssemblyDetailed(rawAsm, currentStepId)
-        currentStepId += result.injectedCount
-        Object.assign(globalStepMap, result.stepMap)
-        progress(`Injected ${result.injectedCount} tracking hooks into ${asmName.split('/').pop()}`)
-        asmEntries.push({ name: asmName, assembly: result.output })
-    }
-
-    return { asmEntries, globalStepMap }
 }

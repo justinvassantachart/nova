@@ -106,6 +106,7 @@ async function handleSeedSysroot(data: Extract<CompilerMessage, { type: 'SEED_SY
 
     // PRO-TIP: Precompile memory_tracker.cpp into memory_tracker.o so we never have to parse C++ during user debug linking.
     try {
+        let mtStderr = ""
         const args = [
             ...BASE_INCLUDES,
             '-std=c++20', '-O2', '-c',
@@ -114,13 +115,18 @@ async function handleSeedSysroot(data: Extract<CompilerMessage, { type: 'SEED_SY
             '/sysroot/memory_tracker.cpp'
         ]
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const outTree = await clangpp(args, cachedSysrootTree as any, {}) as any
+        const outTree = await clangpp(args, cachedSysrootTree as any, {
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) mtStderr += dec.decode(bytes, { stream: true })
+            }
+        }) as any
         const objData = getTreeNode(outTree, '/sysroot/memory_tracker.o')
         if (objData) {
             globalMemoryTrackerObj = extractBinaryData(objData)
         }
     } catch (err) {
-        console.warn("Worker: Failed to precompile memory_tracker.cpp", err)
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn("Worker: Failed to precompile memory_tracker.cpp", msg)
     }
 
     self.postMessage({ type: 'SEED_SYSROOT_DONE' })

@@ -73,6 +73,9 @@ self.onmessage = async (e) => {
             draw_circle: (x: number, y: number, r: number, cp: number) => {
                 drawQueue.push({ type: 'CIRCLE', x, y, r, color: readCString(wasmMemory, cp) })
             },
+            draw_rect: (x: number, y: number, w: number, h: number, cp: number) => {
+                drawQueue.push({ type: 'RECT', x, y, w, h, color: readCString(wasmMemory, cp) })
+            },
             render_frame: () => {
                 self.postMessage({ type: 'RENDER_BATCH', queue: drawQueue })
                 drawQueue = []
