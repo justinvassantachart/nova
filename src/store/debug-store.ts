@@ -10,7 +10,7 @@ import type { MemorySnapshot } from '@/lib/memory-reader'
 
 export type DebugMode = 'idle' | 'compiling' | 'running' | 'paused'
 
-export interface StackFrame { id: string; func: string; line: number; sp: number; frameSize: number }
+export interface StackFrame { id: string; func: string; line: number; sp: number }
 
 /** Snapshot of one debug step — enough to fully restore the UI */
 export interface DebugStepEntry {
@@ -39,7 +39,7 @@ export interface DebugState {
     /** Current file name (from stepMap) */
     currentFile: string | null
 
-    /** Step ID → (line, func, file) mapping from the asm-interceptor */
+    /** Step ID → (line, func, file) mapping from the LLVM debug pass */
     stepMap: Record<number, { line: number; func: string; file: string }>
 
     /** User-set breakpoints (file:line string format) */
@@ -156,8 +156,6 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         const s = get()
         if (s.stepHistory.length < 2 && s.stepIndex < 0) return
         if (s.stepHistory.length === 0) return
-        console.log(s.stepHistory)
-        console.log(s.stepIndex)
         // If at live edge (-1), the last entry IS the current state,
         // so go to second-to-last to actually show a different step
         const newIndex = s.stepIndex < 0

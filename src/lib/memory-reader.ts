@@ -65,7 +65,7 @@ export function getResolvedTypeSize(dwarfInfo: DwarfInfo, typeName: string): num
 
 export function readMemorySnapshot(
     memoryBuffer: ArrayBuffer | null, dwarfInfo: DwarfInfo,
-    callStack: { id: string; func: string; sp: number; line: number; frameSize: number }[],
+    callStack: { id: string; func: string; sp: number; line: number }[],
     heapPointers: { countPtr: number; allocsPtr: number },
     knownHeapTypes: Record<number, string> = {}
 ): { snapshot: MemorySnapshot; nextKnownTypes: Record<number, string> } {

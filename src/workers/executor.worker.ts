@@ -17,11 +17,14 @@ self.onmessage = async (e) => {
     let inst: WebAssembly.Instance
 
     // ── Native Hardware Call Stack ──────────────────────────────
-    // JS_notify_enter/exit are called by __cyg_profile_func_enter/exit
-    // which Clang generates automatically with -finstrument-functions.
-    // Each entry has a unique ID so React Flow can track nodes across renders.
-    let callStack: Array<{ id: number; func: string; sp: number; frameSize: number }> = []
+    let callStack: Array<{ id: number; func: string; sp: number; _lastStepId?: number }> = []
     let nextCallId = 1
+
+    // ── Debugger stepping state ────────────────────────────────
+    let lastPausedLine = -1
+    let lastPausedFunc = ''
+    let lastPausedFile = ''
+    let lastPausedDepth = -1
 
     function readCString(mem: WebAssembly.Memory, ptr: number): string {
         const b = new Uint8Array(mem.buffer)
@@ -55,14 +58,11 @@ self.onmessage = async (e) => {
             __cxa_pure_virtual: () => { },
             _ZSt28__throw_bad_array_new_lengthv: () => { throw new Error("Bad array length"); },
 
-            // Hardware tells us exactly when a frame is pushed/popped!
-            JS_notify_enter: (frameSize: number, updated: number) => {
+            // Hardware tells us exactly when a frame is pushed/popped
+            JS_notify_enter: () => {
                 if (!debugMode) return
                 const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
-                // If it's a leaf function, the global pointer wasn't updated, so we subtract the size to get the true frame base
-                const trueSp = updated ? sp : sp - frameSize
-                console.log(`[executor] ENTER: depth=${callStack.length} sp=0x${trueSp.toString(16)} (global=0x${sp.toString(16)}, updated=${updated}) frameSize=${frameSize}`)
-                callStack.push({ id: nextCallId++, func: 'unknown', sp: trueSp, frameSize })
+                callStack.push({ id: nextCallId++, func: 'unknown', sp, _lastStepId: -1 })
             },
             JS_notify_exit: () => {
                 if (!debugMode) return
@@ -86,12 +86,12 @@ self.onmessage = async (e) => {
             //   [1]  = current step ID
             //   [2]  = run mode: 0=Continue, 1=StepInto, 2=StepOver
             //   [3]  = call stack depth
-            //   [4..123] = interleaved (callId, sp, frameSize) triples
+            //   [4..83] = interleaved (callId, sp) pairs
             //   [128] = __nova_alloc_count ptr
             //   [129] = __nova_allocs ptr
             //   [130] = target call depth (for StepOver)
             //   [200] = breakpoint count
-            //   [201..1000] = breakpoint line numbers
+            //   [201..1000] = breakpoint step IDs
             JS_debug_step: (stepId: number) => {
                 if (!debugMode || !debugSab) return
                 const stateArr = new Int32Array(debugSab.buffer)
@@ -105,36 +105,46 @@ self.onmessage = async (e) => {
                 const mapEntry = stepMap[stepId]
                 const currentFunc = mapEntry ? mapEntry.func : 'unknown'
                 const line = mapEntry ? mapEntry.line : -1
+                const file = mapEntry ? mapEntry.file : ''
 
                 const sp = inst.exports.__stack_pointer ? (inst.exports.__stack_pointer as WebAssembly.Global).value as number : 0
                 if (callStack.length > 0) {
                     callStack[callStack.length - 1].func = currentFunc
                 } else {
-                    callStack.push({ id: nextCallId++, func: currentFunc, sp, frameSize: 0 })
+                    callStack.push({ id: nextCallId++, func: currentFunc, sp, _lastStepId: -1 })
                 }
 
-                // 3. Read run mode and breakpoints dynamically from SAB
+                // 3. Detect backward jumps (loop iterations / re-evaluations)
+                const currentFrame = callStack[callStack.length - 1]
+                const prevStepId = currentFrame._lastStepId !== undefined ? currentFrame._lastStepId : -1
+                const isBackwardJump = prevStepId !== -1 && stepId <= prevStepId
+                currentFrame._lastStepId = stepId
+
+                // 4. Read run mode and breakpoints dynamically from SAB
                 const runMode = Atomics.load(stateArr, 2) // 0=Continue, 1=StepInto, 2=StepOver
                 const targetDepth = Atomics.load(stateArr, 130)
 
                 let isBreakpoint = false
                 const bpCount = Atomics.load(stateArr, 200)
                 for (let i = 0; i < bpCount; i++) {
-                    if (Atomics.load(stateArr, 201 + i) === stepId) { // Check stepId natively instead of line number
+                    if (Atomics.load(stateArr, 201 + i) === stepId) {
                         isBreakpoint = true
                         break
                     }
                 }
 
-                // 4. Evaluate if we should physically freeze the thread
+                // 5. Location Deduplication — only pause if state meaningfully changed
+                const changedState = line !== lastPausedLine || currentFunc !== lastPausedFunc ||
+                    file !== lastPausedFile || callStack.length !== lastPausedDepth || isBackwardJump
+
                 let shouldPause = false
-                if (isBreakpoint) {
+                if (isBreakpoint && changedState) {
                     shouldPause = true
-                } else if (runMode === 1) { // Step Into
-                    shouldPause = true
-                } else if (runMode === 2) { // Step Over
-                    if (callStack.length <= targetDepth) {
+                } else if (line !== -1 && changedState) {
+                    if (runMode === 1) { // Step Into
                         shouldPause = true
+                    } else if (runMode === 2) { // Step Over
+                        if (callStack.length <= targetDepth) shouldPause = true
                     }
                 }
                 // runMode === 0 (Continue) → only pause at breakpoints
@@ -144,26 +154,29 @@ self.onmessage = async (e) => {
                     return
                 }
 
-                // ── PAUSING LOGIC ──────────────────────────────────────
+                // ── PAUSING — Capture state so we know what we stepped FROM next time
+                lastPausedLine = line
+                lastPausedFunc = currentFunc
+                lastPausedFile = file
+                lastPausedDepth = callStack.length
 
-                // 5. Clone live WASM memory into the shared snapshot buffer
+                // 6. Clone live WASM memory into the shared snapshot buffer
                 if (e.data.memorySab) {
                     const memArr = new Uint8Array(wasmMemory.buffer)
                     const sabArr = new Uint8Array(e.data.memorySab as SharedArrayBuffer)
                     sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
                 }
 
-                // 6. Write step ID + call stack into the SAB
+                // 7. Write step ID + call stack into the SAB (stride-2 pairs)
                 Atomics.store(stateArr, 1, stepId)
                 Atomics.store(stateArr, 3, callStack.length)
 
                 for (let i = 0; i < callStack.length && i < 40; i++) {
-                    Atomics.store(stateArr, 4 + i * 3, callStack[i].id)
-                    Atomics.store(stateArr, 4 + i * 3 + 1, callStack[i].sp)
-                    Atomics.store(stateArr, 4 + i * 3 + 2, callStack[i].frameSize)
+                    Atomics.store(stateArr, 4 + i * 2, callStack[i].id)
+                    Atomics.store(stateArr, 4 + i * 2 + 1, callStack[i].sp)
                 }
 
-                // 7. Export native heap tracker pointers
+                // 8. Export native heap tracker pointers
                 const getExportAddr = (name: string) => {
                     const exp = inst.exports[name]
                     if (typeof exp === 'number') return exp
@@ -173,16 +186,16 @@ self.onmessage = async (e) => {
                 Atomics.store(stateArr, 128, getExportAddr('__nova_alloc_count'))
                 Atomics.store(stateArr, 129, getExportAddr('__nova_allocs'))
 
-                // 8. Signal PAUSED state (1)
+                // 9. Signal PAUSED state (1)
                 Atomics.store(stateArr, 0, 1)
                 Atomics.notify(stateArr, 0, 1)
 
-                // 9. Safari-safe wait loop: spin until resumed (3) or stopped (2)
+                // 10. Safari-safe wait loop: spin until resumed (3) or stopped (2)
                 while (Atomics.load(stateArr, 0) === 1) {
                     Atomics.wait(stateArr, 0, 1)
                 }
 
-                // 10. Check if we should stop
+                // 11. Check if we should stop
                 if (Atomics.load(stateArr, 0) === 2) {
                     throw new Error('__debug_stop')
                 }
