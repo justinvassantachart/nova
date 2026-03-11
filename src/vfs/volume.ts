@@ -69,7 +69,7 @@ const CANVAS_DEMO = `#include <iostream>
 // This program uses the Nova canvas API to animate a ball
 // bouncing around the screen, leaving a fading trail behind it.
 
-int main() {
+int main2() {
     // Canvas dimensions (matches the Nova canvas panel)
     const double W = 600;
     const double H = 400;
