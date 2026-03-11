@@ -8,7 +8,8 @@ type StderrCallback = (text: string) => void
 
 export interface CompileOneResult {
     src: string
-    assembly: string
+    objectData: ArrayBuffer
+    stepMap: Record<number, { line: number; func: string; file: string }>
 }
 
 export interface LinkResult {
@@ -258,31 +259,24 @@ export class CompilerPool {
         files: Record<string, string>,
         onProgress?: ProgressCallback,
         onStderr?: StderrCallback,
-    ): Promise<Map<string, string>> {
-        const results = new Map<string, string>()
+    ): Promise<Map<string, CompileOneResult>> {
+        const results = new Map<string, CompileOneResult>()
         const queue = [...sources]
         let hasError = false
-
         const promises = this.#pool.map(async (node) => {
             await node.ready
             while (true) {
                 if (hasError) break;
-                // ALGORITHMIC FIX: O(1) array pop instead of O(N) shift
                 const src = queue.pop()
                 if (!src) break
-
                 onProgress?.(`Compiling ${src.split('/').pop()}...`)
                 try {
                     const requestId = `${src}-${Date.now()}`
                     const result = await requestWorker<CompileOneResult>(
-                        node.worker,
-                        { type: 'COMPILE_ONE', src, files, requestId },
-                        [],
-                        'COMPILE_ONE_DONE',
-                        'COMPILE_ONE_ERROR',
-                        onStderr
+                        node.worker, { type: 'COMPILE_ONE', src, files, requestId }, [],
+                        'COMPILE_ONE_DONE', 'COMPILE_ONE_ERROR', onStderr
                     )
-                    results.set(result.src, result.assembly)
+                    results.set(result.src, result)
                     onProgress?.(`Compiled ${result.src.split('/').pop()}`)
                 } catch (err) {
                     hasError = true
@@ -290,13 +284,12 @@ export class CompilerPool {
                 }
             }
         })
-
         await Promise.all(promises)
         return results
     }
 
-    async linkAssembly(
-        asmEntries: Array<{ name: string; assembly: string }>,
+    async linkObjects(
+        objEntries: Array<{ name: string; objectData: ArrayBuffer }>,
         sysrootFiles: Record<string, string>,
         onProgress?: ProgressCallback,
         onStderr?: StderrCallback,
@@ -304,17 +297,17 @@ export class CompilerPool {
         if (this.#pool.length === 0) throw new Error("Compiler pool is empty")
         const primaryNode = this.#pool[0]
         await primaryNode.ready
-
         const requestId = `link-${Date.now()}`
-        onProgress?.('Assembling debug binary...')
+        onProgress?.('Linking debug binary...')
+
+        // Clone buffers for transfer to prevent memory detachment
+        const transfers = objEntries.map(e => e.objectData.slice(0))
+        const clonedEntries = objEntries.map((e, i) => ({ name: e.name, objectData: transfers[i] }))
 
         return requestWorker<LinkResult>(
             primaryNode.worker,
-            { type: 'LINK_ASM', asmEntries, sysrootFiles, requestId },
-            [],
-            'LINK_ASM_DONE',
-            'LINK_ASM_ERROR',
-            onStderr
+            { type: 'LINK_OBJECTS', objEntries: clonedEntries, sysrootFiles, requestId },
+            transfers, 'LINK_OBJECTS_DONE', 'LINK_OBJECTS_ERROR', onStderr
         )
     }
 
