@@ -50,6 +50,20 @@ function beautifyTypeName(typeName: string): string {
 export function getResolvedTypeSize(dwarfInfo: DwarfInfo, typeName: string): number {
     const cleanType = beautifyTypeName(typeName);
     if (cleanType.endsWith('*') || cleanType.endsWith('&')) return 4; // References are pointer-sized in WASM32
+
+    // Evaluate total bytes for multidimensional array types (e.g. Hero[2], int[3][3])
+    const arrayMatch = cleanType.match(/^(.*?)((?:\[\d+\])+)$/);
+    if (arrayMatch) {
+        const baseType = arrayMatch[1].trim();
+        const dimsStr = arrayMatch[2];
+        const baseSize = getResolvedTypeSize(dwarfInfo, baseType) || 4;
+        let totalElements = 1;
+        for (const match of dimsStr.matchAll(/\[(\d+)\]/g)) {
+            totalElements *= parseInt(match[1], 10);
+        }
+        return baseSize * totalElements;
+    }
+
     if (['char', 'bool', 'int8_t', 'uint8_t'].includes(cleanType)) return 1;
     if (['short', 'int16_t', 'uint16_t'].includes(cleanType)) return 2;
     if (['int', 'long', 'float', 'int32_t', 'uint32_t'].includes(cleanType)) return 4;
@@ -140,6 +154,37 @@ export function readMemorySnapshot(
             if (typedAllocations.has(ptr)) continue;
 
             const inferredType = heapTypesMap.get(ptr);
+
+            // Bounded Array Inference on Heap (e.g. Hero[2])
+            const boundedArrayMatch = inferredType ? inferredType.match(/^(.*?)((?:\[\d+\])+)$/) : null;
+            if (boundedArrayMatch) {
+                discovered = true;
+                const baseType = boundedArrayMatch[1].trim();
+                const dims = boundedArrayMatch[2];
+                const firstDimMatch = dims.match(/^\[(\d+)\](.*)$/)!;
+                const count = parseInt(firstDimMatch[1], 10);
+                const elType = baseType + firstDimMatch[2];
+                const elSize = getResolvedTypeSize(dwarfInfo, elType) || 4;
+
+                const ha: HeapAllocation = {
+                    ptr, size, typeName: inferredType!,
+                    label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [],
+                };
+
+                const maxCount = Math.min(count, 50);
+                for (let k = 0; k < maxCount; k++) {
+                    const mAddr = ptr + k * elSize;
+                    if (mAddr + elSize <= ptr + size && mAddr + elSize <= view.byteLength) {
+                        const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, elType, elSize, mAddr, elType.endsWith('*'));
+                        if (mVal) ha.members.push(mVal);
+                    }
+                }
+                if (count > maxCount) {
+                    ha.members.push({ name: '...', type: '', address: 0, value: `(+${count - maxCount} more)`, rawValue: 0, size: 0, isPointer: false });
+                }
+                typedAllocations.set(ptr, ha);
+                continue;
+            }
 
             // Array Inference (used dynamically by std::vector formatter)
             if (inferredType && inferredType.endsWith('[]')) {
@@ -266,6 +311,10 @@ function readVariable(
             }
         }
 
+        // Hoist array regex so it doesn't break the if/else-if chain
+        const arrayMatch = cleanType.match(/^(.*?)((?:\[\d+\])+)$/);
+
+        // 1. Pointers
         if (isPointer || cleanType.endsWith('*')) {
             pointsTo = view.getUint32(address, true);
             rawValue = pointsTo;
@@ -283,7 +332,36 @@ function readVariable(
                 value = `"${new TextDecoder().decode(bytes.subarray(pointsTo, end))}"`
             }
         }
-        // 2. Struct Expansion
+        // 2. Array Expansion (e.g. Hero[2] or int[3][3])
+        else if (arrayMatch && !cleanType.endsWith('&')) {
+            const baseType = arrayMatch[1].trim();
+            const dimsStr = arrayMatch[2]; // e.g. "[2][3]"
+
+            const firstDimMatch = dimsStr.match(/^\[(\d+)\](.*)$/);
+            if (firstDimMatch) {
+                const count = parseInt(firstDimMatch[1], 10);
+                const restDims = firstDimMatch[2]; // e.g. "[3]" or ""
+                const elementType = baseType + restDims; // e.g. "int[3]" or "Hero"
+
+                isStruct = true; value = `[${count}]`; members = [];
+                const elementSize = getResolvedTypeSize(dwarfInfo, elementType) || (count > 0 ? Math.floor(size / count) : 0);
+
+                if (elementSize > 0) {
+                    const renderCount = Math.min(count, 50);
+                    for (let k = 0; k < renderCount; k++) {
+                        const mAddr = address + k * elementSize;
+                        if (mAddr + elementSize <= view.byteLength) {
+                            const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, elementType, elementSize, mAddr, elementType.endsWith('*'), undefined, depth + 1);
+                            if (mVal) members.push(mVal);
+                        }
+                    }
+                    if (count > 50) {
+                        members.push({ name: '...', type: '', address: 0, value: `(+${count - 50} more)`, rawValue: 0, size: 0, isPointer: false });
+                    }
+                }
+            }
+        }
+        // 3. Struct Expansion
         else if (getStructDef(dwarfInfo.types, cleanType)) {
             isStruct = true; value = `{...}`; members = [];
             const structDef = getStructDef(dwarfInfo.types, cleanType)!;
@@ -295,7 +373,7 @@ function readVariable(
                 }
             }
         }
-        // 3. Primitives
+        // 4. Primitives
         else {
             if (size === 1) { rawValue = view.getInt8(address); value = cleanType === 'char' ? `'${String.fromCharCode(rawValue)}'` : rawValue; }
             else if (size === 2) { rawValue = view.getInt16(address, true); value = rawValue; }
@@ -306,3 +384,4 @@ function readVariable(
 
     return { name, type: cleanType, address, value, rawValue, size, isPointer: !!pointsTo, pointsTo, pointeeType, isStruct, members };
 }
+
