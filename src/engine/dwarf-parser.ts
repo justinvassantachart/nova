@@ -238,8 +238,12 @@ function parseDebugLine(data: Uint8Array): { lineMap: LineMap; sourceFiles: stri
     return { lineMap, sourceFiles }
 }
 
-const DW_TAG_variable = 0x34, DW_TAG_formal_parameter = 0x05, DW_TAG_structure_type = 0x13, DW_TAG_class_type = 0x02, DW_TAG_member = 0x0d, DW_TAG_pointer_type = 0x0f, DW_TAG_reference_type = 0x10, DW_TAG_rvalue_reference_type = 0x42, DW_TAG_typedef = 0x16, DW_TAG_subprogram = 0x2e, DW_TAG_const_type = 0x26, DW_TAG_volatile_type = 0x35, DW_TAG_restrict_type = 0x37
-const DW_AT_name = 0x03, DW_AT_type = 0x49, DW_AT_byte_size = 0x0b, DW_AT_data_member_location = 0x38, DW_AT_location = 0x02, DW_AT_decl_line = 0x3b
+const DW_TAG_variable = 0x34, DW_TAG_formal_parameter = 0x05, DW_TAG_structure_type = 0x13, DW_TAG_class_type = 0x02, DW_TAG_member = 0x0d, DW_TAG_pointer_type = 0x0f, DW_TAG_reference_type = 0x10, DW_TAG_rvalue_reference_type = 0x42, DW_TAG_typedef = 0x16, DW_TAG_subprogram = 0x2e, DW_TAG_const_type = 0x26, DW_TAG_volatile_type = 0x35, DW_TAG_restrict_type = 0x37, DW_TAG_array_type = 0x01, DW_TAG_subrange_type = 0x21
+const DW_AT_name = 0x03, DW_AT_type = 0x49, DW_AT_byte_size = 0x0b, DW_AT_data_member_location = 0x38, DW_AT_location = 0x02, DW_AT_decl_line = 0x3b, DW_AT_upper_bound = 0x2f, DW_AT_count = 0x37
+
+interface TypeMapEntry {
+    tag: number; name?: string; size?: number; typeRef?: number; counts?: number[]
+}
 const DW_FORM_addr = 0x01, DW_FORM_data1 = 0x0b, DW_FORM_data2 = 0x05, DW_FORM_data4 = 0x06, DW_FORM_data8 = 0x07, DW_FORM_string = 0x08, DW_FORM_strp = 0x0e, DW_FORM_block1 = 0x0a, DW_FORM_block2 = 0x03, DW_FORM_block4 = 0x04, DW_FORM_block = 0x09, DW_FORM_ref1 = 0x11, DW_FORM_ref2 = 0x12, DW_FORM_ref4 = 0x13, DW_FORM_ref8 = 0x14, DW_FORM_ref_udata = 0x15, DW_FORM_flag = 0x0c, DW_FORM_udata = 0x0f, DW_FORM_sdata = 0x0d, DW_FORM_sec_offset = 0x17, DW_FORM_exprloc = 0x18, DW_FORM_flag_present = 0x19, DW_FORM_ref_addr = 0x10, DW_FORM_strx = 0x1a, DW_FORM_addrx = 0x1b, DW_FORM_strx1 = 0x25, DW_FORM_strx2 = 0x26, DW_FORM_strx4 = 0x27, DW_FORM_implicit_const = 0x21, DW_FORM_line_strp = 0x1f, DW_FORM_rnglistx = 0x23, DW_FORM_loclistx = 0x22, DW_FORM_ref_sig8 = 0x20, DW_FORM_addrx1 = 0x29, DW_FORM_addrx2 = 0x2a
 
 interface AbbrevEntry {
@@ -323,7 +327,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
     const variables: VariableInfo[] = []
     const types: Record<string, StructInfo> = {}
     const view = new DataView(debugInfo.buffer, debugInfo.byteOffset, debugInfo.byteLength)
-    const typeMap = new Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>()
+    const typeMap = new Map<number, TypeMapEntry>()
     const pendingStructMembers = new Map<number, { name: string; offset: number; typeRef?: number }[]>()
 
     let offset = 0
@@ -346,7 +350,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
 
         const abbrevTable = parseAbbrevTable(debugAbbrev, abbrevOffset)
         let currentStructOffset: number | null = null
-        const dieStack: { tag: number, name: string }[] = []
+        const dieStack: { tag: number, name: string, offset: number }[] = []
         const pendingVars: { name: string; typeRef: number | undefined; stackOffset: number; declLine: number; funcName: string }[] = []
 
         while (offset < unitEnd && offset < debugInfo.length) {
@@ -361,18 +365,23 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
             if (!abbrev) { offset = unitEnd; break }
 
             let dieName: string | undefined; let dieSize: number | undefined; let dieTypeRef: number | undefined; let dieMemberLoc: number | undefined; let dieStackOffset: number | undefined; let dieDeclLine: number | undefined
+            let dieUpperBound: number | undefined; let dieCount: number | undefined
 
             for (const attr of abbrev.attrs) {
                 const attrStart = offset
                 if (attr.form === DW_FORM_implicit_const) {
                     if (attr.name === DW_AT_byte_size) dieSize = attr.implicitConst
                     if (attr.name === DW_AT_data_member_location) dieMemberLoc = attr.implicitConst
+                    if (attr.name === DW_AT_count) dieCount = attr.implicitConst
+                    if (attr.name === DW_AT_upper_bound) dieUpperBound = attr.implicitConst
                     continue
                 }
 
                 if (attr.name === DW_AT_name) dieName = readFormAsString(debugInfo, offset, attr.form, debugStr) ?? undefined
                 if (attr.name === DW_AT_byte_size) dieSize = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize) ?? undefined
                 if (attr.name === DW_AT_decl_line) dieDeclLine = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize) ?? undefined
+                if (attr.name === DW_AT_count) dieCount = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize) ?? undefined
+                if (attr.name === DW_AT_upper_bound) dieUpperBound = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize) ?? undefined
                 if (attr.name === DW_AT_type) {
                     const ref = readFormAsNumber(view, debugInfo, offset, attr.form, addressSize)
                     if (ref !== null) dieTypeRef = (attr.form === DW_FORM_ref4 || attr.form === DW_FORM_ref1 || attr.form === DW_FORM_ref2 || attr.form === DW_FORM_ref_udata) ? unitStart + ref : ref
@@ -395,7 +404,24 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
 
             typeMap.set(dieOffset, { tag: abbrev.tag, name: dieName, size: dieSize, typeRef: dieTypeRef })
 
-            if (abbrev.tag === DW_TAG_structure_type || abbrev.tag === DW_TAG_class_type) {
+            // Handle DW_TAG_subrange_type → push dimension count to parent DW_TAG_array_type
+            if (abbrev.tag === DW_TAG_subrange_type) {
+                if (dieStack.length > 0) {
+                    const parent = dieStack[dieStack.length - 1]
+                    if (parent.tag === DW_TAG_array_type) {
+                        const parentInfo = typeMap.get(parent.offset)
+                        if (parentInfo) {
+                            let count: number | undefined
+                            if (dieCount !== undefined) count = dieCount
+                            else if (dieUpperBound !== undefined) count = dieUpperBound + 1
+                            if (count !== undefined) {
+                                parentInfo.counts = parentInfo.counts || []
+                                parentInfo.counts.push(count)
+                            }
+                        }
+                    }
+                }
+            } else if (abbrev.tag === DW_TAG_structure_type || abbrev.tag === DW_TAG_class_type) {
                 if (dieName && dieSize !== undefined) {
                     currentStructOffset = dieOffset
                     pendingStructMembers.set(dieOffset, [])
@@ -415,7 +441,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
                     pendingVars.push({ name: dieName, typeRef: dieTypeRef, stackOffset: dieStackOffset, declLine: dieDeclLine ?? 0, funcName })
                 }
             }
-            if (abbrev.hasChildren) dieStack.push({ tag: abbrev.tag, name: dieName || '' })
+            if (abbrev.hasChildren) dieStack.push({ tag: abbrev.tag, name: dieName || '', offset: dieOffset })
         }
 
         for (const pv of pendingVars) {
@@ -460,13 +486,18 @@ function cleanTypeName(name: string): string {
     return name
 }
 
-function resolveTypeName(typeMap: Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>, offset: number | undefined, depth = 0): string {
+function resolveTypeName(typeMap: Map<number, TypeMapEntry>, offset: number | undefined, depth = 0): string {
     if (offset === undefined || depth > 10) return 'unknown'
     const info = typeMap.get(offset)
     if (!info) return 'unknown'
     if (info.tag === DW_TAG_pointer_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}*`
     if (info.tag === DW_TAG_reference_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}&`
     if (info.tag === DW_TAG_rvalue_reference_type) return `${resolveTypeName(typeMap, info.typeRef, depth + 1)}&&`
+    if (info.tag === DW_TAG_array_type) {
+        const elementType = resolveTypeName(typeMap, info.typeRef, depth + 1)
+        const dims = info.counts ? info.counts.map(c => `[${c}]`).join('') : '[]'
+        return `${elementType}${dims}`
+    }
     if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) {
         if (info.name) {
             const cleaned = cleanTypeName(info.name)
@@ -479,29 +510,36 @@ function resolveTypeName(typeMap: Map<number, { tag: number; name?: string; size
     return cleanTypeName(info.name ?? 'unknown')
 }
 
-function resolveTypeSize(typeMap: Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>, offset: number | undefined, depth = 0): number {
+function resolveTypeSize(typeMap: Map<number, TypeMapEntry>, offset: number | undefined, depth = 0): number {
     if (offset === undefined || depth > 10) return 0
     const info = typeMap.get(offset)
     if (!info) return 0
+    if (info.tag === DW_TAG_array_type) {
+        const baseSize = resolveTypeSize(typeMap, info.typeRef, depth + 1)
+        const totalElements = info.counts ? info.counts.reduce((a, b) => a * b, 1) : 0
+        return baseSize * totalElements
+    }
     if (info.size !== undefined) return info.size
     if (info.tag === DW_TAG_pointer_type || info.tag === DW_TAG_reference_type || info.tag === DW_TAG_rvalue_reference_type) return 4
     return resolveTypeSize(typeMap, info.typeRef, depth + 1)
 }
 
-function isPointerType(typeMap: Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>, offset: number | undefined, depth = 0): boolean {
+function isPointerType(typeMap: Map<number, TypeMapEntry>, offset: number | undefined, depth = 0): boolean {
     if (offset === undefined || depth > 10) return false
     const info = typeMap.get(offset)
     if (!info) return false
     if (info.tag === DW_TAG_pointer_type || info.tag === DW_TAG_reference_type || info.tag === DW_TAG_rvalue_reference_type) return true
+    if (info.tag === DW_TAG_array_type) return false
     if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) return isPointerType(typeMap, info.typeRef, depth + 1)
     return false
 }
 
-function resolvePointeeType(typeMap: Map<number, { tag: number; name?: string; size?: number; typeRef?: number }>, offset: number | undefined, depth = 0): string | undefined {
+function resolvePointeeType(typeMap: Map<number, TypeMapEntry>, offset: number | undefined, depth = 0): string | undefined {
     if (offset === undefined || depth > 10) return undefined
     const info = typeMap.get(offset)
     if (!info) return undefined
     if (info.tag === DW_TAG_pointer_type || info.tag === DW_TAG_reference_type || info.tag === DW_TAG_rvalue_reference_type) return resolveTypeName(typeMap, info.typeRef, depth + 1)
+    if (info.tag === DW_TAG_array_type) return undefined
     if (info.tag === DW_TAG_typedef || info.tag === DW_TAG_const_type || info.tag === DW_TAG_volatile_type || info.tag === DW_TAG_restrict_type) return resolvePointeeType(typeMap, info.typeRef, depth + 1)
     return undefined
 }

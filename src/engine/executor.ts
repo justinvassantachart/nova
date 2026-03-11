@@ -43,13 +43,12 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                 const stepId = Atomics.load(ctrl, 1)
                 const depth = Atomics.load(ctrl, 3)
 
-                // Read interleaved (callId, sp, frameSize) triples
-                const framesData: Array<{ id: number; sp: number; frameSize: number }> = []
+                // Read interleaved (callId, sp) pairs
+                const framesData: Array<{ id: number; sp: number }> = []
                 for (let i = 0; i < depth && i < 40; i++) {
                     framesData.push({
-                        id: Atomics.load(ctrl, 4 + i * 3),
-                        sp: Atomics.load(ctrl, 4 + i * 3 + 1),
-                        frameSize: Atomics.load(ctrl, 4 + i * 3 + 2),
+                        id: Atomics.load(ctrl, 4 + i * 2),
+                        sp: Atomics.load(ctrl, 4 + i * 2 + 1),
                     })
                 }
 
@@ -77,7 +76,6 @@ export async function execute(wasmBinary: Uint8Array, debugMode = false) {
                         return {
                             id: frameIdStr,
                             sp: fData.sp,
-                            frameSize: fData.frameSize,
                             func: isTop ? func : (existing ? existing.func : 'unknown'),
                             line: isTop ? line : (existing ? existing.line : -1),
                         }

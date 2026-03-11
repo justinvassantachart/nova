@@ -57,7 +57,110 @@ const NOVA_H = `#pragma once
 extern "C" {
     void clear_screen();
     void draw_circle(double x, double y, double radius, const char* hex_color);
+    void draw_rect(double x, double y, double w, double h, const char* hex_color);
     void render_frame();
+}
+`
+
+const CANVAS_DEMO = `#include <iostream>
+#include "nova.h"
+
+// ── Bouncing Ball Demo ──────────────────────────────────────
+// This program uses the Nova canvas API to animate a ball
+// bouncing around the screen, leaving a fading trail behind it.
+
+int main() {
+    // Canvas dimensions (matches the Nova canvas panel)
+    const double W = 600;
+    const double H = 400;
+
+    // Ball state
+    double x = W / 2;
+    double y = H / 2;
+    double vx = 3.5;
+    double vy = 2.8;
+    double radius = 20;
+
+    // Trail history (circular buffer)
+    const int TRAIL_LEN = 25;
+    double trail_x[25];
+    double trail_y[25];
+    int trail_idx = 0;
+    bool trail_full = false;
+
+    for (int i = 0; i < TRAIL_LEN; i++) {
+        trail_x[i] = -100;
+        trail_y[i] = -100;
+    }
+
+    // Color palette for the trail (purple to cyan gradient)
+    const char* trail_colors[] = {
+        "#2d1b69", "#33207a", "#39258b", "#3f2a9c",
+        "#4530ad", "#4b35be", "#523bcf", "#5840e0",
+        "#5e45f1", "#6a50f0", "#765bef", "#8266ee",
+        "#8e71ed", "#9a7cec", "#a687eb", "#b292ea",
+        "#be9de9", "#caa8e8", "#d6b3e7", "#e2bfe6",
+        "#c8e0f0", "#aee0f5", "#94e0fa", "#7ae0ff",
+        "#60e0ff"
+    };
+
+    // Background gradient colors (dark navy strips)
+    const char* bg[] = {
+        "#080811", "#0a0c17", "#0c101d", "#0e1423",
+        "#101829", "#121c2f", "#142035", "#16243b"
+    };
+
+    // Main animation loop
+    for (int frame = 0; frame < 600; frame++) {
+        // ── Physics ──
+        x += vx;
+        y += vy;
+
+        // Bounce off walls
+        if (x - radius < 0)    { x = radius;     vx = -vx; }
+        if (x + radius > W)    { x = W - radius; vx = -vx; }
+        if (y - radius < 0)    { y = radius;     vy = -vy; }
+        if (y + radius > H)    { y = H - radius; vy = -vy; }
+
+        // ── Record trail ──
+        trail_x[trail_idx] = x;
+        trail_y[trail_idx] = y;
+        trail_idx = (trail_idx + 1) % TRAIL_LEN;
+        if (trail_idx == 0) trail_full = true;
+
+        // ── Draw ──
+        clear_screen();
+
+        // Dark gradient background (stacked rectangles)
+        for (int i = 0; i < 8; i++) {
+            draw_rect(0, i * (H / 8), W, H / 8, bg[i]);
+        }
+
+        // Draw trail (growing circles with gradient colors)
+        int count = trail_full ? TRAIL_LEN : trail_idx;
+        for (int i = 0; i < count; i++) {
+            int idx = trail_full
+                ? (trail_idx + i) % TRAIL_LEN
+                : i;
+            double t = (double)i / (double)count;
+            double r = 4.0 + t * (radius - 6);
+            int colorIdx = (int)(t * (TRAIL_LEN - 1));
+            draw_circle(trail_x[idx], trail_y[idx], r, trail_colors[colorIdx]);
+        }
+
+        // Draw the main ball (bright cyan with white highlight)
+        draw_circle(x, y, radius, "#00e5ff");
+        draw_circle(x - radius * 0.25, y - radius * 0.25, radius * 0.4, "#b2fff9");
+
+        // Draw a floor line
+        draw_rect(0, H - 2, W, 2, "#1a237e");
+
+        // Sync frame to display (~60fps via SharedArrayBuffer pacer)
+        render_frame();
+    }
+
+    std::cout << "Animation complete! (600 frames)" << std::endl;
+    return 0;
 }
 `
 
@@ -75,8 +178,8 @@ extern "C" {
     void* __wrap_malloc(size_t size) {
         void* ptr = __real_malloc(size);
         if (size > 0 && __nova_alloc_count < 1024) {
-            __nova_allocs[__nova_alloc_count].ptr = (unsigned int)ptr;
-            __nova_allocs[__nova_alloc_count].size = (unsigned int)size;
+            __nova_allocs[__nova_alloc_count].ptr = (unsigned int) ptr;
+            __nova_allocs[__nova_alloc_count].size = (unsigned int) size;
             __nova_alloc_count++;
         }
         return ptr;
@@ -171,7 +274,7 @@ export function getAllFiles(): Record<string, string> {
     function walk(dir: string) {
         const entries = vol.readdirSync(dir, { encoding: 'utf8' }) as string[]
         for (const entry of entries) {
-            const full = dir === '/' ? `/${entry}` : `${dir}/${entry}`
+            const full = dir === '/' ? `/ ${entry} ` : `${dir}/${entry}`
             const stat = vol.statSync(full)
             if (stat.isDirectory()) walk(full)
             else result[full] = vol.readFileSync(full, { encoding: 'utf8' }) as string
@@ -236,9 +339,12 @@ export async function initVFS() {
         await hydrateFromOPFS(activeProjectId)
     } catch { /* OPFS not available */ }
 
-    // Default file
+    // Default files
     if (!vol.existsSync('/workspace/main.cpp')) {
         writeFile('/workspace/main.cpp', DEFAULT_MAIN)
+    }
+    if (!vol.existsSync('/workspace/canvas_demo.cpp')) {
+        writeFile('/workspace/canvas_demo.cpp', CANVAS_DEMO)
     }
 
     refreshFileTree()
