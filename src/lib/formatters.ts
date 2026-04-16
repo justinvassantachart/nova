@@ -4,6 +4,7 @@
 
 import type { MemoryValue } from './memory-reader'
 import type { StructMember } from '@/engine/dwarf-types'
+import { parseCppType, stringifyCppType, getBaseTypeNoNamespaces, type ParsedType } from './type-parser'
 
 export interface FormatterContext {
     view: DataView
@@ -11,6 +12,7 @@ export interface FormatterContext {
     address: number
     name: string
     typeName: string
+    ast: ParsedType
     size: number
     depth: number
     getTypeSize: (type: string) => number
@@ -20,19 +22,15 @@ export interface FormatterContext {
 }
 
 export interface TypeFormatter {
-    match: (typeName: string) => boolean
+    match: (typeName: string, ast: ParsedType) => boolean
     format: (ctx: FormatterContext) => MemoryValue | null
 }
 
 export const StdStringFormatter: TypeFormatter = {
-    match: (type) => {
-        const t = type.replace(/\s+/g, '')
-        if (t.endsWith('*') || t.endsWith('&')) return false;
-        // Guard: only match if basic_string is the TOP-LEVEL type, not a template arg
-        // e.g. match "basic_string<char,...>" but NOT "Vector<basic_string<char,...>>"
-        const bracketIdx = t.indexOf('<')
-        const prefix = bracketIdx === -1 ? t : t.substring(0, bracketIdx)
-        return t === 'std::string' || t === 'string' || prefix.includes('basic_string')
+    match: (_, ast) => {
+        if (ast.pointerCount > 0 || ast.isReference || ast.isRValueReference || ast.arrayDims.length > 0) return false;
+        const b = getBaseTypeNoNamespaces(ast);
+        return b === 'string' || b === 'basic_string';
     },
     format: (ctx) => {
         const { view, bytes, address, name, size, tagHeap } = ctx
@@ -65,15 +63,13 @@ export const StdStringFormatter: TypeFormatter = {
 }
 
 export const StdVectorFormatter: TypeFormatter = {
-    match: (type) => {
-        const t = type.replace(/\s+/g, '')
-        if (t.endsWith('*') || t.endsWith('&')) return false;
-        return t.includes('vector<')
+    match: (_, ast) => {
+        if (ast.pointerCount > 0 || ast.isReference || ast.isRValueReference || ast.arrayDims.length > 0) return false;
+        return getBaseTypeNoNamespaces(ast) === 'vector';
     },
     format: (ctx) => {
-        const { view, address, name, typeName, size, getTypeSize, tagHeap, readVar } = ctx
-        const match = typeName.match(/<([^>]+)/)
-        const elementType = match ? match[1].trim() : 'unknown'
+        const { view, address, name, ast, size, getTypeSize, tagHeap, readVar } = ctx
+        const elementType = ast.templateArgs.length > 0 ? stringifyCppType(ast.templateArgs[0]) : 'unknown'
         const elementSize = getTypeSize(elementType) || 4
 
         if (address + 12 > view.byteLength) return null
@@ -105,41 +101,32 @@ export const StdVectorFormatter: TypeFormatter = {
 
 export const StdTreeFormatter: TypeFormatter = {
     // Universal Matcher for std::set and std::map
-    match: (type) => {
-        const t = type.replace(/\s+/g, '');
-        if (t.endsWith('*') || t.endsWith('&')) return false;
-        return t.startsWith('std::set<') || t.startsWith('std::map<') || t.startsWith('set<') || t.startsWith('map<');
+    match: (_, ast) => {
+        if (ast.pointerCount > 0 || ast.isReference || ast.isRValueReference || ast.arrayDims.length > 0) return false;
+        const b = getBaseTypeNoNamespaces(ast);
+        return b === 'set' || b === 'map';
     },
     format: (ctx) => {
-        const { view, address, name, typeName, size, depth, getTypeSize, tagHeap, readVar } = ctx;
+        const { view, address, name, typeName, ast, size, depth, getTypeSize, tagHeap, readVar } = ctx;
         if (address + 12 > view.byteLength) return null;
 
         // In WASM32 libc++ __tree, root pointer is at offset 4, size is at offset 8.
         const rootPtr = view.getUint32(address + 4, true);
         const length = view.getUint32(address + 8, true);
 
-        const cleanT = typeName.replace(/\s+/g, '');
-        const isMap = cleanT.startsWith('std::map<') || cleanT.startsWith('map<');
-        let valType = 'unknown';
+        const isMap = getBaseTypeNoNamespaces(ast) === 'map';
 
+        let valType = 'unknown';
         if (isMap) {
-            const mapMatch = typeName.match(/<(.+?)(?:,\s*std::(?:__1::)?allocator|$)/);
-            if (mapMatch) {
-                let commaIdx = -1; let brackets = 0;
-                for (let i = 0; i < mapMatch[1].length; i++) {
-                    if (mapMatch[1][i] === '<') brackets++;
-                    else if (mapMatch[1][i] === '>') brackets--;
-                    else if (mapMatch[1][i] === ',' && brackets === 0) { commaIdx = i; break; }
-                }
-                if (commaIdx !== -1) {
-                    const k = mapMatch[1].substring(0, commaIdx).trim();
-                    const v = mapMatch[1].substring(commaIdx + 1).trim();
-                    valType = `std::pair<const ${k}, ${v}>`;
-                }
+            if (ast.templateArgs.length >= 2) {
+                const k = stringifyCppType(ast.templateArgs[0]);
+                const v = stringifyCppType(ast.templateArgs[1]);
+                valType = `std::pair<const ${k}, ${v}>`;
             }
         } else {
-            const match = typeName.match(/<([^,>]+)/);
-            if (match) valType = match[1].trim();
+            if (ast.templateArgs.length >= 1) {
+                valType = stringifyCppType(ast.templateArgs[0]);
+            }
         }
 
         const valSize = getTypeSize(valType) || 4;
@@ -159,7 +146,7 @@ export const StdTreeFormatter: TypeFormatter = {
                     // In WASM32 libc++, __tree_node values ALWAYS start at offset 16
                     const elVal = readVar(`[${count}]`, valType, valSize, nodePtr + 16, depth + 1);
                     if (elVal) {
-                        // Expand Maps natively so they print beautifully 
+                        // Expand Maps natively so they print beautifully
                         if (isMap && elVal.members && elVal.members.length >= 2) {
                             elVal.value = `${elVal.members[0].value} : ${elVal.members[1].value}`;
                         }
@@ -180,20 +167,19 @@ export const StdTreeFormatter: TypeFormatter = {
 
 export const StanfordCollectionFormatter: TypeFormatter = {
     // Universal Matcher for Stanford Collections
-    match: (type) => {
-        const t = type.replace(/\s+/g, '').replace(/^(?:[a-zA-Z_][a-zA-Z0-9_]*::)+/, '');
-        if (t.endsWith('*') || t.endsWith('&')) return false;
+    match: (_, ast) => {
+        if (ast.pointerCount > 0 || ast.isReference || ast.isRValueReference || ast.arrayDims.length > 0) return false;
+        const b = getBaseTypeNoNamespaces(ast);
         // GenericSet is caught too to ensure typedefs resolve perfectly
-        return /^(Vector|Set|HashSet|Map|HashMap|Stack|Queue|Grid|GenericSet|GenericMap)</.test(t);
+        return /^(Vector|Set|HashSet|Map|HashMap|Stack|Queue|Grid|GenericSet|GenericMap)$/.test(b);
     },
     format: (ctx) => {
-        const { view, address, name, typeName, size, depth, getTypeSize, getStructMembers, tagHeap, readVar } = ctx
+        const { view, address, name, typeName, ast, size, depth, getTypeSize, getStructMembers, tagHeap, readVar } = ctx
 
         const membersList = getStructMembers(typeName);
         if (!membersList) return null;
 
-        const cleanName = typeName.replace(/^(?:[a-zA-Z_][a-zA-Z0-9_]*::)+/, '');
-        const collectionType = cleanName.split('<')[0].replace('Generic', '');
+        const collectionType = getBaseTypeNoNamespaces(ast).replace('Generic', '');
 
         // --- 1. DELEGATION (e.g. Set wrapping Map, Stack wrapping Vector) ---
         const wrapperMember = membersList.find(m =>
@@ -242,8 +228,7 @@ export const StanfordCollectionFormatter: TypeFormatter = {
 
             let elementType = elementsMember.pointeeType;
             if (!elementType) {
-                const match = typeName.match(/<([^,>]+)/);
-                elementType = match ? match[1].trim() : 'unknown';
+                elementType = ast.templateArgs.length > 0 ? stringifyCppType(ast.templateArgs[0]) : 'unknown';
             }
             const elementSize = getTypeSize(elementType) || 4;
 
