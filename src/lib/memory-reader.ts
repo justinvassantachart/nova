@@ -265,7 +265,16 @@ export function readMemorySnapshot(
         }
 
         const heapType = heapTypesMap.get(ptr) || ''
-        if (!heapType.endsWith('::data') && !heapType.endsWith('::node') && !heapType.includes('tree::node') && !heapType.includes('Node')) {
+        
+        // Hide internal C++ and Stanford library structures (e.g., std::__tree_node, std::vector::data)
+        // so they don't clutter the user's heap visualization.
+        // Note: We use a regex instead of `.includes('Node')` to prevent hiding user-defined struct Nodes.
+        const isInternalLibStruct = heapType.endsWith('::data') || 
+                                    heapType.endsWith('::node') || 
+                                    heapType.includes('tree::node') || 
+                                    heapType.match(/__\w*node/i);
+
+        if (!isInternalLibStruct) {
             heapAllocations.push(typedAllocations.get(ptr)!);
         }
     }
