@@ -4,7 +4,7 @@
 
 import type { MemoryValue } from './memory-reader'
 import type { StructMember } from '@/engine/dwarf-types'
-import { parseCppType, stringifyCppType, getBaseTypeNoNamespaces, type ParsedType } from './type-parser'
+import { stringifyCppType, getBaseTypeNoNamespaces, type ParsedType } from './type-parser'
 
 export interface FormatterContext {
     view: DataView
