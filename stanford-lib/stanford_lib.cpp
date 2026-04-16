@@ -554,6 +554,81 @@ char integerToChar(int n) {
     return char('0' + n);
 }
 
+Vector<std::string> stringSplit(const std::string& str, char delimiter, int limit) {
+    Vector<std::string> result;
+    std::string token;
+    int count = 0;
+    for (size_t i = 0; i < str.length(); i++) {
+        if (str[i] == delimiter) {
+            // Coalesce adjacent delimiters (skip empty tokens)
+            if (!token.empty()) {
+                result.add(token);
+                token.clear();
+                count++;
+                if (limit > 0 && count >= limit) {
+                    // Add the remainder as the last token
+                    std::string remainder = str.substr(i + 1);
+                    if (!remainder.empty()) result.add(remainder);
+                    return result;
+                }
+            }
+        } else {
+            token += str[i];
+        }
+    }
+    if (!token.empty()) {
+        result.add(token);
+    }
+    return result;
+}
+
+Vector<std::string> stringSplit(const std::string& str, const std::string& delimiter, int limit) {
+    Vector<std::string> result;
+    if (delimiter.empty()) {
+        result.add(str);
+        return result;
+    }
+    std::string remaining = str;
+    int count = 0;
+    size_t pos;
+    while ((pos = remaining.find(delimiter)) != std::string::npos) {
+        std::string token = remaining.substr(0, pos);
+        // Coalesce adjacent delimiters (skip empty tokens)
+        if (!token.empty()) {
+            result.add(token);
+            count++;
+            if (limit > 0 && count >= limit) {
+                std::string tail = remaining.substr(pos + delimiter.length());
+                if (!tail.empty()) result.add(tail);
+                return result;
+            }
+        }
+        remaining = remaining.substr(pos + delimiter.length());
+    }
+    if (!remaining.empty()) {
+        result.add(remaining);
+    }
+    return result;
+}
+
+std::string stringJoin(const Vector<std::string>& v, char delimiter) {
+    std::string result;
+    for (int i = 0; i < v.size(); i++) {
+        if (i > 0) result += delimiter;
+        result += v[i];
+    }
+    return result;
+}
+
+std::string stringJoin(const Vector<std::string>& v, const std::string& delimiter) {
+    std::string result;
+    for (int i = 0; i < v.size(); i++) {
+        if (i > 0) result += delimiter;
+        result += v[i];
+    }
+    return result;
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  random.cpp — NOVA: use JS bridge for true randomness
 // ══════════════════════════════════════════════════════════════════
