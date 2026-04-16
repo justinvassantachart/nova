@@ -172,7 +172,16 @@ export function readMemorySnapshot(
 
             try {
                 if (varInfo.stackOffset === undefined) continue
-                const address = frameBase + varInfo.stackOffset
+                let address = frameBase + varInfo.stackOffset
+
+                if (varInfo.isDeref) {
+                    if (address > 0 && address + 4 <= view.byteLength) {
+                        address = view.getUint32(address, true)
+                    } else {
+                        continue
+                    }
+                }
+
                 const mv = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, varInfo.name, varInfo.type, varInfo.size, address, varInfo.isPointer, varInfo.pointeeType)
                 if (mv) frames[i].variables.push(mv)
             } catch { }
