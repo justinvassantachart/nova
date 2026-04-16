@@ -45,6 +45,16 @@ self.onmessage = async (e) => {
 
         // Base environment — functions we explicitly implement
         const baseEnv: Record<string, Function> = {
+            // ── Nova Random Bridge ─────────────────────────────
+            // Provides real randomness to C++ code via crypto.getRandomValues.
+            // The Stanford library's randomInteger/randomReal call this instead
+            // of rand(), which is broken in WASM (srand(0) → always returns 0).
+            __nova_random_u32: () => {
+                const buf = new Uint32Array(1);
+                crypto.getRandomValues(buf);
+                return buf[0];
+            },
+
             // Natively handled by C++ Memory Tracker
             JS_notify_alloc: () => { },
             JS_notify_free: () => { },
