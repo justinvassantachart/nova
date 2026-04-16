@@ -3,6 +3,7 @@
 
 import type { DwarfInfo, LineMap, VariableInfo, StructInfo } from './dwarf-types'
 import { EMPTY_DWARF } from './dwarf-types'
+import { canonicalizeTypeName } from '../lib/type-parser'
 
 const textDecoder = new TextDecoder('utf-8')
 
@@ -482,17 +483,8 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
 }
 
 function cleanTypeName(name: string): string {
-    if (!name) return 'unknown'
-    if (name.startsWith('std::__1::basic_string') || name.startsWith('std::__2::basic_string')) return 'std::string'
-    if (name.startsWith('std::__1::vector') || name.startsWith('std::__2::vector')) {
-        const match = name.match(/<([^,]+)/); if (match) return `std::vector<${cleanTypeName(match[1].trim())}>`
-    }
-    if (name === 'string' || name === 'std::string' || name.startsWith('basic_string')) return 'std::string'
-    if (name === 'vector' || name.startsWith('vector<')) {
-        const match = name.match(/<([^,]+)/); if (match) return `std::vector<${cleanTypeName(match[1].trim())}>`
-        return 'std::vector<unknown>'
-    }
-    return name
+    if (!name) return 'unknown';
+    return canonicalizeTypeName(name);
 }
 
 function resolveTypeName(typeMap: Map<number, TypeMapEntry>, offset: number | undefined, depth = 0): string {

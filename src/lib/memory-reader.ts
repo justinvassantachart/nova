@@ -5,6 +5,7 @@
 
 import type { DwarfInfo, StructInfo } from '@/engine/dwarf-types'
 import { PRETTY_PRINTERS } from './formatters'
+import { parseCppType, stringifyCppType, getBaseTypeNoNamespaces, canonicalizeTypeName } from './type-parser'
 
 export interface MemoryValue {
     name: string; type: string; address: number; value: string | number; rawValue: number;
@@ -24,56 +25,47 @@ export interface MemorySnapshot {
     frames: CallFrameSnapshot[]; heapAllocations: HeapAllocation[];
 }
 
-function getStructDef(types: Record<string, StructInfo>, typeName: string) {
+function stripNs(canonicalName: string): string {
+    return canonicalName.replace(/(?:[a-zA-Z_0-9]+::)+/g, '');
+}
+
+export function getStructDef(types: Record<string, StructInfo>, typeName: string) {
     if (!typeName) return undefined;
     if (types[typeName]) return types[typeName];
-    
+
     let clean = typeName.replace(/^(struct|class)\s+/, '').trim();
     if (types[clean]) return types[clean];
 
-    const spaceless = clean.replace(/\s+/g, '');
+    const reqCanon = canonicalizeTypeName(clean);
+    const reqNoNs = stripNs(reqCanon);
 
-    const stripNs = (name: string) => {
-        const bracketIdx = name.indexOf('<');
-        if (bracketIdx === -1) {
-            const parts = name.split('::');
-            return parts[parts.length - 1];
-        }
-        const prefix = name.substring(0, bracketIdx);
-        const parts = prefix.split('::');
-        return parts[parts.length - 1] + name.substring(bracketIdx);
-    };
-
-    const requestedNoNs = stripNs(spaceless); // e.g. "Set<int>"
-
-    // 1. Try exact matches ignoring namespaces
+    // 1st pass: exact structural match
     for (const [key, def] of Object.entries(types)) {
-        const keyClean = key.replace(/^(struct|class)\s+/, '').replace(/\s+/g, '');
-        if (keyClean === spaceless) return def;
-        
-        const keyNoNs = stripNs(keyClean);
-        if (keyNoNs === requestedNoNs) return def;
+        const keyCanon = canonicalizeTypeName(key.replace(/^(struct|class)\s+/, ''));
+        if (keyCanon === reqCanon) return def;
     }
 
-    // 2. Try prefix matches (handles trailing default args: Set<int, less<int>>)
-    if (requestedNoNs.includes('<')) {
-        const prefix = requestedNoNs.substring(0, requestedNoNs.length - 1) + ',';
-        for (const [key, def] of Object.entries(types)) {
-            const keyNoNs = stripNs(key.replace(/^(struct|class)\s+/, '').replace(/\s+/g, ''));
-            if (keyNoNs.startsWith(prefix)) return def;
-        }
+    // 2nd pass: structural match ignoring namespaces
+    for (const [key, def] of Object.entries(types)) {
+        const keyCanon = canonicalizeTypeName(key.replace(/^(struct|class)\s+/, ''));
+        if (stripNs(keyCanon) === reqNoNs) return def;
     }
 
-    // 3. NUCLEAR MATCH: Match Base Name + First Template Argument
-    const reqBaseMatch = requestedNoNs.match(/^([^<]+)<([^,>]+)/); // ["Set<int", "Set", "int"]
-    if (reqBaseMatch) {
-        const reqBase = reqBaseMatch[1];
-        const reqFirstArg = reqBaseMatch[2];
+    // 3rd pass: Match base name + exact first N template arguments (ignoring trailing defaults)
+    const reqAst = parseCppType(clean);
+    if (reqAst && reqAst.templateArgs.length > 0) {
+        const reqBase = stripNs(reqAst.baseName);
         for (const [key, def] of Object.entries(types)) {
-            const keyNoNs = stripNs(key.replace(/^(struct|class)\s+/, '').replace(/\s+/g, ''));
-            const keyBaseMatch = keyNoNs.match(/^([^<]+)<([^,>]+)/);
-            if (keyBaseMatch && keyBaseMatch[1] === reqBase && keyBaseMatch[2] === reqFirstArg) {
-                return def;
+            const keyAst = parseCppType(key.replace(/^(struct|class)\s+/, ''));
+            if (keyAst && stripNs(keyAst.baseName) === reqBase) {
+                let match = true;
+                for (let i = 0; i < reqAst.templateArgs.length; i++) {
+                    if (i >= keyAst.templateArgs.length || stripNs(stringifyCppType(keyAst.templateArgs[i], true)) !== stripNs(stringifyCppType(reqAst.templateArgs[i], true))) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return def;
             }
         }
     }
@@ -81,40 +73,30 @@ function getStructDef(types: Record<string, StructInfo>, typeName: string) {
     return undefined;
 }
 
-function beautifyTypeName(typeName: string): string {
-    return typeName
-        .replace(/(const|volatile|restrict)\s+/g, '')
-        .replace(/\s+(const|volatile|restrict)/g, '')
-        .replace(/std::(?:__1|__2)::/g, 'std::')
-        .replace(/,\s*std::allocator<[^>]+>\s*/g, '')
-        .trim();
-}
-
 export function getResolvedTypeSize(dwarfInfo: DwarfInfo, typeName: string): number {
-    const cleanType = beautifyTypeName(typeName);
-    if (cleanType.endsWith('*') || cleanType.endsWith('&')) return 4; 
+    const ast = parseCppType(typeName);
 
-    const arrayMatch = cleanType.match(/^(.*?)((?:\[\d+\])+)$/);
-    if (arrayMatch) {
-        const baseType = arrayMatch[1].trim();
-        const dimsStr = arrayMatch[2];
-        const baseSize = getResolvedTypeSize(dwarfInfo, baseType) || 4;
+    if (ast.pointerCount > 0 || ast.isReference || ast.isRValueReference) return 4;
+
+    if (ast.arrayDims.length > 0) {
+        const baseAst = { ...ast, arrayDims: [] };
+        const baseSize = getResolvedTypeSize(dwarfInfo, stringifyCppType(baseAst)) || 4;
         let totalElements = 1;
-        for (const match of dimsStr.matchAll(/\[(\d+)\]/g)) {
-            totalElements *= parseInt(match[1], 10);
+        for (const dim of ast.arrayDims) {
+            totalElements *= (dim === 0 ? 1 : dim);
         }
         return baseSize * totalElements;
     }
 
-    if (['char', 'bool', 'int8_t', 'uint8_t'].includes(cleanType)) return 1;
-    if (['short', 'int16_t', 'uint16_t'].includes(cleanType)) return 2;
-    if (['int', 'long', 'float', 'int32_t', 'uint32_t'].includes(cleanType)) return 4;
-    if (['long long', 'double', 'int64_t', 'uint64_t'].includes(cleanType)) return 8;
+    const cleanType = getBaseTypeNoNamespaces(ast);
+    if (['char', 'bool', 'int8_t', 'uint8_t', 'unsigned char', 'signed char'].includes(cleanType)) return 1;
+    if (['short', 'unsigned short', 'int16_t', 'uint16_t'].includes(cleanType)) return 2;
+    if (['int', 'unsigned', 'unsigned int', 'long', 'unsigned long', 'float', 'int32_t', 'uint32_t'].includes(cleanType)) return 4;
+    if (['long long', 'unsigned long long', 'double', 'long double', 'int64_t', 'uint64_t'].includes(cleanType)) return 8;
+    if (cleanType === 'string' || cleanType === 'basic_string') return 12;
+    if (cleanType === 'vector') return 12;
 
-    if (cleanType === 'std::string' || cleanType === 'string') return 12;
-    if (cleanType.startsWith('std::vector') || cleanType.startsWith('vector<')) return 12;
-
-    const def = getStructDef(dwarfInfo.types, cleanType);
+    const def = getStructDef(dwarfInfo.types, typeName);
     return def ? def.size : 4;
 }
 
@@ -197,33 +179,37 @@ export function readMemorySnapshot(
             if (typedAllocations.has(ptr)) continue;
 
             const inferredType = heapTypesMap.get(ptr);
-            const boundedArrayMatch = inferredType ? inferredType.match(/^(.*?)((?:\[\d+\])+)$/) : null;
+            const ast = inferredType ? parseCppType(inferredType) : null;
 
-            if (boundedArrayMatch) {
+            // Handle bounded array types via AST arrayDims
+            if (ast && ast.arrayDims.length > 0) {
                 discovered = true;
-                const baseType = boundedArrayMatch[1].trim();
-                const dims = boundedArrayMatch[2];
-                const firstDimMatch = dims.match(/^\[(\d+)\](.*)$/)!;
-                const count = parseInt(firstDimMatch[1], 10);
-                const elType = baseType + firstDimMatch[2];
+                const count = ast.arrayDims[0];
+                const elAst = { ...ast, arrayDims: ast.arrayDims.slice(1) };
+                const elType = stringifyCppType(elAst);
                 const elSize = getResolvedTypeSize(dwarfInfo, elType) || 4;
 
                 const ha: HeapAllocation = { ptr, size, typeName: inferredType!, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
-                const maxCount = Math.min(count, 50);
-                
+
+                let renderCount = count;
+                if (renderCount === 0) renderCount = Math.floor(size / elSize);
+
+                const maxCount = Math.min(renderCount || 0, 50);
+
                 for (let k = 0; k < maxCount; k++) {
                     const mAddr = ptr + k * elSize;
                     if (mAddr + elSize <= ptr + size && mAddr + elSize <= view.byteLength) {
-                        const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, elType, elSize, mAddr, elType.endsWith('*'));
+                        const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, elType, elSize, mAddr, elAst.pointerCount > 0);
                         if (mVal) ha.members.push(mVal);
                     }
                 }
-                if (count > maxCount) ha.members.push({ name: '...', type: '', address: 0, value: `(+${count - maxCount} more)`, rawValue: 0, size: 0, isPointer: false });
+                if (renderCount > maxCount) ha.members.push({ name: '...', type: '', address: 0, value: `(+${renderCount - maxCount} more)`, rawValue: 0, size: 0, isPointer: false });
 
                 typedAllocations.set(ptr, ha);
                 continue;
             }
 
+            // Handle unbounded array types (type ending with [])
             if (inferredType && inferredType.endsWith('[]')) {
                 discovered = true;
                 const elType = inferredType.slice(0, -2);
@@ -231,7 +217,7 @@ export function readMemorySnapshot(
 
                 const ha: HeapAllocation = { ptr, size, typeName: inferredType, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
                 const count = Math.min(Math.floor(size / elSize), 50);
-                
+
                 for (let k = 0; k < count; k++) {
                     const mAddr = ptr + k * elSize;
                     if (mAddr + elSize <= ptr + size && mAddr + elSize <= view.byteLength) {
@@ -295,15 +281,16 @@ function readVariable(
 ): MemoryValue | null {
     if (address <= 0 || address + size > view.byteLength || depth > 10) return null;
 
-    const cleanType = beautifyTypeName(typeName);
+    const ast = parseCppType(typeName);
+    const cleanType = stringifyCppType(ast);
 
     for (const printer of PRETTY_PRINTERS) {
-        if (printer.match(cleanType)) {
+        if (printer.match(cleanType, ast)) {
             try {
                 const formatted = printer.format({
-                    view, bytes, address, name, typeName: cleanType, size, depth,
+                    view, bytes, address, name, typeName: cleanType, ast, size, depth,
                     getTypeSize: (t) => getResolvedTypeSize(dwarfInfo, t),
-                    getStructMembers: (t) => getStructDef(dwarfInfo.types, beautifyTypeName(t))?.members,
+                    getStructMembers: (t) => getStructDef(dwarfInfo.types, t)?.members,
                     tagHeap: (ptr, type) => { if (activePtrs.has(ptr)) heapTypesMap.set(ptr, type) },
                     readVar: (n, t, s, a, d) => readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, n, t, s, a, false, undefined, d),
                 });
@@ -316,23 +303,28 @@ function readVariable(
     let pointsTo: number | undefined; let isStruct = false; let members: MemoryValue[] | undefined;
 
     try {
-        if (cleanType.endsWith('&')) {
+        if (ast.isReference || ast.isRValueReference) {
             let ptrVal = 0;
             try { ptrVal = view.getUint32(address, true); } catch { return null; }
             if (ptrVal > 0) {
-                const baseType = cleanType.replace(/&+$/, '').trim();
+                const baseAst = { ...ast, isReference: false, isRValueReference: false };
+                const baseType = stringifyCppType(baseAst);
                 const baseSize = getResolvedTypeSize(dwarfInfo, baseType) || 4;
-                const resolved = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, name, baseType, baseSize, ptrVal, baseType.endsWith('*'), undefined, depth + 1);
+                const resolved = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, name, baseType, baseSize, ptrVal, baseAst.pointerCount > 0, undefined, depth + 1);
                 if (resolved) { resolved.type = cleanType; return resolved; }
             } else return { name, type: cleanType, address, value: 'nullptr (invalid ref)', rawValue: 0, size: 4, isPointer: true, pointsTo: 0, isStruct: false };
         }
 
-        const arrayMatch = cleanType.match(/^(.*?)((?:\[\d+\])+)$/);
-
         // 1. Pointers
-        if (isPointer || cleanType.endsWith('*')) {
+        if (isPointer || ast.pointerCount > 0) {
             pointsTo = view.getUint32(address, true); rawValue = pointsTo;
-            const actualPointee = pointeeType ? beautifyTypeName(pointeeType) : (cleanType.endsWith('*') ? cleanType.slice(0, -1).trim() : 'unknown');
+            let actualPointee = 'unknown';
+            if (pointeeType) {
+                actualPointee = canonicalizeTypeName(pointeeType);
+            } else if (ast.pointerCount > 0) {
+                const pointeeAst = { ...ast, pointerCount: ast.pointerCount - 1 };
+                actualPointee = stringifyCppType(pointeeAst);
+            }
 
             if (pointsTo > 0 && actualPointee !== 'unknown' && actualPointee !== 'void' && actualPointee !== 'char') {
                 if (activePtrs.has(pointsTo)) heapTypesMap.set(pointsTo, actualPointee);
@@ -345,32 +337,29 @@ function readVariable(
             }
         }
         // 2. Arrays
-        else if (arrayMatch && !cleanType.endsWith('&')) {
-            const baseType = arrayMatch[1].trim(); const dimsStr = arrayMatch[2];
-            const firstDimMatch = dimsStr.match(/^\[(\d+)\](.*)$/);
-            if (firstDimMatch) {
-                const count = parseInt(firstDimMatch[1], 10);
-                const elementType = baseType + firstDimMatch[2];
-                isStruct = true; value = `[${count}]`; members = [];
-                const elementSize = getResolvedTypeSize(dwarfInfo, elementType) || (count > 0 ? Math.floor(size / count) : 0);
-                if (elementSize > 0) {
-                    const renderCount = Math.min(count, 50);
-                    for (let k = 0; k < renderCount; k++) {
-                        const mAddr = address + k * elementSize;
-                        if (mAddr + elementSize <= view.byteLength) {
-                            const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, elementType, elementSize, mAddr, elementType.endsWith('*'), undefined, depth + 1);
-                            if (mVal) members.push(mVal);
-                        }
+        else if (ast.arrayDims.length > 0) {
+            const count = ast.arrayDims[0];
+            const elementAst = { ...ast, arrayDims: ast.arrayDims.slice(1) };
+            const elementType = stringifyCppType(elementAst);
+            isStruct = true; value = `[${count || 0}]`; members = [];
+            const elementSize = getResolvedTypeSize(dwarfInfo, elementType) || (count > 0 ? Math.floor(size / count) : 0);
+            if (elementSize > 0) {
+                const renderCount = Math.min(count || Math.floor(size / elementSize), 50);
+                for (let k = 0; k < renderCount; k++) {
+                    const mAddr = address + k * elementSize;
+                    if (mAddr + elementSize <= view.byteLength) {
+                        const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, elementType, elementSize, mAddr, elementAst.pointerCount > 0, undefined, depth + 1);
+                        if (mVal) members.push(mVal);
                     }
-                    if (count > 50) members.push({ name: '...', type: '', address: 0, value: `(+${count - 50} more)`, rawValue: 0, size: 0, isPointer: false });
                 }
+                if ((count || Math.floor(size / elementSize)) > 50) members.push({ name: '...', type: '', address: 0, value: `(+${(count || Math.floor(size / elementSize)) - 50} more)`, rawValue: 0, size: 0, isPointer: false });
             }
         }
-        // 3. Struct Expansion 
+        // 3. Struct Expansion
         else if (getStructDef(dwarfInfo.types, cleanType)) {
             isStruct = true; value = `{...}`; members = [];
             const structDef = getStructDef(dwarfInfo.types, cleanType)!;
-            
+
             for (const member of structDef.members) {
                 // Ignore these internally so they don't clog up the UI
                 if (['version', '_version', 'removeFlag', '_removeFlags'].includes(member.name)) continue;
@@ -384,10 +373,11 @@ function readVariable(
         }
         // 4. Primitives & Opaque Fallback
         else {
-            if (size === 1) { rawValue = view.getInt8(address); value = cleanType === 'char' ? `'${String.fromCharCode(rawValue)}'` : rawValue; }
+            const baseTypeNoNs = getBaseTypeNoNamespaces(ast);
+            if (size === 1) { rawValue = view.getInt8(address); value = baseTypeNoNs === 'char' ? `'${String.fromCharCode(rawValue)}'` : rawValue; }
             else if (size === 2) { rawValue = view.getInt16(address, true); value = rawValue; }
-            else if (size === 4) { if (cleanType === 'float') { rawValue = view.getFloat32(address, true); value = Number(rawValue.toFixed(4)); } else { rawValue = view.getInt32(address, true); value = rawValue; } }
-            else if (size === 8) { if (cleanType === 'double') { rawValue = view.getFloat64(address, true); value = Number(rawValue.toFixed(4)); } else { rawValue = Number(view.getBigInt64(address, true)); value = rawValue; } }
+            else if (size === 4) { if (baseTypeNoNs === 'float') { rawValue = view.getFloat32(address, true); value = Number(rawValue.toFixed(4)); } else { rawValue = view.getInt32(address, true); value = rawValue; } }
+            else if (size === 8) { if (baseTypeNoNs === 'double') { rawValue = view.getFloat64(address, true); value = Number(rawValue.toFixed(4)); } else { rawValue = Number(view.getBigInt64(address, true)); value = rawValue; } }
             else { value = `[${size} bytes]`; } // Graceful fallback instead of throwing ???
         }
     } catch { }
