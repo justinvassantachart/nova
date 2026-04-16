@@ -7,7 +7,7 @@ self.postMessage({ type: 'PRELOAD_DONE' })
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
-const BASE_INCLUDES = ['-I/workspace/', '-I/sysroot/', '-isystem', '/sysroot/include/c++/v1', '-isystem', '/sysroot/include', '-fno-exceptions', '-fno-rtti']
+const BASE_INCLUDES = ['-I/workspace/', '-I/sysroot/', '-I/sysroot/include/stanford/', '-isystem', '/sysroot/include/c++/v1', '-isystem', '/sysroot/include', '-fno-exceptions', '-fno-rtti']
 
 function insertIntoTree(tree: Record<string, unknown>, path: string, data: Uint8Array) {
     const parts = (path.startsWith('/') ? path.slice(1) : path).split('/')
@@ -65,9 +65,11 @@ function extractTextData(rawData: unknown): string {
 let cachedSysrootTree: Record<string, unknown> = {}
 let globalPchBytes: Uint8Array | null = null
 let globalMemoryTrackerObj: Uint8Array | null = null // Lead's Pro-Tip!
+let globalStanfordObj: Uint8Array | null = null // Stanford CS106B ADT library
 
 const PCH_HEADERS = ['<iostream>', '<vector>', '<string>', '<map>', '<algorithm>', '<memory>', '<functional>', '<utility>', '<unordered_map>', '<unordered_set>', '<set>', '<queue>', '<stack>', '<iomanip>']
-const PCH_CONTENT = PCH_HEADERS.map(h => `#include ${h}`).join('\n') + '\n'
+const STANFORD_PCH_HEADERS = ['"vector.h"', '"grid.h"', '"map.h"', '"set.h"', '"stack.h"', '"queue.h"', '"hashmap.h"', '"hashset.h"', '"strlib.h"']
+const PCH_CONTENT = [...PCH_HEADERS, ...STANFORD_PCH_HEADERS].map(h => `#include ${h}`).join('\n') + '\n'
 
 function buildFileTree(files: Record<string, string>): Record<string, unknown> {
     const tree: Record<string, unknown> = {}
@@ -129,6 +131,31 @@ async function handleSeedSysroot(data: Extract<CompilerMessage, { type: 'SEED_SY
         console.warn("Worker: Failed to precompile memory_tracker.cpp", msg)
     }
 
+    // Precompile Stanford C++ 106B library into stanford_lib.o
+    try {
+        let stStderr = ""
+        const stArgs = [
+            ...BASE_INCLUDES,
+            '-std=c++20', '-O2', '-c',
+            '-target', 'wasm32-wasip1',
+            '-o', '/sysroot/stanford_lib.o',
+            '/sysroot/include/stanford/stanford_lib.cpp'
+        ]
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stOutTree = await clangpp(stArgs, cachedSysrootTree as any, {
+            stderr: (bytes: Uint8Array | null) => {
+                if (bytes) stStderr += dec.decode(bytes, { stream: true })
+            }
+        }) as any
+        const stObjData = getTreeNode(stOutTree, '/sysroot/stanford_lib.o')
+        if (stObjData) {
+            globalStanfordObj = extractBinaryData(stObjData)
+        }
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn("Worker: Failed to precompile Stanford library", msg)
+    }
+
     self.postMessage({ type: 'SEED_SYSROOT_DONE' })
 }
 
@@ -184,6 +211,12 @@ async function handleCompile(data: Extract<CompilerMessage, { type: 'COMPILE' }>
             args.push('/sysroot/memory_tracker.o')
         } else {
             args.push('/sysroot/memory_tracker.cpp')
+        }
+
+        // Auto-link Stanford library
+        if (globalStanfordObj) {
+            insertIntoTree(tree, '/sysroot/stanford_lib.o', globalStanfordObj)
+            args.push('/sysroot/stanford_lib.o')
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -297,6 +330,12 @@ async function handleLinkObjects(data: Extract<CompilerMessage, { type: 'LINK_OB
             linkArgs.push('/sysroot/memory_tracker.o')
         } else {
             linkArgs.push('/sysroot/memory_tracker.cpp') // Fallback 
+        }
+
+        // Auto-link Stanford library
+        if (globalStanfordObj) {
+            insertIntoTree(tree, '/sysroot/stanford_lib.o', globalStanfordObj)
+            linkArgs.push('/sysroot/stanford_lib.o')
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -351,7 +351,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
         const abbrevTable = parseAbbrevTable(debugAbbrev, abbrevOffset)
         let currentStructOffset: number | null = null
         const dieStack: { tag: number, name: string, offset: number }[] = []
-        const pendingVars: { name: string; typeRef: number | undefined; stackOffset: number; declLine: number; funcName: string }[] = []
+        const pendingVars: { name: string; typeRef: number | undefined; stackOffset: number; declLine: number; funcName: string; isDeref?: boolean }[] = []
 
         while (offset < unitEnd && offset < debugInfo.length) {
             const dieOffset = offset
@@ -366,6 +366,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
 
             let dieName: string | undefined; let dieSize: number | undefined; let dieTypeRef: number | undefined; let dieMemberLoc: number | undefined; let dieStackOffset: number | undefined; let dieDeclLine: number | undefined
             let dieUpperBound: number | undefined; let dieCount: number | undefined
+            let dieIsDeref = false
 
             for (const attr of abbrev.attrs) {
                 const attrStart = offset
@@ -395,7 +396,14 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
 
                         const blockStart = offset + lenSize
                         if (blockLen >= 2 && blockStart < debugInfo.length) {
-                            if (view.getUint8(blockStart) === 0x91) dieStackOffset = readSLEB128(view, blockStart + 1)
+                            if (view.getUint8(blockStart) === 0x91) {
+                                dieStackOffset = readSLEB128(view, blockStart + 1)
+                                const opOffset = blockStart + 1 + _bytesRead
+                                // Check if a DW_OP_deref (0x06) instruction follows the fbreg offset
+                                if (opOffset < blockStart + blockLen && view.getUint8(opOffset) === 0x06) {
+                                    dieIsDeref = true
+                                }
+                            }
                         }
                     }
                 }
@@ -438,7 +446,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
                     if (dieStack[i].tag === DW_TAG_subprogram) { funcName = dieStack[i].name || 'unknown'; break }
                 }
                 if (dieStackOffset !== undefined && !funcName.startsWith('__') && !dieName.startsWith('__')) {
-                    pendingVars.push({ name: dieName, typeRef: dieTypeRef, stackOffset: dieStackOffset, declLine: dieDeclLine ?? 0, funcName })
+                    pendingVars.push({ name: dieName, typeRef: dieTypeRef, stackOffset: dieStackOffset, declLine: dieDeclLine ?? 0, funcName, isDeref: dieIsDeref })
                 }
             }
             if (abbrev.hasChildren) dieStack.push({ tag: abbrev.tag, name: dieName || '', offset: dieOffset })
@@ -452,6 +460,7 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
                 name: pv.name, type: typeName, size: typeSize, stackOffset: pv.stackOffset, isPointer: pointer,
                 pointeeType: pointer && pv.typeRef ? resolvePointeeType(typeMap, pv.typeRef) : undefined,
                 declLine: pv.declLine, funcName: pv.funcName,
+                isDeref: pv.isDeref
             })
         }
         for (const [structOff, members] of pendingStructMembers) {
