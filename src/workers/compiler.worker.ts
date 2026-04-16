@@ -206,6 +206,15 @@ async function handleCompile(data: Extract<CompilerMessage, { type: 'COMPILE' }>
             ...sources,
         ]
 
+        if (globalPchBytes) {
+            insertIntoTree(tree, '/workspace/nova_pch.h', enc.encode(PCH_CONTENT))
+            insertIntoTree(tree, '/workspace/nova_pch.pch', globalPchBytes)
+            args.push('-include-pch', '/workspace/nova_pch.pch')
+        } else {
+            insertIntoTree(tree, '/workspace/nova_pch.h', enc.encode(PCH_CONTENT))
+            args.push('-include', '/workspace/nova_pch.h')
+        }
+
         if (globalMemoryTrackerObj) {
             insertIntoTree(tree, '/sysroot/memory_tracker.o', globalMemoryTrackerObj)
             args.push('/sysroot/memory_tracker.o')
@@ -258,6 +267,9 @@ async function handleCompileOne(data: Extract<CompilerMessage, { type: 'COMPILE_
             insertIntoTree(tree, '/workspace/nova_pch.h', enc.encode(PCH_CONTENT))
             insertIntoTree(tree, '/workspace/nova_pch.pch', globalPchBytes)
             args.push('-include-pch', '/workspace/nova_pch.pch')
+        } else if (src.endsWith('.cpp')) {
+            insertIntoTree(tree, '/workspace/nova_pch.h', enc.encode(PCH_CONTENT))
+            args.push('-include', '/workspace/nova_pch.h')
         }
 
         args.push('-c', '-o', objName, src) // -c forces Object File output
