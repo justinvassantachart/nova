@@ -28,7 +28,11 @@ export const StdStringFormatter: TypeFormatter = {
     match: (type) => {
         const t = type.replace(/\s+/g, '')
         if (t.endsWith('*') || t.endsWith('&')) return false;
-        return t === 'std::string' || t === 'string' || t.includes('basic_string')
+        // Guard: only match if basic_string is the TOP-LEVEL type, not a template arg
+        // e.g. match "basic_string<char,...>" but NOT "Vector<basic_string<char,...>>"
+        const bracketIdx = t.indexOf('<')
+        const prefix = bracketIdx === -1 ? t : t.substring(0, bracketIdx)
+        return t === 'std::string' || t === 'string' || prefix.includes('basic_string')
     },
     format: (ctx) => {
         const { view, bytes, address, name, size, tagHeap } = ctx
@@ -45,8 +49,9 @@ export const StdStringFormatter: TypeFormatter = {
                     value = `"${new TextDecoder().decode(bytes.subarray(address, address + strSize))}"`
                 }
             } else {
+                // libc++ __2 (alternate) ABI: __data_ at +0, __size_ at +4, __cap_ at +8
                 const strSize = view.getUint32(address + 4, true)
-                const ptr = view.getUint32(address + 8, true)
+                const ptr = view.getUint32(address, true)
                 if (ptr > 0 && ptr + strSize <= bytes.length && strSize < 100000) {
                     value = `"${new TextDecoder().decode(bytes.subarray(ptr, ptr + strSize))}"`
                     tagHeap(ptr, 'std::string::data')

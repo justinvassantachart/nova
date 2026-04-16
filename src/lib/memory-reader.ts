@@ -33,6 +33,12 @@ function getStructDef(types: Record<string, StructInfo>, typeName: string) {
 
     const spaceless = clean.replace(/\s+/g, '');
 
+    // Try matching after beautifying both sides (handles __2:: vs std:: mismatches)
+    const beautified = beautifyTypeName(clean).replace(/\s+/g, '');
+    for (const [key, def] of Object.entries(types)) {
+        if (beautifyTypeName(key).replace(/\s+/g, '') === beautified) return def;
+    }
+
     const stripNs = (name: string) => {
         const bracketIdx = name.indexOf('<');
         if (bracketIdx === -1) {
