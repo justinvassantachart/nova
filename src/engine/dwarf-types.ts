@@ -14,6 +14,7 @@ export interface VariableInfo {
     pointeeType?: string      // type being pointed to (for pointers)
     funcName: string          // owning function name (for scope filtering)
     declLine: number          // source line where declared (for time-travel filtering)
+    isDeref?: boolean         // true if the location has DW_OP_deref (passed by invisible reference)
 }
 
 /** A member of a struct/class */

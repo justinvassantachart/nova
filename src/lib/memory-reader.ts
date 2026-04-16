@@ -1,14 +1,7 @@
-// ── Memory Reader ──────────────────────────────────────────────────
+//   Memory Reader  //
 // Reads WASM linear memory while the executor worker is paused to extract
 // stack variable values and heap allocation contents. Uses DWARF info
 // for type-aware reading with scope and time-travel filtering.
-//
-// Features:
-// - Multi-frame call stack processing
-// - Topological heap type inference (linked list traversal)
-// - Extensible Pretty Printer dispatch for std::string, std::vector
-// - Array inference via tagHeap (used by std::vector formatter)
-// - Struct expansion with recursive member reading
 
 import type { DwarfInfo, StructInfo } from '@/engine/dwarf-types'
 import { PRETTY_PRINTERS } from './formatters'
@@ -32,9 +25,59 @@ export interface MemorySnapshot {
 }
 
 function getStructDef(types: Record<string, StructInfo>, typeName: string) {
+    if (!typeName) return undefined;
     if (types[typeName]) return types[typeName];
-    if (typeName.startsWith('struct ')) return types[typeName.replace('struct ', '')];
-    if (typeName.startsWith('class ')) return types[typeName.replace('class ', '')];
+    
+    let clean = typeName.replace(/^(struct|class)\s+/, '').trim();
+    if (types[clean]) return types[clean];
+
+    const spaceless = clean.replace(/\s+/g, '');
+
+    const stripNs = (name: string) => {
+        const bracketIdx = name.indexOf('<');
+        if (bracketIdx === -1) {
+            const parts = name.split('::');
+            return parts[parts.length - 1];
+        }
+        const prefix = name.substring(0, bracketIdx);
+        const parts = prefix.split('::');
+        return parts[parts.length - 1] + name.substring(bracketIdx);
+    };
+
+    const requestedNoNs = stripNs(spaceless); // e.g. "Set<int>"
+
+    // 1. Try exact matches ignoring namespaces
+    for (const [key, def] of Object.entries(types)) {
+        const keyClean = key.replace(/^(struct|class)\s+/, '').replace(/\s+/g, '');
+        if (keyClean === spaceless) return def;
+        
+        const keyNoNs = stripNs(keyClean);
+        if (keyNoNs === requestedNoNs) return def;
+    }
+
+    // 2. Try prefix matches (handles trailing default args: Set<int, less<int>>)
+    if (requestedNoNs.includes('<')) {
+        const prefix = requestedNoNs.substring(0, requestedNoNs.length - 1) + ',';
+        for (const [key, def] of Object.entries(types)) {
+            const keyNoNs = stripNs(key.replace(/^(struct|class)\s+/, '').replace(/\s+/g, ''));
+            if (keyNoNs.startsWith(prefix)) return def;
+        }
+    }
+
+    // 3. NUCLEAR MATCH: Match Base Name + First Template Argument
+    const reqBaseMatch = requestedNoNs.match(/^([^<]+)<([^,>]+)/); // ["Set<int", "Set", "int"]
+    if (reqBaseMatch) {
+        const reqBase = reqBaseMatch[1];
+        const reqFirstArg = reqBaseMatch[2];
+        for (const [key, def] of Object.entries(types)) {
+            const keyNoNs = stripNs(key.replace(/^(struct|class)\s+/, '').replace(/\s+/g, ''));
+            const keyBaseMatch = keyNoNs.match(/^([^<]+)<([^,>]+)/);
+            if (keyBaseMatch && keyBaseMatch[1] === reqBase && keyBaseMatch[2] === reqFirstArg) {
+                return def;
+            }
+        }
+    }
+
     return undefined;
 }
 
@@ -49,9 +92,8 @@ function beautifyTypeName(typeName: string): string {
 
 export function getResolvedTypeSize(dwarfInfo: DwarfInfo, typeName: string): number {
     const cleanType = beautifyTypeName(typeName);
-    if (cleanType.endsWith('*') || cleanType.endsWith('&')) return 4; // References are pointer-sized in WASM32
+    if (cleanType.endsWith('*') || cleanType.endsWith('&')) return 4; 
 
-    // Evaluate total bytes for multidimensional array types (e.g. Hero[2], int[3][3])
     const arrayMatch = cleanType.match(/^(.*?)((?:\[\d+\])+)$/);
     if (arrayMatch) {
         const baseType = arrayMatch[1].trim();
@@ -69,7 +111,6 @@ export function getResolvedTypeSize(dwarfInfo: DwarfInfo, typeName: string): num
     if (['int', 'long', 'float', 'int32_t', 'uint32_t'].includes(cleanType)) return 4;
     if (['long long', 'double', 'int64_t', 'uint64_t'].includes(cleanType)) return 8;
 
-    // WebAssembly libc++ specific footprint sizes
     if (cleanType === 'std::string' || cleanType === 'string') return 12;
     if (cleanType.startsWith('std::vector') || cleanType.startsWith('vector<')) return 12;
 
@@ -83,14 +124,12 @@ export function readMemorySnapshot(
     heapPointers: { countPtr: number; allocsPtr: number },
     knownHeapTypes: Record<number, string> = {}
 ): { snapshot: MemorySnapshot; nextKnownTypes: Record<number, string> } {
-
     const frames: CallFrameSnapshot[] = callStack.map(f => ({
         id: f.id, funcName: f.func, sp: f.sp, line: f.line, variables: [], isActive: false,
     }))
     if (frames.length > 0) frames[frames.length - 1].isActive = true
 
     const heapAllocations: HeapAllocation[] = []
-
     if (!memoryBuffer || memoryBuffer.byteLength === 0) {
         return { snapshot: { frames, heapAllocations }, nextKnownTypes: knownHeapTypes }
     }
@@ -98,9 +137,9 @@ export function readMemorySnapshot(
     const view = new DataView(memoryBuffer)
     const bytes = new Uint8Array(memoryBuffer)
 
-    // 1. Read raw heap allocations FIRST so we know which pointers are still alive
     const rawAllocations: { ptr: number; size: number }[] = []
     const activePtrs = new Set<number>()
+
     if (heapPointers.countPtr > 0 && heapPointers.allocsPtr > 0) {
         try {
             const count = view.getInt32(heapPointers.countPtr, true)
@@ -113,7 +152,6 @@ export function readMemorySnapshot(
         } catch { }
     }
 
-    // 2. Seed the type map from the persistent cache, pruning freed addresses
     const heapTypesMap = new Map<number, string>()
     for (const [ptrStr, typeName] of Object.entries(knownHeapTypes)) {
         const ptr = Number(ptrStr)
@@ -122,7 +160,6 @@ export function readMemorySnapshot(
         }
     }
 
-    // 3. Evaluate variables — this may discover new heap types via pointer analysis
     for (let i = 0; i < callStack.length; i++) {
         const frame = callStack[i]
         const isTopFrame = (i === callStack.length - 1)
@@ -135,16 +172,22 @@ export function readMemorySnapshot(
 
             try {
                 if (varInfo.stackOffset === undefined) continue
-                const address = frameBase + varInfo.stackOffset
+                let address = frameBase + varInfo.stackOffset
+
+                if (varInfo.isDeref) {
+                    if (address > 0 && address + 4 <= view.byteLength) {
+                        address = view.getUint32(address, true)
+                    } else {
+                        continue
+                    }
+                }
+
                 const mv = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, varInfo.name, varInfo.type, varInfo.size, address, varInfo.isPointer, varInfo.pointeeType)
                 if (mv) frames[i].variables.push(mv)
             } catch { }
         }
     }
 
-
-
-    // 4. Iterative Type Mapping (Crucial for Linked Lists & Arrays!)
     let discovered = true;
     const typedAllocations = new Map<number, HeapAllocation>();
 
@@ -154,9 +197,8 @@ export function readMemorySnapshot(
             if (typedAllocations.has(ptr)) continue;
 
             const inferredType = heapTypesMap.get(ptr);
-
-            // Bounded Array Inference on Heap (e.g. Hero[2])
             const boundedArrayMatch = inferredType ? inferredType.match(/^(.*?)((?:\[\d+\])+)$/) : null;
+
             if (boundedArrayMatch) {
                 discovered = true;
                 const baseType = boundedArrayMatch[1].trim();
@@ -166,12 +208,9 @@ export function readMemorySnapshot(
                 const elType = baseType + firstDimMatch[2];
                 const elSize = getResolvedTypeSize(dwarfInfo, elType) || 4;
 
-                const ha: HeapAllocation = {
-                    ptr, size, typeName: inferredType!,
-                    label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [],
-                };
-
+                const ha: HeapAllocation = { ptr, size, typeName: inferredType!, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
                 const maxCount = Math.min(count, 50);
+                
                 for (let k = 0; k < maxCount; k++) {
                     const mAddr = ptr + k * elSize;
                     if (mAddr + elSize <= ptr + size && mAddr + elSize <= view.byteLength) {
@@ -179,24 +218,20 @@ export function readMemorySnapshot(
                         if (mVal) ha.members.push(mVal);
                     }
                 }
-                if (count > maxCount) {
-                    ha.members.push({ name: '...', type: '', address: 0, value: `(+${count - maxCount} more)`, rawValue: 0, size: 0, isPointer: false });
-                }
+                if (count > maxCount) ha.members.push({ name: '...', type: '', address: 0, value: `(+${count - maxCount} more)`, rawValue: 0, size: 0, isPointer: false });
+
                 typedAllocations.set(ptr, ha);
                 continue;
             }
 
-            // Array Inference (used dynamically by std::vector formatter)
             if (inferredType && inferredType.endsWith('[]')) {
                 discovered = true;
                 const elType = inferredType.slice(0, -2);
                 const elSize = getResolvedTypeSize(dwarfInfo, elType) || 4;
-                const ha: HeapAllocation = {
-                    ptr, size, typeName: inferredType,
-                    label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [],
-                };
 
-                const count = Math.min(Math.floor(size / elSize), 50); // limit to 50 items
+                const ha: HeapAllocation = { ptr, size, typeName: inferredType, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
+                const count = Math.min(Math.floor(size / elSize), 50);
+                
                 for (let k = 0; k < count; k++) {
                     const mAddr = ptr + k * elSize;
                     if (mAddr + elSize <= ptr + size && mAddr + elSize <= view.byteLength) {
@@ -204,65 +239,53 @@ export function readMemorySnapshot(
                         if (mVal) ha.members.push(mVal);
                     }
                 }
+
                 typedAllocations.set(ptr, ha);
                 continue;
             }
 
-            // Native Structs & Linked Lists
             const structDef = inferredType ? getStructDef(dwarfInfo.types, inferredType) : undefined;
             if (structDef) {
                 discovered = true;
-                const ha: HeapAllocation = {
-                    ptr, size, typeName: structDef.name,
-                    label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [],
-                };
+                const ha: HeapAllocation = { ptr, size, typeName: structDef.name, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
 
                 for (const member of structDef.members) {
+                    if (['version', '_version', 'removeFlag', '_removeFlags'].includes(member.name)) continue;
                     const mAddr = ptr + member.offset;
                     if (mAddr + member.size <= ptr + size && mAddr + member.size <= view.byteLength) {
                         const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, member.name, member.type, member.size, mAddr, member.isPointer, member.pointeeType);
                         if (mVal) ha.members.push(mVal);
                     }
                 }
+
                 typedAllocations.set(ptr, ha);
             }
         }
     }
 
-    // 5. Fill unmapped heap blocks with raw memory data & push to output
     for (const { ptr, size } of rawAllocations) {
         if (!typedAllocations.has(ptr)) {
-            const ha: HeapAllocation = {
-                ptr, size, typeName: `${size} bytes`,
-                label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [],
-            };
+            const ha: HeapAllocation = { ptr, size, typeName: `${size} bytes`, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
+
             const words = Math.min(Math.floor(size / 4), 8);
             for (let k = 0; k < words; k++) {
                 const mAddr = ptr + k * 4;
                 if (mAddr + 4 <= memoryBuffer.byteLength) {
                     const val = view.getInt32(mAddr, true);
-                    ha.members.push({
-                        name: `+${k * 4}`, type: 'i32', address: mAddr,
-                        value: val, rawValue: val, size: 4, isPointer: false,
-                    });
+                    ha.members.push({ name: `+${k * 4}`, type: 'i32', address: mAddr, value: val, rawValue: val, size: 4, isPointer: false });
                 }
             }
             typedAllocations.set(ptr, ha);
         }
 
-        // Don't render internal std library buffers as standalone heap boxes
-        const heapType = heapTypesMap.get(ptr)
-        if (heapType !== 'std::string::data' && heapType !== 'std::vector::data') {
+        const heapType = heapTypesMap.get(ptr) || ''
+        if (!heapType.endsWith('::data') && !heapType.endsWith('::node') && !heapType.includes('tree::node') && !heapType.includes('Node')) {
             heapAllocations.push(typedAllocations.get(ptr)!);
         }
     }
 
-    // 6. Serialize the type map back for persistent storage
     const nextKnownTypes: Record<number, string> = {}
-    for (const [ptr, typeName] of heapTypesMap.entries()) {
-        nextKnownTypes[ptr] = typeName
-    }
-
+    for (const [ptr, typeName] of heapTypesMap.entries()) nextKnownTypes[ptr] = typeName
     return { snapshot: { frames, heapAllocations }, nextKnownTypes }
 }
 
@@ -271,18 +294,21 @@ function readVariable(
     name: string, typeName: string, size: number, address: number, isPointer: boolean, pointeeType?: string, depth = 0
 ): MemoryValue | null {
     if (address <= 0 || address + size > view.byteLength || depth > 10) return null;
+
     const cleanType = beautifyTypeName(typeName);
 
-    // 1. Run Extensible Pretty Printers First
     for (const printer of PRETTY_PRINTERS) {
         if (printer.match(cleanType)) {
-            const formatted = printer.format({
-                view, bytes, address, name, typeName: cleanType, size, depth,
-                getTypeSize: (t) => getResolvedTypeSize(dwarfInfo, t),
-                tagHeap: (ptr, type) => { if (activePtrs.has(ptr)) heapTypesMap.set(ptr, type) },
-                readVar: (n, t, s, a, d) => readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, n, t, s, a, false, undefined, d),
-            });
-            if (formatted) return formatted;
+            try {
+                const formatted = printer.format({
+                    view, bytes, address, name, typeName: cleanType, size, depth,
+                    getTypeSize: (t) => getResolvedTypeSize(dwarfInfo, t),
+                    getStructMembers: (t) => getStructDef(dwarfInfo.types, beautifyTypeName(t))?.members,
+                    tagHeap: (ptr, type) => { if (activePtrs.has(ptr)) heapTypesMap.set(ptr, type) },
+                    readVar: (n, t, s, a, d) => readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, n, t, s, a, false, undefined, d),
+                });
+                if (formatted) return formatted;
+            } catch { /* Fallthrough on formatter failure */ }
         }
     }
 
@@ -290,62 +316,43 @@ function readVariable(
     let pointsTo: number | undefined; let isStruct = false; let members: MemoryValue[] | undefined;
 
     try {
-        // Auto-dereference C++ references so they expand natively in the Stack frame UI
         if (cleanType.endsWith('&')) {
             let ptrVal = 0;
             try { ptrVal = view.getUint32(address, true); } catch { return null; }
-
             if (ptrVal > 0) {
                 const baseType = cleanType.replace(/&+$/, '').trim();
                 const baseSize = getResolvedTypeSize(dwarfInfo, baseType) || 4;
                 const resolved = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, name, baseType, baseSize, ptrVal, baseType.endsWith('*'), undefined, depth + 1);
-
-                if (resolved) {
-                    resolved.type = cleanType; // Restore the reference signature for the UI
-                    return resolved;
-                }
-            } else {
-                return {
-                    name, type: cleanType, address, value: 'nullptr (invalid ref)', rawValue: 0, size: 4, isPointer: true, pointsTo: 0, isStruct: false
-                };
-            }
+                if (resolved) { resolved.type = cleanType; return resolved; }
+            } else return { name, type: cleanType, address, value: 'nullptr (invalid ref)', rawValue: 0, size: 4, isPointer: true, pointsTo: 0, isStruct: false };
         }
 
-        // Hoist array regex so it doesn't break the if/else-if chain
         const arrayMatch = cleanType.match(/^(.*?)((?:\[\d+\])+)$/);
 
         // 1. Pointers
         if (isPointer || cleanType.endsWith('*')) {
-            pointsTo = view.getUint32(address, true);
-            rawValue = pointsTo;
+            pointsTo = view.getUint32(address, true); rawValue = pointsTo;
             const actualPointee = pointeeType ? beautifyTypeName(pointeeType) : (cleanType.endsWith('*') ? cleanType.slice(0, -1).trim() : 'unknown');
 
-            // Only tag the heap for active (non-freed) pointers
             if (pointsTo > 0 && actualPointee !== 'unknown' && actualPointee !== 'void' && actualPointee !== 'char') {
                 if (activePtrs.has(pointsTo)) heapTypesMap.set(pointsTo, actualPointee);
             }
             value = pointsTo === 0 ? 'nullptr' : `0x${pointsTo.toString(16).padStart(6, '0')}`;
-
             if (pointsTo > 0 && (actualPointee === 'char' || actualPointee === 'const char')) {
                 let end = pointsTo;
                 while (end < bytes.length && bytes[end] !== 0 && end - pointsTo < 50) end++;
                 value = `"${new TextDecoder().decode(bytes.subarray(pointsTo, end))}"`
             }
         }
-        // 2. Array Expansion (e.g. Hero[2] or int[3][3])
+        // 2. Arrays
         else if (arrayMatch && !cleanType.endsWith('&')) {
-            const baseType = arrayMatch[1].trim();
-            const dimsStr = arrayMatch[2]; // e.g. "[2][3]"
-
+            const baseType = arrayMatch[1].trim(); const dimsStr = arrayMatch[2];
             const firstDimMatch = dimsStr.match(/^\[(\d+)\](.*)$/);
             if (firstDimMatch) {
                 const count = parseInt(firstDimMatch[1], 10);
-                const restDims = firstDimMatch[2]; // e.g. "[3]" or ""
-                const elementType = baseType + restDims; // e.g. "int[3]" or "Hero"
-
+                const elementType = baseType + firstDimMatch[2];
                 isStruct = true; value = `[${count}]`; members = [];
                 const elementSize = getResolvedTypeSize(dwarfInfo, elementType) || (count > 0 ? Math.floor(size / count) : 0);
-
                 if (elementSize > 0) {
                     const renderCount = Math.min(count, 50);
                     for (let k = 0; k < renderCount; k++) {
@@ -355,17 +362,19 @@ function readVariable(
                             if (mVal) members.push(mVal);
                         }
                     }
-                    if (count > 50) {
-                        members.push({ name: '...', type: '', address: 0, value: `(+${count - 50} more)`, rawValue: 0, size: 0, isPointer: false });
-                    }
+                    if (count > 50) members.push({ name: '...', type: '', address: 0, value: `(+${count - 50} more)`, rawValue: 0, size: 0, isPointer: false });
                 }
             }
         }
-        // 3. Struct Expansion
+        // 3. Struct Expansion 
         else if (getStructDef(dwarfInfo.types, cleanType)) {
             isStruct = true; value = `{...}`; members = [];
             const structDef = getStructDef(dwarfInfo.types, cleanType)!;
+            
             for (const member of structDef.members) {
+                // Ignore these internally so they don't clog up the UI
+                if (['version', '_version', 'removeFlag', '_removeFlags'].includes(member.name)) continue;
+
                 const mAddr = address + member.offset;
                 if (mAddr + member.size <= view.byteLength) {
                     const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, member.name, member.type, member.size, mAddr, member.isPointer, member.pointeeType, depth + 1);
@@ -373,15 +382,15 @@ function readVariable(
                 }
             }
         }
-        // 4. Primitives
+        // 4. Primitives & Opaque Fallback
         else {
             if (size === 1) { rawValue = view.getInt8(address); value = cleanType === 'char' ? `'${String.fromCharCode(rawValue)}'` : rawValue; }
             else if (size === 2) { rawValue = view.getInt16(address, true); value = rawValue; }
             else if (size === 4) { if (cleanType === 'float') { rawValue = view.getFloat32(address, true); value = Number(rawValue.toFixed(4)); } else { rawValue = view.getInt32(address, true); value = rawValue; } }
             else if (size === 8) { if (cleanType === 'double') { rawValue = view.getFloat64(address, true); value = Number(rawValue.toFixed(4)); } else { rawValue = Number(view.getBigInt64(address, true)); value = rawValue; } }
+            else { value = `[${size} bytes]`; } // Graceful fallback instead of throwing ???
         }
     } catch { }
 
     return { name, type: cleanType, address, value, rawValue, size, isPointer: !!pointsTo, pointsTo, pointeeType, isStruct, members };
 }
-
