@@ -5,13 +5,17 @@ import { CompilerPool, createPool } from '@/lib/compiler-pool'
 import { computeSourceHash, getCached, setCached } from '@/lib/compile-cache'
 import { getSysrootFiles, isSysrootLoaded, loadSysroot } from '@/vfs/sysroot-loader'
 import { parseDwarf } from './dwarf-parser'
-import { useDebugStore } from '@/store/debug-store'
-
-export interface CompileResult {
+export interface RawCompileResult {
     success: boolean
     errors: string[]
     wasmBinary: Uint8Array | null
     stepMap?: Record<number, { line: number; func: string; file: string }>
+    dwarfInfo?: any | null
+}
+
+export interface CompileOptions {
+    onProgress?: (msg: string) => void
+    onStderr?: (msg: string) => void
 }
 
 // --- SECURE RELEASE MODE PIPELINE ---
@@ -24,22 +28,19 @@ function ensureReleaseWorker(): Worker {
 
         releaseWorker.onmessage = (e) => {
             const { type, requestId } = e.data
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const term = (window as any).__novaTerminal
 
             const req = activeReleaseRequests.get(requestId)
             if (!req) return // Ignore orphaned messages
 
             if (type === 'COMPILE_DONE') {
                 const wasmBinary = new Uint8Array(e.data.wasmBinary)
+                let dwarfInfo = null
                 try {
-                    const dwarfInfo = parseDwarf(wasmBinary)
-                    useDebugStore.getState().setDwarfInfo(dwarfInfo)
-                    useDebugStore.getState().setWasmBinary(wasmBinary)
+                    dwarfInfo = parseDwarf(wasmBinary)
                 } catch (err) {
                     console.warn('[compiler] DWARF parse failed:', err)
                 }
-                req.resolve({ success: true, errors: [], wasmBinary })
+                req.resolve({ success: true, errors: [], wasmBinary, dwarfInfo })
                 activeReleaseRequests.delete(requestId)
 
             } else if (type === 'COMPILE_ERROR') {
@@ -48,7 +49,6 @@ function ensureReleaseWorker(): Worker {
                 activeReleaseRequests.delete(requestId)
 
             } else if (type === 'COMPILE_STDERR') {
-                if (term) term.write(e.data.text.replace(/\n/g, '\r\n'))
                 req.stderr.push(...e.data.text.split('\n').filter(Boolean))
             }
         }
@@ -65,14 +65,12 @@ function ensureReleaseWorker(): Worker {
     return releaseWorker
 }
 
-export async function compile(files: Record<string, string>, debugMode = false): Promise<CompileResult> {
-    return debugMode ? compileDebug(files) : compileRelease(files)
+export async function compile(files: Record<string, string>, debugMode = false, options?: CompileOptions): Promise<RawCompileResult> {
+    return debugMode ? compileDebug(files, options) : compileRelease(files, options)
 }
 
-async function compileRelease(files: Record<string, string>): Promise<CompileResult> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const term = (window as any).__novaTerminal
-    const progress = (msg: string) => term?.writeln?.(`\x1b[90m${msg}\x1b[0m`)
+async function compileRelease(files: Record<string, string>, options?: CompileOptions): Promise<RawCompileResult> {
+    const progress = (msg: string) => options?.onProgress?.(msg)
 
     if (!isSysrootLoaded()) {
         progress('Waiting for standard library to load...')
@@ -127,11 +125,9 @@ function takePreloadedWorker(): Worker | undefined {
     return undefined
 }
 
-async function compileDebug(files: Record<string, string>): Promise<CompileResult> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const term = (window as any).__novaTerminal
-    const progress = (msg: string) => term?.writeln?.(`\x1b[90m${msg}\x1b[0m`)
-    const stderr = (text: string) => term?.write?.(text.replace(/\n/g, '\r\n'))
+async function compileDebug(files: Record<string, string>, options?: CompileOptions): Promise<RawCompileResult> {
+    const progress = (msg: string) => options?.onProgress?.(msg)
+    const stderr = (text: string) => options?.onStderr?.(text)
 
     try {
         if (!isSysrootLoaded()) {
@@ -205,16 +201,14 @@ async function compileDebug(files: Record<string, string>): Promise<CompileResul
         const wasmBinaryResult = await debugPool.linkObjects(objEntries, linkSysrootFiles, progress, stderr)
         const wasmBinary = new Uint8Array(wasmBinaryResult.wasmBinary)
 
+        let dwarfInfo = null
         try {
-            const dwarfInfo = parseDwarf(wasmBinary)
-            useDebugStore.getState().setDwarfInfo(dwarfInfo)
-            useDebugStore.getState().setWasmBinary(wasmBinary)
-            useDebugStore.getState().setStepMap(globalStepMap)
+            dwarfInfo = parseDwarf(wasmBinary)
         } catch (err) {
             console.warn('[compiler] DWARF parse failed:', err)
         }
 
-        return { success: true, errors: [], wasmBinary, stepMap: globalStepMap }
+        return { success: true, errors: [], wasmBinary, stepMap: globalStepMap, dwarfInfo }
 
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)

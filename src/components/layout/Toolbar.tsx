@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Play, Square, Loader2, Bug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -7,72 +8,41 @@ import { useExecutionStore } from '@/store/execution-store'
 import { useCompilerStore } from '@/store/compiler-store'
 import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
-import { compile } from '@/engine/compiler'
-import { execute, stop } from '@/engine/executor'
+import { useEngine } from '@/engine/EngineContext'
 import { DebugControls } from './DebugControls'
 
 export function Toolbar() {
+    const engine = useEngine()
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
-    const { debugMode, currentLine, currentFile } = useDebugStore()
+    const { debugMode, currentLine, currentFile, pushHistoryState, setDebugMode, reset } = useDebugStore()
     const compilerReady = cacheState === 'ready'
 
-    const handleRun = async () => {
-        const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (!term) return
-        try {
-            term.clear()
-            term.writeln('\x1b[1;33mCompiling…\x1b[0m')
-            setIsCompiling(true)
-            const result = await compile(getAllFiles())
-            setIsCompiling(false)
-            if (!result.success) {
-                term.writeln('\x1b[1;31mCompilation failed:\x1b[0m')
-                result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
-                return
-            }
-            term.writeln('\x1b[1;32mCompiled successfully\x1b[0m')
-            term.writeln('\x1b[90m─────────────────────────\x1b[0m')
-            setIsRunning(true)
-            await execute(result.wasmBinary!)
-        } catch (err: unknown) {
-            term.writeln(`\x1b[1;31m${err instanceof Error ? err.message : err}\x1b[0m`)
-        } finally {
-            setIsCompiling(false)
+    useEffect(() => {
+        const u1 = engine.onDebugPaused.subscribe((state) => pushHistoryState(state))
+        const u2 = engine.onDebugResumed.subscribe(() => setDebugMode('running'))
+        const u3 = engine.onExit.subscribe(() => {
             setIsRunning(false)
+            if (useDebugStore.getState().debugMode !== 'idle') setDebugMode('idle')
+        })
+        return () => { u1(); u2(); u3() }
+    }, [engine, pushHistoryState, setDebugMode, setIsRunning])
+
+    const executePipeline = async (debug: boolean) => {
+        if (isCompiling || isRunning) return
+        setIsCompiling(true)
+        const result = await engine.compile(getAllFiles(), debug)
+        setIsCompiling(false)
+        if (result.success) {
+            setIsRunning(true)
+            setDebugMode(debug ? 'running' : 'idle')
+            await engine.run(debug)
         }
     }
 
-    const handleDebug = async () => {
-        const term = (window as any).__novaTerminal // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (!term) return
-        try {
-            term.clear()
-            term.writeln('\x1b[1;35mDebug build starting…\x1b[0m')
-            setIsCompiling(true)
-
-            const result = await compile(getAllFiles(), true)
-            setIsCompiling(false)
-
-            if (!result.success) {
-                term.writeln('\x1b[1;31mCompilation failed:\x1b[0m')
-                result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
-                return
-            }
-            term.writeln('\x1b[1;32mDebug build ready\x1b[0m')
-            term.writeln('\x1b[90m─────────────────────────\x1b[0m')
-            setIsRunning(true)
-
-            await execute(result.wasmBinary!, true)
-        } catch (err: unknown) {
-            term.writeln(`\x1b[1;31m${err instanceof Error ? err.message : err}\x1b[0m`)
-        } finally {
-            setIsCompiling(false)
-            setIsRunning(false)
-        }
-    }
-
-    const handleStop = () => { stop(); setIsRunning(false) }
+    const handleRun = () => executePipeline(false)
+    const handleDebug = () => executePipeline(true)
+    const handleStop = () => { engine.stop(); reset() }
 
     return (
         <div className="flex items-center h-10 px-3 gap-2 border-b bg-card">

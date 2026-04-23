@@ -6,6 +6,7 @@ import { Editor } from '@/components/editor/Editor'
 import { RightPanel } from '@/components/layout/RightPanel'
 import { initVFS } from '@/vfs/volume'
 import { preloadCompiler } from '@/lib/compiler-cache'
+import { EngineProvider } from '@/engine/EngineContext'
 
 // ── Drag handle with iframe overlay ────────────────────────────
 // Creates a fullscreen transparent overlay during drag so that
@@ -58,8 +59,9 @@ export default function App() {
     Math.max(min, Math.min(max, val)), [])
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="flex flex-col h-screen w-screen overflow-hidden">
+    <EngineProvider>
+      <TooltipProvider delayDuration={300}>
+        <div className="flex flex-col h-screen w-screen overflow-hidden">
         <Toolbar />
 
         <div ref={containerRef} className="flex flex-1 min-h-0 overflow-hidden">
@@ -84,5 +86,6 @@ export default function App() {
         </div>
       </div>
     </TooltipProvider>
+    </EngineProvider>
   )
 }

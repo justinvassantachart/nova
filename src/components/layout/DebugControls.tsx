@@ -18,12 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Separator } from '@/components/ui/separator'
 import { useDebugStore } from '@/store/debug-store'
-import {
-    debugStepInto,
-    debugStepOver,
-    debugContinue,
-    debugStop,
-} from '@/engine/executor'
+import { useEngine } from '@/engine/EngineContext'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -40,7 +35,8 @@ interface DebugAction {
 // ── Component ──────────────────────────────────────────────────────
 
 export function DebugControls() {
-    const { stepHistory, stepIndex, stepBack, stepForward } = useDebugStore()
+    const { stepHistory, stepIndex, stepBack, stepForward, reset } = useDebugStore()
+    const engine = useEngine()
 
     const isAtLiveEdge = stepIndex < 0
     const canStepBack = isAtLiveEdge ? stepHistory.length >= 2 : stepIndex > 0
@@ -53,22 +49,25 @@ export function DebugControls() {
             label: 'Continue',
             shortcut: 'F5',
             icon: <FastForward className="h-3.5 w-3.5" />,
-            onClick: debugContinue,
+            onClick: () => engine.continueExecution(),
             className: 'bg-green-600 hover:bg-green-500 text-white',
+            disabled: !isAtLiveEdge
         },
         {
             label: 'Step Over',
             shortcut: 'F10',
             icon: <StepForward className="h-3.5 w-3.5" />,
-            onClick: debugStepOver,
+            onClick: () => engine.stepOver(),
             className: 'bg-blue-600 hover:bg-blue-500 text-white',
+            disabled: !isAtLiveEdge
         },
         {
             label: 'Step Into',
             shortcut: 'F11',
             icon: <ArrowDown className="h-3.5 w-3.5" />,
-            onClick: debugStepInto,
+            onClick: () => engine.stepInto(),
             className: 'bg-indigo-600 hover:bg-indigo-500 text-white',
+            disabled: !isAtLiveEdge
         },
     ]
 
@@ -111,7 +110,7 @@ export function DebugControls() {
                     label: 'Stop',
                     shortcut: '⇧F5',
                     icon: <Square className="h-3.5 w-3.5" />,
-                    onClick: debugStop,
+                    onClick: () => { engine.stop(); reset(); },
                     className: '',
                     destructive: true,
                 }}

@@ -239,7 +239,7 @@ function parseDebugLine(data: Uint8Array): { lineMap: LineMap; sourceFiles: stri
     return { lineMap, sourceFiles }
 }
 
-const DW_TAG_variable = 0x34, DW_TAG_formal_parameter = 0x05, DW_TAG_structure_type = 0x13, DW_TAG_class_type = 0x02, DW_TAG_member = 0x0d, DW_TAG_pointer_type = 0x0f, DW_TAG_reference_type = 0x10, DW_TAG_rvalue_reference_type = 0x42, DW_TAG_typedef = 0x16, DW_TAG_subprogram = 0x2e, DW_TAG_const_type = 0x26, DW_TAG_volatile_type = 0x35, DW_TAG_restrict_type = 0x37, DW_TAG_array_type = 0x01, DW_TAG_subrange_type = 0x21
+const DW_TAG_variable = 0x34, DW_TAG_formal_parameter = 0x05, DW_TAG_inlined_subroutine = 0x1d, DW_TAG_structure_type = 0x13, DW_TAG_class_type = 0x02, DW_TAG_member = 0x0d, DW_TAG_pointer_type = 0x0f, DW_TAG_reference_type = 0x10, DW_TAG_rvalue_reference_type = 0x42, DW_TAG_typedef = 0x16, DW_TAG_subprogram = 0x2e, DW_TAG_const_type = 0x26, DW_TAG_volatile_type = 0x35, DW_TAG_restrict_type = 0x37, DW_TAG_array_type = 0x01, DW_TAG_subrange_type = 0x21
 const DW_AT_name = 0x03, DW_AT_type = 0x49, DW_AT_byte_size = 0x0b, DW_AT_data_member_location = 0x38, DW_AT_location = 0x02, DW_AT_decl_line = 0x3b, DW_AT_upper_bound = 0x2f, DW_AT_count = 0x37
 
 interface TypeMapEntry {
@@ -442,10 +442,19 @@ function parseDebugInfo(debugInfo: Uint8Array, debugAbbrev: Uint8Array, debugStr
                     members.push({ name: dieName, offset: dieMemberLoc, typeRef: dieTypeRef })
                 }
             } else if ((abbrev.tag === DW_TAG_variable || abbrev.tag === DW_TAG_formal_parameter) && dieName) {
-                let funcName = 'global'
+                let funcName = '<global>'
+                
                 for (let i = dieStack.length - 1; i >= 0; i--) {
-                    if (dieStack[i].tag === DW_TAG_subprogram) { funcName = dieStack[i].name || 'unknown'; break }
+                    if (dieStack[i].tag === DW_TAG_inlined_subroutine) {
+                        funcName = dieStack[i].name || '<inlined>'; 
+                        break;
+                    }
+                    if (dieStack[i].tag === DW_TAG_subprogram) { 
+                        funcName = dieStack[i].name || '<unnamed_subprogram>'; 
+                        break; 
+                    }
                 }
+
                 if (dieStackOffset !== undefined && !funcName.startsWith('__') && !dieName.startsWith('__')) {
                     pendingVars.push({ name: dieName, typeRef: dieTypeRef, stackOffset: dieStackOffset, declLine: dieDeclLine ?? 0, funcName, isDeref: dieIsDeref })
                 }
