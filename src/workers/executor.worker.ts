@@ -180,13 +180,14 @@ self.onmessage = async (e) => {
                     sabArr.set(memArr.subarray(0, Math.min(memArr.length, sabArr.length)))
                 }
 
-                // 7. Write step ID + call stack into the SAB (stride-2 pairs)
+                // 7. Write step ID + call stack into the SAB (stride-3 tuples: id, sp, stepId)
                 Atomics.store(stateArr, 1, stepId)
                 Atomics.store(stateArr, 3, callStack.length)
 
                 for (let i = 0; i < callStack.length && i < 40; i++) {
-                    Atomics.store(stateArr, 4 + i * 2, callStack[i].id)
-                    Atomics.store(stateArr, 4 + i * 2 + 1, callStack[i].sp)
+                    Atomics.store(stateArr, 4 + i * 3, callStack[i].id)
+                    Atomics.store(stateArr, 4 + i * 3 + 1, callStack[i].sp)
+                    Atomics.store(stateArr, 4 + i * 3 + 2, callStack[i]._lastStepId ?? -1)
                 }
 
                 // 8. Export native heap tracker pointers
