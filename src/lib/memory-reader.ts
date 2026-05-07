@@ -233,6 +233,26 @@ export function readMemorySnapshot(
             const structDef = inferredType ? getStructDef(dwarfInfo.types, inferredType) : undefined;
             if (structDef) {
                 discovered = true;
+                const elSize = structDef.size;
+                // `new T[N]` arrives here typed as `T` (no `[]` suffix, no arrayDims), so detect
+                // array-of-struct allocations from size and recurse to render each element.
+                const elementCount = elSize > 0 ? Math.floor(size / elSize) : 1;
+
+                if (elementCount > 1) {
+                    const ha: HeapAllocation = { ptr, size, typeName: `${structDef.name}[${elementCount}]`, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
+                    const maxCount = Math.min(elementCount, 50);
+                    for (let k = 0; k < maxCount; k++) {
+                        const mAddr = ptr + k * elSize;
+                        if (mAddr + elSize <= ptr + size && mAddr + elSize <= view.byteLength) {
+                            const mVal = readVariable(view, bytes, dwarfInfo, heapTypesMap, activePtrs, `[${k}]`, structDef.name, elSize, mAddr, false);
+                            if (mVal) ha.members.push(mVal);
+                        }
+                    }
+                    if (elementCount > maxCount) ha.members.push({ name: '...', type: '', address: 0, value: `(+${elementCount - maxCount} more)`, rawValue: 0, size: 0, isPointer: false });
+                    typedAllocations.set(ptr, ha);
+                    continue;
+                }
+
                 const ha: HeapAllocation = { ptr, size, typeName: structDef.name, label: `0x${ptr.toString(16).padStart(6, '0')}`, members: [] };
 
                 for (const member of structDef.members) {
