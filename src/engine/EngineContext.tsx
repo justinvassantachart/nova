@@ -1,14 +1,11 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import type { IIDEEngine } from './IIDEEngine';
-import { LegacyWasmEngine } from './LegacyWasmEngine';
+import { NpmDapEngine } from './NpmDapEngine';
 
 const EngineContext = createContext<IIDEEngine | null>(null);
 
 export function EngineProvider({ children }: { children: React.ReactNode }) {
-    // 🚀 THE MIGRATION SWITCH:
-    // When the DAP NPM package is ready, change exactly ONE line of code here:
-    // const engine = useMemo(() => new NpmDapEngine(), []);
-    const engine = useMemo(() => new LegacyWasmEngine(), []);
+    const engine = useMemo(() => new NpmDapEngine(), []);
 
     return <EngineContext.Provider value={engine}>{children}</EngineContext.Provider>;
 }

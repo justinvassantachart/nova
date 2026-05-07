@@ -24,13 +24,18 @@ export function Terminal() {
         const ro = new ResizeObserver(() => fit.fit())
         ro.observe(containerRef.current)
 
+        // Forward keystrokes to the engine's stdin pipe (Ctrl+C, line buffering, etc. handled in engine).
+        const onDataDisposable = term.onData((data) => {
+            engine.writeStdin?.(data)
+        })
+
         // Pure Reactive Subscriptions!
         const unsubOut = engine.onStdout.subscribe((text) => term.write(text.replace(/\n/g, '\r\n')))
         const unsubErr = engine.onStderr.subscribe((text) => term.write(`\x1b[1;31m${text.replace(/\n/g, '\r\n')}\x1b[0m`))
         const unsubClr = engine.onClearTerminal.subscribe(() => term.clear())
         const unsubExt = engine.onExit.subscribe((code) => term.writeln(`\r\n\x1b[90m  Program exited with code ${code ?? 0}  \x1b[0m\r\n`))
 
-        return () => { unsubOut(); unsubErr(); unsubClr(); unsubExt(); ro.disconnect(); term.dispose(); }
+        return () => { unsubOut(); unsubErr(); unsubClr(); unsubExt(); onDataDisposable.dispose(); ro.disconnect(); term.dispose(); }
     }, [engine])
 
     return <div ref={containerRef} className="w-full h-full" />

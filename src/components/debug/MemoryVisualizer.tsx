@@ -3,7 +3,7 @@ import { ReactFlow, Background, type Node, type Edge, type NodeChange, type Edge
 import '@xyflow/react/dist/style.css'
 import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
-import type { MemoryValue } from '@/lib/memory-reader'
+import type { VariableNode as MemoryValue } from '@/engine/IIDEEngine'
 
 // ── Recursive Table Row ──
 function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
@@ -198,11 +198,11 @@ export function MemoryVisualizer() {
 
         const reversedFrames = [...snapshot.frames].reverse()
 
-        reversedFrames.forEach((frameData, i) => {
+        reversedFrames.forEach((frameData) => {
             rawNodes.push({
                 id: frameData.id, type: 'stackFrame', position: { x: 0, y: 0 },
                 draggable: false,
-                data: { id: frameData.id, label: `${frameData.funcName}()`, isActive: i === 0, variables: frameData.variables },
+                data: { id: frameData.id, label: `${frameData.funcName}()`, isActive: frameData.isActive, variables: frameData.variables },
             })
 
 
@@ -215,8 +215,8 @@ export function MemoryVisualizer() {
                             id: `${currentHandleId}->heap-${v.pointsTo}`,
                             source: nodeIdentifier, sourceHandle: currentHandleId,
                             target: `heap-${v.pointsTo}`, targetHandle: 'target',
-                            type: 'bezier', animated: i === 0,
-                            style: { stroke: i === 0 ? '#58a6ff' : '#475569', strokeWidth: 2 }
+                            type: 'bezier', animated: frameData.isActive,
+                            style: { stroke: frameData.isActive ? '#58a6ff' : '#475569', strokeWidth: 2 }
                         })
                     }
                     if (v.isStruct && v.members) extractEdges(v.members, currentHandleId, nodeIdentifier);

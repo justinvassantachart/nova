@@ -34,6 +34,7 @@ export interface DebugPauseState {
     file: string | null;
     callStack: StackFrame[];
     memorySnapshot: MemorySnapshot | null;
+    nextKnownTypes?: Record<number, string>;
 }
 
 export type DrawCommand =
@@ -52,6 +53,9 @@ export interface IIDEEngine {
     stepInto(): Promise<void>;
     stepOver(): Promise<void>; // Note: The DAP protocol formally calls this "next"
     continueExecution(): Promise<void>;
+
+    // Optional: forward raw xterm keystrokes into the program's stdin
+    writeStdin?(data: string): void;
 
     // Event Subscriptions (Pub/Sub Pattern)
     readonly onStdout: EventEmitter<string>;
