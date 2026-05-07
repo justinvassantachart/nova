@@ -7,18 +7,21 @@ import type { MemoryValue } from '@/lib/memory-reader'
 
 // ── Recursive Table Row ──
 function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
+    const addrTooltip = variable.address > 0
+        ? `0x${variable.address.toString(16).padStart(8, '0')}`
+        : undefined
     return (
         <div className="flex flex-col border-t border-[#30363d] w-full group relative">
-            <div className="flex items-stretch min-h-[26px] hover:bg-[#21262d] transition-colors relative w-full">
+            <div className="flex items-stretch min-h-[26px] hover:bg-[#21262d] transition-colors relative w-full"
+                title={addrTooltip}>
                 {/* Left Column: Name */}
                 <div className="w-[45%] py-1 px-3 border-r border-[#30363d] text-[#8b949e] flex items-center font-mono text-[11px]"
                     style={{ paddingLeft: `${0.75 + depth * 0.75}rem` }}>
-                    <span className="truncate" title={variable.name}>{variable.name}</span>
+                    <span className="truncate">{variable.name}</span>
                 </div>
                 {/* Right Column: Value */}
                 <div className="w-[55%] py-1 px-3 relative flex items-center font-mono text-[11px] text-[#e6edf3]">
-                    <span className={`truncate ${variable.type.includes('string') || variable.type.includes('char') ? 'text-[#a5d6ff]' : ''}`}
-                        title={String(variable.value)}>
+                    <span className={`truncate ${variable.type.includes('string') || variable.type.includes('char') ? 'text-[#a5d6ff]' : ''}`}>
                         {variable.isStruct && variable.value === '{...}' ? '' : String(variable.value)}
                     </span>
 
@@ -27,6 +30,12 @@ function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; d
                             className="!w-2 !h-2 !bg-[#58a6ff] !border-0 !-right-1" />
                     )}
                 </div>
+
+                {/* Invisible target handle so any incoming pointer can land on this exact row */}
+                {variable.address > 0 && (
+                    <Handle type="target" position={Position.Left} id={`${nodeId}-${variable.name}-target`}
+                        className="!w-1 !h-1 !bg-transparent !border-0 !left-0 !opacity-0" />
+                )}
             </div>
 
             {variable.isStruct && variable.members && (
@@ -198,6 +207,33 @@ export function MemoryVisualizer() {
 
         const reversedFrames = [...snapshot.frames].reverse()
 
+        // Build an address → handle map so pointers can target any visualized memory,
+        // not only heap allocation bases. Heap bases register first and win at the
+        // base address; interior member addresses (e.g. &savanna[0].cat) get their
+        // own row-level target handle.
+        const addressMap = new Map<number, { nodeId: string; handleId: string }>()
+
+        for (const alloc of snapshot.heapAllocations) {
+            addressMap.set(alloc.ptr, { nodeId: `heap-${alloc.ptr}`, handleId: 'target' })
+        }
+
+        const registerAddresses = (vars: MemoryValue[], parentPath: string, nodeIdentifier: string) => {
+            for (const v of vars) {
+                const handlePath = `${parentPath}-${v.name}`
+                if (v.address > 0 && !addressMap.has(v.address)) {
+                    addressMap.set(v.address, { nodeId: nodeIdentifier, handleId: `${handlePath}-target` })
+                }
+                if (v.isStruct && v.members) registerAddresses(v.members, handlePath, nodeIdentifier)
+            }
+        }
+
+        for (const frame of snapshot.frames) {
+            registerAddresses(frame.variables, frame.id, frame.id)
+        }
+        for (const alloc of snapshot.heapAllocations) {
+            registerAddresses(alloc.members, `heap-${alloc.ptr}`, `heap-${alloc.ptr}`)
+        }
+
         reversedFrames.forEach((frameData, i) => {
             rawNodes.push({
                 id: frameData.id, type: 'stackFrame', position: { x: 0, y: 0 },
@@ -210,14 +246,17 @@ export function MemoryVisualizer() {
             const extractEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string) => {
                 for (const v of vars) {
                     const currentHandleId = `${parentId}-${v.name}`;
-                    if (v.isPointer && v.pointsTo && snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
-                        rawEdges.push({
-                            id: `${currentHandleId}->heap-${v.pointsTo}`,
-                            source: nodeIdentifier, sourceHandle: currentHandleId,
-                            target: `heap-${v.pointsTo}`, targetHandle: 'target',
-                            type: 'bezier', animated: i === 0,
-                            style: { stroke: i === 0 ? '#58a6ff' : '#475569', strokeWidth: 2 }
-                        })
+                    if (v.isPointer && v.pointsTo) {
+                        const target = addressMap.get(v.pointsTo)
+                        if (target) {
+                            rawEdges.push({
+                                id: `${currentHandleId}->${target.nodeId}/${target.handleId}`,
+                                source: nodeIdentifier, sourceHandle: currentHandleId,
+                                target: target.nodeId, targetHandle: target.handleId,
+                                type: 'bezier', animated: i === 0,
+                                style: { stroke: i === 0 ? '#58a6ff' : '#475569', strokeWidth: 2 }
+                            })
+                        }
                     }
                     if (v.isStruct && v.members) extractEdges(v.members, currentHandleId, nodeIdentifier);
                 }
@@ -236,14 +275,17 @@ export function MemoryVisualizer() {
             const extractHeapEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string) => {
                 for (const v of vars) {
                     const currentHandleId = `${parentId}-${v.name}`;
-                    if (v.isPointer && v.pointsTo && snapshot.heapAllocations.some(h => h.ptr === v.pointsTo)) {
-                        rawEdges.push({
-                            id: `${currentHandleId}->heap-${v.pointsTo}`,
-                            source: nodeIdentifier, sourceHandle: currentHandleId,
-                            target: `heap-${v.pointsTo}`, targetHandle: 'target',
-                            type: 'bezier', animated: false,
-                            style: { stroke: '#8b949e', strokeWidth: 2 }
-                        })
+                    if (v.isPointer && v.pointsTo) {
+                        const target = addressMap.get(v.pointsTo)
+                        if (target) {
+                            rawEdges.push({
+                                id: `${currentHandleId}->${target.nodeId}/${target.handleId}`,
+                                source: nodeIdentifier, sourceHandle: currentHandleId,
+                                target: target.nodeId, targetHandle: target.handleId,
+                                type: 'bezier', animated: false,
+                                style: { stroke: '#8b949e', strokeWidth: 2 }
+                            })
+                        }
                     }
                     if (v.isStruct && v.members) extractHeapEdges(v.members, currentHandleId, nodeIdentifier);
                 }
