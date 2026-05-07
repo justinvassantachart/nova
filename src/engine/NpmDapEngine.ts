@@ -310,6 +310,14 @@ export class NpmDapEngine implements IIDEEngine {
         }
 
         // Heap discovery: any pointer that resolves to children becomes a heap node.
+        // TODO(dap-array): when the runtime implements the two spec extensions
+        // (presentationHint.byteSize and pointer-array variables requests with
+        // start/count), detect array-of-T allocations (e.g. `new Savanna[3]`) by
+        // comparing the pointer's allocation byteSize to the element byteSize, and
+        // issue a second variables request with start=0, count=N to materialize
+        // each element as `[k]`. Without this, T*-typed allocations larger than
+        // sizeof(T) will only render the first element — the same bug fixed in
+        // the legacy memory-reader heap loop.
         if (isPointer && pointsTo && pointsTo > 0 && !heapAllocations.has(pointsTo)) {
             const pointeeMembers = isStruct && members ? members : [];
             heapAllocations.set(pointsTo, {
