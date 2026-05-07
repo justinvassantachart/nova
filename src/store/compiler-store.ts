@@ -13,8 +13,10 @@ interface CompilerState {
 }
 
 export const useCompilerStore = create<CompilerState>((set) => ({
-    cacheState: 'idle',
-    downloadProgress: 0,
+    // The @jtrb/runtime package handles its own WASM loading internally on
+    // the first Runtime.create() call, so no explicit preload pass is needed.
+    cacheState: 'ready',
+    downloadProgress: 100,
     errorMessage: null,
 
     setCacheState: (s) => set({ cacheState: s }),

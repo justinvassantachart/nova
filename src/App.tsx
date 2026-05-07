@@ -5,7 +5,6 @@ import { FileExplorer } from '@/components/explorer/FileExplorer'
 import { Editor } from '@/components/editor/Editor'
 import { RightPanel } from '@/components/layout/RightPanel'
 import { initVFS } from '@/vfs/volume'
-import { preloadCompiler } from '@/lib/compiler-cache'
 import { EngineProvider } from '@/engine/EngineContext'
 
 // ── Drag handle with iframe overlay ────────────────────────────
@@ -52,7 +51,6 @@ export default function App() {
 
   useEffect(() => {
     initVFS()
-    preloadCompiler()
   }, [])
 
   const clamp = useCallback((val: number, min: number, max: number) =>
