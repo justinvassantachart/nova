@@ -62,8 +62,13 @@ service cloud.firestore {
     match /submissions/{id} {
       // The student who owns it can read/write. The teacher who owns the
       // referenced assignment can read (for grading).
+      // resource is null when the doc doesn't exist yet — allow that case
+      // so getOrCreateSubmission's initial getDoc() returns exists=false
+      // instead of permission-denied. The deterministic id encodes the
+      // student uid, so non-existence isn't sensitive.
       allow read: if isSignedIn() && (
-        resource.data.studentUid == request.auth.uid
+        resource == null
+        || resource.data.studentUid == request.auth.uid
         || get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.teacherUid == request.auth.uid
       );
 
