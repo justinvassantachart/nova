@@ -10,6 +10,7 @@ import {
   updateAssignmentMeta,
 } from '@/shared/firebase/assignments'
 import { useAuth } from '@/shared/context/AuthProvider'
+import { useFirestoreEventSink } from '@/shared/analytics/useFirestoreEventSink'
 
 export default function AssignmentEditor() {
   const { id } = useParams<{ id: string }>()
@@ -29,6 +30,8 @@ export default function AssignmentEditor() {
     initialized.current = true
   }, [assignment])
 
+  const onEvent = useFirestoreEventSink({ uid: user?.uid, assignmentId: id })
+
   // Host context for the IDE: edits to /workspace flow back into
   // assignment.starterFiles on a 2s debounce (handled in App.tsx).
   const host = useMemo<IDEHost | null>(() => {
@@ -40,6 +43,7 @@ export default function AssignmentEditor() {
       onWorkspaceChange: (files) => {
         saveStarterFiles(id, files).catch((e) => console.warn('[AssignmentEditor] save failed', e))
       },
+      onEvent,
     }
     // We intentionally only seed initialFiles once (on first load); ignore later updates
     // from snapshot to avoid stomping the teacher's in-flight edits.

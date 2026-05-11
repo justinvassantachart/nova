@@ -5,11 +5,15 @@ import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, getProjectId, fileExists, readFile } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 import { syncBreakpoints } from '@/engine/executor'
+import { useIDEHost } from '@/ide-host-context'
 
 export function Editor() {
     const { activeFile, activeFileContent, setActiveFileContent, setActiveFile } = useEditorStore()
     const { currentLine, currentFile, debugMode, breakpoints, toggleBreakpoint } = useDebugStore()
     const monaco = useMonaco()
+    const host = useIDEHost()
+    // Throttle `edit` events to at most 1/sec per file so we don't spam hosts on every keystroke.
+    const lastEditEmit = useRef<Record<string, number>>({})
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const editorRef = useRef<any>(null)
@@ -61,7 +65,10 @@ export function Editor() {
                 (monacoInstance && e.target.type === monacoInstance.editor.MouseTargetType.GUTTER_GLYPH_MARGIN)) {
                 const line = e.target.position?.lineNumber
                 const file = useEditorStore.getState().activeFile
-                if (line && file) toggleBreakpoint(file, line)
+                if (line && file) {
+                    toggleBreakpoint(file, line)
+                    host?.onEvent?.('breakpoint_toggle', { file, line })
+                }
             }
         })
 
@@ -143,6 +150,14 @@ export function Editor() {
         setActiveFileContent(value)
         writeFile(activeFile, value)
 
+        // Throttled edit event — at most 1/sec per file. Hosts buffer & batch.
+        const now = Date.now()
+        const last = lastEditEmit.current[activeFile] ?? 0
+        if (now - last >= 1000) {
+            lastEditEmit.current[activeFile] = now
+            host?.onEvent?.('edit', { file: activeFile, length: value.length })
+        }
+
         // Clear only this file's timer — other files' timers keep running
         if (syncTimers.current[activeFile]) clearTimeout(syncTimers.current[activeFile])
 
@@ -150,7 +165,7 @@ export function Editor() {
             import('@/vfs/opfs-sync').then(({ syncToOPFS }) => syncToOPFS(getProjectId(), activeFile, value))
             delete syncTimers.current[activeFile]
         }, 2000)
-    }, [activeFile, setActiveFileContent])
+    }, [activeFile, setActiveFileContent, host])
 
     if (!activeFile) {
         return (

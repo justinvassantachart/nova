@@ -10,11 +10,13 @@ import { getAllFiles } from '@/vfs/volume'
 import { compile } from '@/engine/compiler'
 import { execute, stop } from '@/engine/executor'
 import { DebugControls } from './DebugControls'
+import { useIDEHost } from '@/ide-host-context'
 
 export function Toolbar() {
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
     const { debugMode, currentLine, currentFile } = useDebugStore()
+    const host = useIDEHost()
     const compilerReady = cacheState === 'ready'
 
     const handleRun = async () => {
@@ -24,9 +26,11 @@ export function Toolbar() {
             term.clear()
             term.writeln('\x1b[1;33mCompiling…\x1b[0m')
             setIsCompiling(true)
+            host?.onEvent?.('compile', { debug: false })
             const result = await compile(getAllFiles())
             setIsCompiling(false)
             if (!result.success) {
+                host?.onEvent?.('compile_error', { errors: result.errors })
                 term.writeln('\x1b[1;31mCompilation failed:\x1b[0m')
                 result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
                 return
@@ -34,6 +38,7 @@ export function Toolbar() {
             term.writeln('\x1b[1;32mCompiled successfully\x1b[0m')
             term.writeln('\x1b[90m─────────────────────────\x1b[0m')
             setIsRunning(true)
+            host?.onEvent?.('run', { debug: false })
             await execute(result.wasmBinary!)
         } catch (err: unknown) {
             term.writeln(`\x1b[1;31m${err instanceof Error ? err.message : err}\x1b[0m`)
@@ -50,11 +55,13 @@ export function Toolbar() {
             term.clear()
             term.writeln('\x1b[1;35mDebug build starting…\x1b[0m')
             setIsCompiling(true)
+            host?.onEvent?.('compile_debug', {})
 
             const result = await compile(getAllFiles(), true)
             setIsCompiling(false)
 
             if (!result.success) {
+                host?.onEvent?.('compile_error', { errors: result.errors, debug: true })
                 term.writeln('\x1b[1;31mCompilation failed:\x1b[0m')
                 result.errors.forEach((e) => term.writeln(`  \x1b[31m${e}\x1b[0m`))
                 return
@@ -62,6 +69,7 @@ export function Toolbar() {
             term.writeln('\x1b[1;32mDebug build ready\x1b[0m')
             term.writeln('\x1b[90m─────────────────────────\x1b[0m')
             setIsRunning(true)
+            host?.onEvent?.('run', { debug: true })
 
             await execute(result.wasmBinary!, true)
         } catch (err: unknown) {

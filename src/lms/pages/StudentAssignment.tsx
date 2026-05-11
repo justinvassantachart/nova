@@ -13,6 +13,7 @@ import {
   saveSubmissionFiles,
   submissionId,
 } from '@/shared/firebase/submissions'
+import { useFirestoreEventSink } from '@/shared/analytics/useFirestoreEventSink'
 
 function downloadZip(filename: string, files: Record<string, string>) {
   const tree: Record<string, Uint8Array> = {}
@@ -44,6 +45,7 @@ export default function StudentAssignment() {
   const [submitting, setSubmitting] = useState(false)
 
   const subId = id && user ? submissionId(id, user.uid) : undefined
+  const onEvent = useFirestoreEventSink({ uid: user?.uid, assignmentId: id, submissionId: subId })
 
   // Build host once submission is ready. We seed initialFiles with submission.files
   // (which on first load equals starterFiles). The IDE-side useEffect on host?.initialFiles
@@ -61,6 +63,7 @@ export default function StudentAssignment() {
           console.warn('[StudentAssignment] save failed', e),
         )
       },
+      onEvent,
     }
     // Freeze on first submission load — subsequent live updates (e.g. submittedAt
     // changes from Firestore) must not re-bootstrap and discard local edits.

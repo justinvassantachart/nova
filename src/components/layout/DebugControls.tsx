@@ -24,6 +24,8 @@ import {
     debugContinue,
     debugStop,
 } from '@/engine/executor'
+import { useIDEHost } from '@/ide-host-context'
+import type { EventType } from '@/ide-host'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -41,10 +43,13 @@ interface DebugAction {
 
 export function DebugControls() {
     const { stepHistory, stepIndex, stepBack, stepForward } = useDebugStore()
+    const host = useIDEHost()
 
     const isAtLiveEdge = stepIndex < 0
     const canStepBack = isAtLiveEdge ? stepHistory.length >= 2 : stepIndex > 0
     const canStepForward = !isAtLiveEdge && stepIndex < stepHistory.length - 1
+
+    const emit = (t: EventType) => () => host?.onEvent?.(t, {})
 
     // ── Execution controls (live engine commands) ──────────────────
 
@@ -53,21 +58,21 @@ export function DebugControls() {
             label: 'Continue',
             shortcut: 'F5',
             icon: <FastForward className="h-3.5 w-3.5" />,
-            onClick: debugContinue,
+            onClick: () => { emit('debug_continue')(); debugContinue() },
             className: 'bg-green-600 hover:bg-green-500 text-white',
         },
         {
             label: 'Step Over',
             shortcut: 'F10',
             icon: <StepForward className="h-3.5 w-3.5" />,
-            onClick: debugStepOver,
+            onClick: () => { emit('debug_step_over')(); debugStepOver() },
             className: 'bg-blue-600 hover:bg-blue-500 text-white',
         },
         {
             label: 'Step Into',
             shortcut: 'F11',
             icon: <ArrowDown className="h-3.5 w-3.5" />,
-            onClick: debugStepInto,
+            onClick: () => { emit('debug_step_into')(); debugStepInto() },
             className: 'bg-indigo-600 hover:bg-indigo-500 text-white',
         },
     ]
@@ -79,7 +84,7 @@ export function DebugControls() {
             label: 'Back',
             shortcut: '⇧F11',
             icon: <SkipBack className="h-3.5 w-3.5" />,
-            onClick: stepBack,
+            onClick: () => { emit('debug_step_back')(); stepBack() },
             disabled: !canStepBack,
             className: 'bg-zinc-700 hover:bg-zinc-600 text-white',
         },
@@ -87,7 +92,7 @@ export function DebugControls() {
             label: 'Forward',
             shortcut: '⇧F10',
             icon: <SkipForward className="h-3.5 w-3.5" />,
-            onClick: stepForward,
+            onClick: () => { emit('debug_step_forward')(); stepForward() },
             disabled: !canStepForward,
             className: 'bg-zinc-700 hover:bg-zinc-600 text-white',
         },
