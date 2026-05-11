@@ -16,8 +16,10 @@ export function ProtectedRoute({
   if (!configured) return <Navigate to="/login" replace />
   if (loading) return <div className="h-screen w-screen flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />
-  if (!appUser?.role) return <Navigate to="/role" replace />
-  if (role && appUser.role !== role) {
+  // Don't redirect to /role from /role itself — that's an infinite loop and
+  // leaves a blank screen. RoleSelect handles its own "no role yet" state.
+  if (!appUser?.role && location.pathname !== '/role') return <Navigate to="/role" replace />
+  if (role && appUser?.role && appUser.role !== role) {
     return <Navigate to={appUser.role === 'teacher' ? '/teacher' : '/student'} replace />
   }
   return <>{children}</>

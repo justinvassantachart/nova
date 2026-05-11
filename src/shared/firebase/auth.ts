@@ -1,5 +1,6 @@
 import {
   GoogleAuthProvider,
+  onAuthStateChanged,
   signInWithCredential,
   signOut as fbSignOut,
 } from 'firebase/auth'
@@ -28,6 +29,20 @@ type BridgeMessage =
   | { ok: true; idToken: string | null; accessToken: string | null }
   | { ok: false; error: string }
 
+// Waits for the next non-null user from Firebase Auth, with a short
+// grace period. Used to detect implicit sign-in via shared auth storage
+// (the bridge writes to the same origin's localStorage / IndexedDB).
+function waitForAuthUser(graceMs = 1500): Promise<boolean> {
+  const auth = getFirebaseAuth()
+  if (auth.currentUser) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { unsub(); resolve(false) }, graceMs)
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u) { clearTimeout(timer); unsub(); resolve(true) }
+    })
+  })
+}
+
 export async function signInWithGoogle(): Promise<void> {
   const config = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -44,30 +59,44 @@ export async function signInWithGoogle(): Promise<void> {
   const channel = new BroadcastChannel(CHANNEL)
   let popupWatch: ReturnType<typeof setInterval> | undefined
 
-  try {
-    const msg = await new Promise<BridgeMessage>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Sign-in timed out.'))
-      }, TIMEOUT_MS)
+  // Race: explicit BroadcastChannel message OR popup-closed (bridge may
+  // have signed in via shared storage so fast we missed the message).
+  type Outcome = { kind: 'msg'; msg: BridgeMessage } | { kind: 'closed' } | { kind: 'timeout' }
 
-      // If the user closes the popup before signing in, fail fast rather than wait.
+  try {
+    const outcome = await new Promise<Outcome>((resolve) => {
+      const timeout = setTimeout(() => resolve({ kind: 'timeout' }), TIMEOUT_MS)
       popupWatch = setInterval(() => {
         if (popup.closed) {
           clearTimeout(timeout)
           if (popupWatch) clearInterval(popupWatch)
-          reject(new Error('Sign-in window was closed.'))
+          resolve({ kind: 'closed' })
         }
-      }, 500)
-
+      }, 250)
       channel.onmessage = (e: MessageEvent<BridgeMessage>) => {
         clearTimeout(timeout)
-        resolve(e.data)
+        if (popupWatch) clearInterval(popupWatch)
+        resolve({ kind: 'msg', msg: e.data })
       }
     })
 
-    if (!msg.ok) throw new Error(msg.error)
-    const credential = GoogleAuthProvider.credential(msg.idToken, msg.accessToken)
-    await signInWithCredential(getFirebaseAuth(), credential)
+    if (outcome.kind === 'timeout') throw new Error('Sign-in timed out.')
+
+    if (outcome.kind === 'msg' && outcome.msg.ok && (outcome.msg.idToken || outcome.msg.accessToken)) {
+      // Use the explicit credential when we got one.
+      const credential = GoogleAuthProvider.credential(outcome.msg.idToken, outcome.msg.accessToken)
+      await signInWithCredential(getFirebaseAuth(), credential)
+      return
+    }
+
+    // Fallback path: bridge may have signed in via shared auth storage
+    // (same origin → same localStorage/IndexedDB) without delivering a
+    // usable credential message. Wait briefly for onAuthStateChanged.
+    if (await waitForAuthUser()) return
+
+    // No credential, no implicit auth — surface the bridge error if any.
+    if (outcome.kind === 'msg' && !outcome.msg.ok) throw new Error(outcome.msg.error)
+    throw new Error('Sign-in window closed before completing.')
   } finally {
     if (popupWatch) clearInterval(popupWatch)
     channel.close()
