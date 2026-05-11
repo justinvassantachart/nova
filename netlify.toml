@@ -12,3 +12,11 @@
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
+
+# Auth bridge: strip COOP/COEP so the bridge popup can run signInWithPopup
+# (its child OAuth popup needs cross-origin postMessage to come back).
+[[headers]]
+  for = "/auth.html"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "unsafe-none"
+    Cross-Origin-Embedder-Policy = "unsafe-none"
