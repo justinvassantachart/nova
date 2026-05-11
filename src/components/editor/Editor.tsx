@@ -6,12 +6,16 @@ import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, getProjectId, fileExists, readFile } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 import { useEngine } from '@/engine/EngineContext'
+import { useIDEHost } from '@/ide-host-context'
 
 export function Editor() {
     const { activeFile, activeFileContent, setActiveFileContent, setActiveFile } = useEditorStore()
     const { currentLine, currentFile, debugMode, breakpoints, toggleBreakpoint } = useDebugStore()
     const monaco = useMonaco()
     const engine = useEngine()
+    const host = useIDEHost()
+    // Throttle `edit` events to at most 1/sec per file so we don't spam hosts on every keystroke.
+    const lastEditEmit = useRef<Record<string, number>>({})
 
     // Strict Typing
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -55,7 +59,10 @@ export function Editor() {
             if (targetType === MouseTargetType.GUTTER_GLYPH_MARGIN || targetType === MouseTargetType.GUTTER_LINE_NUMBERS) {
                 const line = e.target.position.lineNumber
                 const file = useEditorStore.getState().activeFile
-                if (line && file) toggleBreakpoint(file, line)
+                if (line && file) {
+                    toggleBreakpoint(file, line)
+                    host?.onEvent?.('breakpoint_toggle', { file, line })
+                }
             }
         })
 
@@ -123,13 +130,21 @@ export function Editor() {
         if (!value || !activeFile) return
         setActiveFileContent(value)
         writeFile(activeFile, value)
-        
+
+        // Throttled edit event — at most 1/sec per file. Hosts buffer & batch.
+        const now = Date.now()
+        const last = lastEditEmit.current[activeFile] ?? 0
+        if (now - last >= 1000) {
+            lastEditEmit.current[activeFile] = now
+            host?.onEvent?.('edit', { file: activeFile, length: value.length })
+        }
+
         if (syncTimers.current[activeFile]) clearTimeout(syncTimers.current[activeFile])
         syncTimers.current[activeFile] = setTimeout(() => {
             import('@/vfs/opfs-sync').then(({ syncToOPFS }) => syncToOPFS(getProjectId(), activeFile, value))
             delete syncTimers.current[activeFile]
         }, 2000)
-    }, [activeFile, setActiveFileContent])
+    }, [activeFile, setActiveFileContent, host])
 
     if (!activeFile) {
         return (
