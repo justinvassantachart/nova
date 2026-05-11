@@ -1,5 +1,5 @@
 // ── NpmDapEngine ───────────────────────────────────────────────────
-// Drives the @jtrb/runtime WASM C/C++ runtime via standard DAP messages.
+// Drives the debugger-sh WASM C/C++ engine via standard DAP messages.
 // Replaces the in-house compiler/executor/DWARF stack with a single
 // library call that does all of compile + execute + debug.
 //
@@ -8,7 +8,7 @@
 // global allocation list (yet — we have requested this from the team).
 
 import { EventEmitter } from '@/lib/event-emitter';
-import { Runtime, type Lang } from '@jtrb/runtime';
+import { Engine, type Lang } from 'debugger-sh';
 import type {
     IIDEEngine,
     CompileResult,
@@ -43,23 +43,21 @@ export class NpmDapEngine implements IIDEEngine {
     public readonly onDebugResumed = new EventEmitter<void>();
     public readonly onExit = new EventEmitter<number>();
 
-    private rt: Runtime | null = null;
+    private engine: Engine | null = null;
     private dapSeq = 1;
-    private abortController: AbortController | null = null;
     private activeBreakpoints: Record<string, number[]> = {};
     private running = false;
     private fileMap: Record<string, string> = {};
 
-    private encoder = new TextEncoder();
     private inputBuf = '';
 
     async compile(files: Record<string, string>, _isDebug: boolean): Promise<CompileResult> {
         void _isDebug;
         this.onClearTerminal.emit();
-        this.onStdout.emit(`\x1b[1;34m[Nova] Initializing @jtrb/runtime execution environment...\x1b[0m\r\n`);
+        this.onStdout.emit(`\x1b[1;34m[Nova] Initializing debugger-sh execution environment...\x1b[0m\r\n`);
 
-        // The runtime sees a flat virtual filesystem. Strip our /workspace and
-        // /sysroot prefixes so files appear at the runtime root (e.g. main.cpp).
+        // The engine sees a flat virtual filesystem. Strip our /workspace and
+        // /sysroot prefixes so files appear at the engine root (e.g. main.cpp).
         this.fileMap = {};
         for (const [path, content] of Object.entries(files)) {
             let mappedPath = path;
@@ -73,9 +71,9 @@ export class NpmDapEngine implements IIDEEngine {
     }
 
     private dapSend(command: string, args: Record<string, unknown> = {}): DapResponse | null {
-        if (!this.rt) return null;
+        if (!this.engine) return null;
         try {
-            const res = this.rt.debugger.send({
+            const res = this.engine.debugger.send({
                 type: 'request',
                 seq: this.dapSeq++,
                 command,
@@ -89,57 +87,39 @@ export class NpmDapEngine implements IIDEEngine {
     }
 
     async run(_isDebug: boolean): Promise<void> {
-        if (this.rt) this.stop();
+        if (this.engine) this.stop();
         const isDebug = _isDebug;
 
-        // Try 'c++' (per team guidance); fall back to 'c' if the runtime rejects it.
         try {
-            this.rt = await Runtime.create('c++' as Lang);
-            this.rt.fs = this.fileMap;
-        } catch (cppErr) {
-            console.warn(`[NpmDapEngine] 'c++' rejected, falling back to 'c':`, cppErr);
-            this.onStderr.emit(`\x1b[33m'c++' rejected by runtime, falling back to 'c'...\x1b[0m\r\n`);
-            try {
-                this.rt = await Runtime.create('c');
-                this.rt.fs = this.fileMap;
-            } catch (cErr) {
-                const msg = cErr instanceof Error ? cErr.message : String(cErr);
-                this.onStderr.emit(`\x1b[31mFailed to create runtime: ${msg}\x1b[0m\r\n`);
-                this.onExit.emit(1);
-                return;
-            }
+            this.engine = await Engine.create('c' as Lang);
+            this.engine.fs = this.fileMap;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.onStderr.emit(`\x1b[31mFailed to create engine: ${msg}\x1b[0m\r\n`);
+            this.onExit.emit(1);
+            return;
         }
 
         this.running = true;
         this.dapSeq = 1;
-        this.abortController = new AbortController();
         this.inputBuf = '';
 
-        const { signal } = this.abortController;
         const decoder = new TextDecoder();
 
-        this.rt.stdout
-            .pipeTo(
-                new WritableStream<Uint8Array>({
-                    write: (chunk) => this.onStdout.emit(decoder.decode(chunk).replace(/\r?\n/g, '\r\n')),
-                }),
-                { signal },
-            )
-            .catch(() => {});
+        // stdout/stderr are event emitters with 'data' events emitting Uint8Array chunks
+        this.engine.stdout.on('data', (chunk: Uint8Array) => {
+            this.onStdout.emit(decoder.decode(chunk).replace(/\r?\n/g, '\r\n'));
+        });
 
-        this.rt.stderr
-            .pipeTo(
-                new WritableStream<Uint8Array>({
-                    write: (chunk) =>
-                        this.onStderr.emit(`\x1b[31m${decoder.decode(chunk).replace(/\r?\n/g, '\r\n')}\x1b[0m`),
-                }),
-                { signal },
-            )
-            .catch(() => {});
+        this.engine.stderr.on('data', (chunk: Uint8Array) => {
+            this.onStderr.emit(`\x1b[31m${decoder.decode(chunk).replace(/\r?\n/g, '\r\n')}\x1b[0m`);
+        });
 
-        // The runtime's Debugger extends a Node-style EventEmitter. The published
-        // .d.ts doesn't expose `on` cleanly under `verbatimModuleSyntax`, so cast.
-        const dbg = this.rt.debugger as unknown as {
+        // debugger.enabled controls whether debug mode is active for the next run
+        this.engine.debugger.enabled = isDebug;
+
+        // The debugger extends a Node-style EventEmitter.
+        const dbg = this.engine.debugger as unknown as {
             on(event: 'event', listener: (msg: unknown) => void): void;
         };
         dbg.on('event', (msg: unknown) => {
@@ -175,13 +155,16 @@ export class NpmDapEngine implements IIDEEngine {
         });
 
         try {
-            await this.rt.run();
+            const result = await this.engine.run();
+            if (result.type === 'completed') {
+                this.onExit.emit(result.exitCode);
+                this.running = false;
+            }
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             this.onStderr.emit(`\x1b[31mRuntime error: ${msg}\x1b[0m\r\n`);
         } finally {
-            this.abortController?.abort();
-            this.rt = null;
+            this.engine = null;
             if (this.running) {
                 this.running = false;
                 this.onExit.emit(0);
@@ -352,7 +335,7 @@ export class NpmDapEngine implements IIDEEngine {
 
     async setBreakpoints(file: string, lines: number[]): Promise<void> {
         this.activeBreakpoints[file] = lines;
-        if (this.rt && this.running) {
+        if (this.engine && this.running) {
             this.dapSend('setBreakpoints', {
                 source: { path: this.toRuntimePath(file) },
                 breakpoints: lines.map((l) => ({ line: l })),
@@ -376,14 +359,13 @@ export class NpmDapEngine implements IIDEEngine {
     }
 
     stop(): void {
-        this.abortController?.abort();
-        if (this.rt) {
+        if (this.engine) {
             try {
-                this.rt.stop();
+                this.engine.stop();
             } catch {
                 /* ignore */
             }
-            this.rt = null;
+            this.engine = null;
         }
         if (this.running) {
             this.running = false;
@@ -392,7 +374,7 @@ export class NpmDapEngine implements IIDEEngine {
     }
 
     writeStdin(data: string): void {
-        if (!this.rt) return;
+        if (!this.engine) return;
 
         if (data === '\x03') {
             // Ctrl+C
@@ -403,9 +385,7 @@ export class NpmDapEngine implements IIDEEngine {
 
         if (data === '\r') {
             this.onStdout.emit('\r\n');
-            const w = this.rt.stdin.getWriter();
-            w.write(this.encoder.encode(this.inputBuf + '\n'));
-            w.releaseLock();
+            this.engine.stdin.write(this.inputBuf + '\n');
             this.inputBuf = '';
             return;
         }
