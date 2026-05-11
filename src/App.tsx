@@ -84,7 +84,7 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex flex-col h-screen w-screen overflow-hidden">
+      <div className="flex flex-col h-full w-full overflow-hidden">
         <Toolbar />
 
         <div ref={containerRef} className="flex flex-1 min-h-0 overflow-hidden">

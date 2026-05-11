@@ -8,7 +8,9 @@ import { ProtectedRoute } from '@/lms/components/ProtectedRoute'
 import Login from '@/lms/pages/Login'
 import RoleSelect from '@/lms/pages/RoleSelect'
 import TeacherDashboard from '@/lms/pages/TeacherDashboard'
+import AssignmentEditor from '@/lms/pages/AssignmentEditor'
 import StudentDashboard from '@/lms/pages/StudentDashboard'
+import StudentAssignment from '@/lms/pages/StudentAssignment'
 import RootRedirect from '@/lms/pages/RootRedirect'
 
 createRoot(document.getElementById('root')!).render(
@@ -35,6 +37,14 @@ createRoot(document.getElementById('root')!).render(
             }
           />
           <Route
+            path="/teacher/assignments/:id"
+            element={
+              <ProtectedRoute role="teacher">
+                <AssignmentEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/student"
             element={
               <ProtectedRoute role="student">
@@ -42,8 +52,23 @@ createRoot(document.getElementById('root')!).render(
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/student/assignments/:id"
+            element={
+              <ProtectedRoute role="student">
+                <StudentAssignment />
+              </ProtectedRoute>
+            }
+          />
           {/* Standalone IDE — no auth, no host context, original behavior. */}
-          <Route path="/ide" element={<App />} />
+          <Route
+            path="/ide"
+            element={
+              <div className="h-screen w-screen">
+                <App />
+              </div>
+            }
+          />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
