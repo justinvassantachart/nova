@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@jtrb/runtime": "^0.2.1",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.2.0",
     "@types/dagre": "^0.7.53",
@@ -21,6 +20,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
+    "debugger-sh": "^0.3.1",
     "fflate": "^0.8.2",
     "firebase": "^12.13.0",
     "lucide-react": "^0.575.0",
