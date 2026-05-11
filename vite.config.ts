@@ -6,17 +6,25 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-// Strip COOP/COEP from the /auth.html bridge so its child OAuth popup
-// (accounts.google.com → firebaseapp.com handler) can postMessage back.
-// Production gets the same exemption via netlify.toml [[headers]].
-function authBridgeHeaders(): Plugin {
+// COOP/COEP are needed everywhere EXCEPT /auth.html (the sign-in bridge).
+// We do this via a single middleware instead of `server.headers` because
+// Vite's global `server.headers` config is applied late and overwrites
+// per-route overrides set by earlier middlewares.
+function novaSecurityHeaders(): Plugin {
   return {
-    name: 'nova-auth-bridge-headers',
+    name: 'nova-security-headers',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url && req.url.split('?')[0] === '/auth.html') {
+        const path = req.url ? req.url.split('?')[0] : ''
+        if (path === '/auth.html') {
+          // Bridge needs to host signInWithPopup; cross-origin handler
+          // must be able to postMessage back to it.
           res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none')
           res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none')
+        } else {
+          // SharedArrayBuffer-based debugger requires cross-origin isolation.
+          res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+          res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
         }
         next()
       })
@@ -26,7 +34,7 @@ function authBridgeHeaders(): Plugin {
 
 export default defineConfig({
   plugins: [
-    authBridgeHeaders(),
+    novaSecurityHeaders(),
     react(),
     tailwindcss(),
     wasm(),
@@ -39,12 +47,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-    },
-  },
-  server: {
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
   worker: {
