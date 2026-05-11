@@ -4,8 +4,9 @@ import { Toolbar } from '@/components/layout/Toolbar'
 import { FileExplorer } from '@/components/explorer/FileExplorer'
 import { Editor } from '@/components/editor/Editor'
 import { RightPanel } from '@/components/layout/RightPanel'
-import { initVFS } from '@/vfs/volume'
+import { initVFS, subscribeWorkspaceChange, getAllFiles } from '@/vfs/volume'
 import { preloadCompiler } from '@/lib/compiler-cache'
+import { useIDEHost } from '@/ide-host-context'
 
 // ── Drag handle with iframe overlay ────────────────────────────
 // Creates a fullscreen transparent overlay during drag so that
@@ -48,11 +49,35 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [explorerW, setExplorerW] = useState(220)
   const [rightW, setRightW] = useState(400)
+  const host = useIDEHost()
 
+  // Bootstrap VFS with a per-host project ID so OPFS namespaces are isolated
+  // across assignments. Re-runs when the host's assignment/submission changes.
   useEffect(() => {
-    initVFS()
+    const projectId = host?.submissionId
+      ? `submission:${host.submissionId}`
+      : host?.assignmentId
+      ? `assignment:${host.assignmentId}`
+      : 'default-project'
+    initVFS({ projectId, initialFiles: host?.initialFiles })
     preloadCompiler()
-  }, [])
+  }, [host?.assignmentId, host?.submissionId, host?.initialFiles])
+
+  // Forward debounced workspace snapshots to the host (e.g. Firestore submission auto-save).
+  // No-op in standalone mode (host is undefined).
+  useEffect(() => {
+    if (!host?.onWorkspaceChange) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const flush = () => host.onWorkspaceChange!(getAllFiles())
+    const unsub = subscribeWorkspaceChange(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(flush, 2000)
+    })
+    return () => {
+      if (timer) clearTimeout(timer)
+      unsub()
+    }
+  }, [host])
 
   const clamp = useCallback((val: number, min: number, max: number) =>
     Math.max(min, Math.min(max, val)), [])

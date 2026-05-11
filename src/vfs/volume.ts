@@ -205,6 +205,22 @@ let activeProjectId = 'default-project'
 export function getProjectId() { return activeProjectId }
 export function setProjectId(id: string) { activeProjectId = id }
 
+// ── Workspace-change emitter ───────────────────────────────────
+// Generic subscription used by hosts (e.g. LMS submission auto-save)
+// to observe /workspace mutations. Volume.ts knows nothing about
+// hosts — just fires events on writes. Subscribers debounce as needed.
+type WsListener = () => void
+const wsListeners = new Set<WsListener>()
+export function subscribeWorkspaceChange(fn: WsListener): () => void {
+    wsListeners.add(fn)
+    return () => wsListeners.delete(fn)
+}
+function notifyWorkspaceChange() {
+    wsListeners.forEach((fn) => {
+        try { fn() } catch (e) { console.warn('[vfs] workspace listener error', e) }
+    })
+}
+
 // ── CRUD Operations ────────────────────────────────────────────
 
 export function writeFile(path: string, content: string) {
@@ -213,6 +229,7 @@ export function writeFile(path: string, content: string) {
         vol.mkdirSync(dir, { recursive: true })
     }
     vol.writeFileSync(path, content, { encoding: 'utf8' })
+    if (path.startsWith('/workspace/')) notifyWorkspaceChange()
 }
 
 export function readFile(path: string): string {
@@ -247,6 +264,7 @@ export function deleteItem(path: string) {
         useEditorStore.getState().setActiveFile('', '')
     }
     refreshFileTree()
+    if (path.startsWith('/workspace/')) notifyWorkspaceChange()
 }
 
 export function renameItem(oldPath: string, newPath: string) {
@@ -260,6 +278,7 @@ export function renameItem(oldPath: string, newPath: string) {
         useEditorStore.getState().setActiveFile(newPath, content)
     }
     refreshFileTree()
+    if (oldPath.startsWith('/workspace/') || newPath.startsWith('/workspace/')) notifyWorkspaceChange()
 }
 
 export function fileExists(path: string): boolean {
@@ -324,31 +343,103 @@ export function refreshFileTree() {
 
 // ── Init ───────────────────────────────────────────────────────
 
-export async function initVFS() {
+export type InitVFSOptions = {
+    // Namespace for OPFS persistence. Each assignment/submission gets its own.
+    projectId?: string
+    // Seed files when /workspace is empty (overrides default templates).
+    initialFiles?: Record<string, string>
+}
+
+function wipeWorkspace() {
+    try {
+        const entries = vol.readdirSync('/workspace', { encoding: 'utf8' }) as string[]
+        for (const e of entries) {
+            const p = `/workspace/${e}`
+            try {
+                const stat = vol.statSync(p)
+                if (stat.isDirectory()) vol.rmdirSync(p, { recursive: true } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+                else vol.unlinkSync(p)
+            } catch { /* ignore */ }
+        }
+    } catch { /* /workspace doesn't exist yet */ }
+}
+
+// Replace /workspace contents with the given files. Used when switching
+// assignments. Does NOT touch /sysroot. Fires a single change notification.
+export function bootstrapWorkspace(files: Record<string, string>) {
+    wipeWorkspace()
+    vol.mkdirSync('/workspace', { recursive: true })
+    for (const [path, content] of Object.entries(files)) {
+        const target = path.startsWith('/workspace/')
+            ? path
+            : `/workspace/${path.replace(/^\/+/, '')}`
+        // Use vol directly to batch notifies into one at the end
+        const dir = target.substring(0, target.lastIndexOf('/'))
+        if (dir && !vol.existsSync(dir)) vol.mkdirSync(dir, { recursive: true })
+        vol.writeFileSync(target, content, { encoding: 'utf8' })
+    }
+    refreshFileTree()
+    // Activate the first file alphabetically (main.cpp wins by sort order)
+    const first = Object.keys(files).sort()[0]
+    if (first) {
+        const target = first.startsWith('/workspace/') ? first : `/workspace/${first.replace(/^\/+/, '')}`
+        useEditorStore.getState().setActiveFile(target, readFile(target))
+    }
+    notifyWorkspaceChange()
+}
+
+export async function initVFS(opts: InitVFSOptions = {}) {
+    if (opts.projectId) activeProjectId = opts.projectId
+
     // Sysroot is separate from workspace — not polluting student's project
     vol.mkdirSync('/sysroot', { recursive: true })
     writeFile('/sysroot/nova.h', NOVA_H)
     writeFile('/sysroot/memory_tracker.cpp', MEMORY_TRACKER)
 
-    // Student workspace
+    // Reset workspace before hydrating so switching assignments doesn't leak
+    wipeWorkspace()
     vol.mkdirSync('/workspace', { recursive: true })
 
-    // Hydrate from OPFS
+    // Hydrate from OPFS (per-project)
     try {
         const { hydrateFromOPFS } = await import('./opfs-sync')
         await hydrateFromOPFS(activeProjectId)
     } catch { /* OPFS not available */ }
 
-    // Default files
-    if (!vol.existsSync('/workspace/main.cpp')) {
-        writeFile('/workspace/main.cpp', DEFAULT_MAIN)
-    }
-    if (!vol.existsSync('/workspace/canvas_demo.cpp')) {
-        writeFile('/workspace/canvas_demo.cpp', CANVAS_DEMO)
+    const workspaceEmpty = (() => {
+        try { return (vol.readdirSync('/workspace', { encoding: 'utf8' }) as string[]).length === 0 }
+        catch { return true }
+    })()
+
+    if (workspaceEmpty) {
+        if (opts.initialFiles && Object.keys(opts.initialFiles).length > 0) {
+            for (const [path, content] of Object.entries(opts.initialFiles)) {
+                const target = path.startsWith('/workspace/')
+                    ? path
+                    : `/workspace/${path.replace(/^\/+/, '')}`
+                writeFile(target, content)
+            }
+        } else {
+            writeFile('/workspace/main.cpp', DEFAULT_MAIN)
+            writeFile('/workspace/canvas_demo.cpp', CANVAS_DEMO)
+        }
     }
 
     refreshFileTree()
-    useEditorStore.getState().setActiveFile('/workspace/main.cpp', readFile('/workspace/main.cpp'))
+    // Pick a sensible active file
+    const pickActive = () => {
+        if (vol.existsSync('/workspace/main.cpp')) return '/workspace/main.cpp'
+        try {
+            const entries = (vol.readdirSync('/workspace', { encoding: 'utf8' }) as string[]).sort()
+            for (const e of entries) {
+                const p = `/workspace/${e}`
+                if (!vol.statSync(p).isDirectory()) return p
+            }
+        } catch { /* empty */ }
+        return null
+    }
+    const active = pickActive()
+    if (active) useEditorStore.getState().setActiveFile(active, readFile(active))
 
     // Load standard library sysroot in the background
     // (non-blocking — compilation will wait for it in the compiler bridge)
