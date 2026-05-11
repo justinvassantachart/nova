@@ -53,17 +53,34 @@
       }
 
       const provider = new firebase.auth.GoogleAuthProvider();
+      // Make sure we get an ID token back, not just an access token.
+      provider.addScope('openid');
+      provider.addScope('email');
+      provider.addScope('profile');
+
       firebase.auth().signInWithPopup(provider)
         .then(function (result) {
-          const cred = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
-          if (!cred) throw new Error('No credential returned');
-          channel.postMessage({
-            ok: true,
-            idToken: cred.idToken,
-            accessToken: cred.accessToken,
-          });
+          // The compat SDK exposes the OAuth credential directly on result.
+          // Fall back to credentialFromResult and the internal _tokenResponse
+          // (covers older/newer SDK shapes).
+          var cred = result && result.credential;
+          if (!cred && firebase.auth.GoogleAuthProvider.credentialFromResult) {
+            try {
+              cred = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
+            } catch (e) { /* ignore */ }
+          }
+          var idToken = (cred && (cred.idToken || cred.oauthIdToken)) || null;
+          var accessToken = (cred && (cred.accessToken || cred.oauthAccessToken)) || null;
+          var tr = result && (result._tokenResponse || (result.user && result.user._tokenResponse));
+          if (!idToken && tr) idToken = tr.oauthIdToken || tr.idToken || null;
+          if (!accessToken && tr) accessToken = tr.oauthAccessToken || tr.accessToken || null;
+
+          if (!idToken && !accessToken) {
+            throw new Error('Sign-in succeeded but no Google tokens were returned');
+          }
+          channel.postMessage({ ok: true, idToken: idToken, accessToken: accessToken });
           // Give the BroadcastChannel a tick to deliver before we close.
-          setTimeout(function () { window.close(); }, 50);
+          setTimeout(function () { window.close(); }, 100);
         })
         .catch(function (err) {
           fail((err && (err.code || err.message)) || 'Sign-in failed');
