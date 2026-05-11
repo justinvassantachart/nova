@@ -1,0 +1,92 @@
+rules_version = '2';
+
+// Nova LMS security rules.
+//
+// Data model:
+//   users/{uid}        — one doc per signed-in user; role is immutable after set
+//   assignments/{id}   — owned by a teacher; readable to all authed users when published
+//   submissions/{id}   — id = `${assignmentId}_${studentUid}`; owned by student
+//   events/{id}        — append-only analytics log; client may create only
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUser(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isTeacher() {
+      return isSignedIn() && getUser(request.auth.uid).role == 'teacher';
+    }
+
+    // ── users ────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+
+      // First-login self-create. role MUST start null; immutable thereafter.
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.role == null
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'role', 'createdAt']);
+
+      // Self-update: only fill in role when it's still null. Email/displayName editable.
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && (resource.data.role == null || request.resource.data.role == resource.data.role)
+        && request.resource.data.role in ['teacher', 'student', null];
+
+      allow delete: if false;
+    }
+
+    // ── assignments ──────────────────────────────────────────────
+    match /assignments/{id} {
+      // Readable by owner, or by anyone signed-in when published.
+      allow read: if isSignedIn()
+        && (resource.data.teacherUid == request.auth.uid
+            || resource.data.published == true);
+
+      // Only teachers may create, and only with themselves as owner.
+      allow create: if isTeacher()
+        && request.resource.data.teacherUid == request.auth.uid;
+
+      // Only the owning teacher may update or delete.
+      allow update, delete: if isSignedIn()
+        && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ── submissions ──────────────────────────────────────────────
+    match /submissions/{id} {
+      // The student who owns it can read/write. The teacher who owns the
+      // referenced assignment can read (for grading).
+      allow read: if isSignedIn() && (
+        resource.data.studentUid == request.auth.uid
+        || get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.teacherUid == request.auth.uid
+      );
+
+      // Student creates their own submission, must match their uid + the deterministic id.
+      allow create: if isSignedIn()
+        && request.resource.data.studentUid == request.auth.uid
+        && id == request.resource.data.assignmentId + '_' + request.auth.uid;
+
+      // Student updates their own submission only. studentUid + assignmentId immutable.
+      allow update: if isSignedIn()
+        && resource.data.studentUid == request.auth.uid
+        && request.resource.data.studentUid == resource.data.studentUid
+        && request.resource.data.assignmentId == resource.data.assignmentId;
+
+      allow delete: if false;
+    }
+
+    // ── events (append-only analytics) ───────────────────────────
+    match /events/{id} {
+      allow read: if false;          // clients never read events
+      allow update, delete: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+    }
+  }
+}
