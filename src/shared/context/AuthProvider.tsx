@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { firebaseConfigured, getDb, getFirebaseAuth } from '@/shared/firebase/client'
+import { consumeRedirectResult } from '@/shared/firebase/auth'
 import type { AppUser } from '@/shared/types'
 
 type AuthState = {
@@ -28,14 +29,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       return
     }
-    const unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
-      setUser(u)
-      if (!u) {
-        setAppUser(null)
-        setLoading(false)
-      }
+    // Consume any pending redirect result before we wire up onAuthStateChanged
+    // so the post-redirect first render already knows the user is signed in.
+    let unsub: (() => void) | undefined
+    consumeRedirectResult().finally(() => {
+      unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
+        setUser(u)
+        if (!u) {
+          setAppUser(null)
+          setLoading(false)
+        }
+      })
     })
-    return unsub
+    return () => {
+      unsub?.()
+    }
   }, [])
 
   // Sync /users/{uid} doc. Create on first login (role=null until RoleSelect).

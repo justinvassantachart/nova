@@ -138,7 +138,6 @@ Any static host works — the repo includes a `netlify.toml` for Netlify with th
 - **Roles are permanent** from the user's side. If a student picks "Teacher" by mistake, edit their `role` field directly in the Firestore console.
 - **Submission size**: a single assignment + submission is limited to ~1 MB by Firestore. Plenty for typical CS-class assignments; unsuitable for large media.
 - **Analytics**: every compile / run / edit / step is logged to the `events` collection with the student's UID, the assignment ID, and a session ID. Export to BigQuery via the Firebase Extensions marketplace if you want to analyze it offline.
-- **Privacy / IRB**: if you're using event-log data for research with human subjects, consult your institution's IRB and obtain informed consent before collecting.
 
 ## Tech Stack
 
