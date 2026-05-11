@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Signing in…</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, sans-serif; background: #0a0a0a; color: #eee; }
+    .wrap { display: flex; align-items: center; justify-content: center; height: 100%; flex-direction: column; gap: 12px; text-align: center; padding: 16px; }
+    .err { color: #ff7676; font-size: 13px; max-width: 360px; }
+    .spin { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #444; border-top-color: #aaa; animation: r 1s linear infinite; }
+    @keyframes r { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="spin"></div>
+    <div>Signing in with Google…</div>
+    <div id="err" class="err"></div>
+  </div>
+
+  <!-- Firebase compat SDK from CDN — keeps this file fully static and self-contained.
+       This page is served WITHOUT COOP/COEP headers (see vite.config.ts / netlify.toml)
+       so signInWithPopup can postMessage back from accounts.google.com normally. -->
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const config = {
+        apiKey: params.get('apiKey'),
+        authDomain: params.get('authDomain'),
+        projectId: params.get('projectId'),
+        appId: params.get('appId'),
+      };
+      const channel = new BroadcastChannel('nova_auth');
+
+      function fail(msg) {
+        document.getElementById('err').textContent = msg;
+        channel.postMessage({ ok: false, error: msg });
+      }
+
+      if (!config.apiKey || !config.authDomain) {
+        fail('Missing Firebase config in URL params.');
+        return;
+      }
+
+      try {
+        firebase.initializeApp(config);
+      } catch (e) {
+        fail('Firebase init failed: ' + (e && e.message ? e.message : e));
+        return;
+      }
+
+      const provider = new firebase.auth.GoogleAuthProvider();
+      // Make sure we get an ID token back, not just an access token.
+      provider.addScope('openid');
+      provider.addScope('email');
+      provider.addScope('profile');
+
+      firebase.auth().signInWithPopup(provider)
+        .then(function (result) {
+          // The compat SDK exposes the OAuth credential directly on result.
+          // Fall back to credentialFromResult and the internal _tokenResponse
+          // (covers older/newer SDK shapes).
+          var cred = result && result.credential;
+          if (!cred && firebase.auth.GoogleAuthProvider.credentialFromResult) {
+            try {
+              cred = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
+            } catch (e) { /* ignore */ }
+          }
+          var idToken = (cred && (cred.idToken || cred.oauthIdToken)) || null;
+          var accessToken = (cred && (cred.accessToken || cred.oauthAccessToken)) || null;
+          var tr = result && (result._tokenResponse || (result.user && result.user._tokenResponse));
+          if (!idToken && tr) idToken = tr.oauthIdToken || tr.idToken || null;
+          if (!accessToken && tr) accessToken = tr.oauthAccessToken || tr.accessToken || null;
+
+          if (!idToken && !accessToken) {
+            throw new Error('Sign-in succeeded but no Google tokens were returned');
+          }
+          channel.postMessage({ ok: true, idToken: idToken, accessToken: accessToken });
+          // Give the BroadcastChannel a tick to deliver before we close.
+          setTimeout(function () { window.close(); }, 100);
+        })
+        .catch(function (err) {
+          fail((err && (err.code || err.message)) || 'Sign-in failed');
+        });
+    })();
+  </script>
+</body>
+</html>

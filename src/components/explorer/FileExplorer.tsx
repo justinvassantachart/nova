@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import {
     readFile, createFile, createFolder, deleteItem, renameItem, fileExists,
 } from '@/vfs/volume'
+import { useIDEHost } from '@/ide-host-context'
 
 // ── Inline name input (like VS Code) ───────────────────────────
 function InlineInput({ defaultValue, onSubmit, onCancel }: {
@@ -48,6 +49,7 @@ function TreeItem({ node, depth }: { node: VFSNode; depth: number }) {
     const { expandedDirs, toggleDir, expandDir } = useFilesStore()
     const [renaming, setRenaming] = useState(false)
     const [creating, setCreating] = useState<'file' | 'folder' | null>(null)
+    const host = useIDEHost()
 
     const isExpanded = expandedDirs.has(node.path)
     const isActive = activeFile === node.path
@@ -65,11 +67,13 @@ function TreeItem({ node, depth }: { node: VFSNode; depth: number }) {
         const newPath = `${parent}/${name}`
         if (newPath !== node.path && !fileExists(newPath)) {
             renameItem(node.path, newPath)
+            host?.onEvent?.('file_rename', { from: node.path, to: newPath })
         }
         setRenaming(false)
     }
 
     const handleDelete = () => {
+        host?.onEvent?.('file_delete', { path: node.path })
         deleteItem(node.path)
     }
 
@@ -79,6 +83,7 @@ function TreeItem({ node, depth }: { node: VFSNode; depth: number }) {
         if (!fileExists(newPath)) {
             if (creating === 'folder') createFolder(newPath)
             else createFile(newPath, '')
+            host?.onEvent?.('file_create', { path: newPath, kind: creating ?? 'file' })
         }
         setCreating(null)
         if (node.isDirectory) expandDir(node.path)

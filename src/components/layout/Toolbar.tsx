@@ -10,9 +10,11 @@ import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
 import { useEngine } from '@/engine/EngineContext'
 import { DebugControls } from './DebugControls'
+import { useIDEHost } from '@/ide-host-context'
 
 export function Toolbar() {
     const engine = useEngine()
+    const host = useIDEHost()
     const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
     const { debugMode, currentLine, currentFile, pushHistoryState, setDebugMode, reset } = useDebugStore()
@@ -31,12 +33,16 @@ export function Toolbar() {
     const executePipeline = async (debug: boolean) => {
         if (isCompiling || isRunning) return
         setIsCompiling(true)
+        host?.onEvent?.(debug ? 'compile_debug' : 'compile', {})
         const result = await engine.compile(getAllFiles(), debug)
         setIsCompiling(false)
         if (result.success) {
             setIsRunning(true)
             setDebugMode(debug ? 'running' : 'idle')
+            host?.onEvent?.('run', { debug })
             await engine.run(debug)
+        } else {
+            host?.onEvent?.('compile_error', { debug })
         }
     }
 
