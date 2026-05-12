@@ -43,7 +43,7 @@ export class NpmDapEngine implements IIDEEngine {
 
     async compile(files: Record<string, string>, _isDebug: boolean): Promise<CompileResult> {
         this.onClearTerminal.emit();
-        this.onStdout.emit(`\x1b[1;34m[Nova] Initializing debugger-sh execution environment...\x1b[0m\r\n`);
+        this.onStdout.emit(`\x1b[1;34mInitializing debugger execution environment...\x1b[0m\r\n`);
 
         this.fileMap = {};
         for (const [path, content] of Object.entries(files)) {
@@ -394,6 +394,11 @@ export class NpmDapEngine implements IIDEEngine {
         this.dapSend('next', { threadId: 1 });
     }
 
+    async stepOut(): Promise<void> {
+        this.onDebugResumed.emit();
+        this.dapSend('stepOut', { threadId: 1 });
+    }
+
     async continueExecution(): Promise<void> {
         this.onDebugResumed.emit();
         this.dapSend('continue', { threadId: 1 });
@@ -414,11 +419,31 @@ export class NpmDapEngine implements IIDEEngine {
         }
     }
 
+    // Line-buffered stdin. Mirrors debugger.sh upstream behavior so programs that
+    // use `cin >> x` / `scanf` / read-until-EOF loops behave the same as in the
+    // reference IDE. Special key conventions:
+    //   ^C  → terminate the running program
+    //   ^D  → flush EOF marker (so `while (cin >> x)` exits)
+    //   ^L  → clear the visible terminal (buffer preserved-cleared)
+    //   ⏎   → flush buffered line + '\n' to the program's stdin
+    //   ⌫   → erase last char in buffer + visible echo
+    //   esc → swallow CSI sequences (arrow keys etc.) so they don't enter the buffer
     writeStdin(data: string): void {
         if (!this.engine) return;
         if (data === '\x03') {
             this.onStdout.emit('^C\r\n');
             this.stop();
+            return;
+        }
+        if (data === '\x04') {
+            this.onStdout.emit('^D\r\n');
+            this.engine.stdin.write('\x04');
+            this.inputBuf = '';
+            return;
+        }
+        if (data === '\x0c') {
+            this.onClearTerminal.emit();
+            this.inputBuf = '';
             return;
         }
         if (data === '\r') {
@@ -434,6 +459,7 @@ export class NpmDapEngine implements IIDEEngine {
             }
             return;
         }
+        if (data.startsWith('\x1b')) return; // arrow keys, function keys, etc.
         if (data >= ' ') {
             this.inputBuf += data;
             this.onStdout.emit(data);

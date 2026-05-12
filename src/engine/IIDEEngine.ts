@@ -52,6 +52,7 @@ export interface IIDEEngine {
     setBreakpoints(file: string, lines: number[]): Promise<void>;
     stepInto(): Promise<void>;
     stepOver(): Promise<void>; // Note: The DAP protocol formally calls this "next"
+    stepOut(): Promise<void>;
     continueExecution(): Promise<void>;
 
     // Optional: forward raw xterm keystrokes into the program's stdin

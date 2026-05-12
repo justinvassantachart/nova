@@ -14,6 +14,7 @@ export type EventType =
   | 'breakpoint_toggle'
   | 'debug_step_into'
   | 'debug_step_over'
+  | 'debug_step_out'
   | 'debug_continue'
   | 'debug_step_back'
   | 'debug_step_forward'

@@ -51,9 +51,9 @@ export function Toolbar() {
     const handleStop = () => { engine.stop(); reset() }
 
     return (
-        <div className="flex items-center h-10 px-3 gap-2 border-b bg-card">
-            <span className="font-bold text-sm tracking-wide text-foreground mr-auto">
-                NOVA
+        <div className="flex items-center h-10 px-3 gap-2 border-b border-border bg-[var(--color-chrome)]">
+            <span className="font-bold text-sm tracking-[0.18em] text-foreground mr-auto select-none">
+                NOVA<span className="text-primary">·</span>IDE
             </span>
 
             {/* Compiler download progress */}
@@ -65,17 +65,24 @@ export function Toolbar() {
                 </div>
             )}
 
-            {/* Debug status */}
-            {debugMode === 'paused' && (
-                <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-400">
-                    Paused in {currentFile ? currentFile.split('/').pop() : 'unknown'} at line {currentLine}
+            {/* Debug status — when paused, the line indicator carries the state
+                and the redundant Running/Ready badge would just add noise. */}
+            {debugMode === 'paused' ? (
+                <Badge variant="outline" className="text-xs border-yellow-500/60 text-yellow-400 bg-yellow-500/5 font-mono">
+                    <span className="text-muted-foreground mr-1">paused at</span>
+                    {currentFile ? currentFile.split('/').pop() : 'unknown'}:{currentLine}
+                </Badge>
+            ) : (
+                <Badge variant="outline" className="text-xs font-mono">
+                    {isCompiling ? (
+                        <span className="text-primary">compiling</span>
+                    ) : isRunning ? (
+                        <span className="text-primary">running</span>
+                    ) : (
+                        <span className="text-muted-foreground">ready</span>
+                    )}
                 </Badge>
             )}
-
-            {/* Status badge */}
-            <Badge variant={isCompiling ? 'default' : isRunning ? 'default' : 'secondary'} className="text-xs">
-                {isCompiling ? 'Compiling' : isRunning ? 'Running' : 'Ready'}
-            </Badge>
 
             {/* Debug controls when paused */}
             {debugMode === 'paused' && <DebugControls />}
@@ -90,7 +97,7 @@ export function Toolbar() {
                                     size="sm"
                                     onClick={handleRun}
                                     disabled={!compilerReady || isCompiling}
-                                    className="bg-green-600 hover:bg-green-500 text-white gap-1"
+                                    className="bg-[oklch(0.65_0.18_145)] hover:bg-[oklch(0.7_0.18_145)] text-black gap-1 font-semibold"
                                 >
                                     <Play className="h-3.5 w-3.5" /> Run
                                 </Button>
@@ -105,11 +112,12 @@ export function Toolbar() {
 
                     <Button
                         size="sm"
+                        variant="outline"
                         onClick={handleDebug}
                         disabled={!compilerReady || isCompiling}
-                        className="bg-purple-600 hover:bg-purple-500 text-white gap-1"
+                        className="gap-1"
                     >
-                        <Bug className="h-3.5 w-3.5" /> Debug
+                        <Bug className="h-3.5 w-3.5 text-primary" /> Debug
                     </Button>
                 </div>
             ) : isRunning && debugMode !== 'paused' ? (
