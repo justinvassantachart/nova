@@ -5,11 +5,12 @@ import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
 import type { VariableNode as MemoryValue } from '@/engine/IIDEEngine'
 
-// ── Recursive Table Row ──
+// --- Recursive Table Row ---
 function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
     const addrTooltip = variable.address > 0
         ? `0x${variable.address.toString(16).padStart(8, '0')}`
         : undefined
+
     return (
         <div className="flex flex-col border-t border-[#30363d] w-full group relative">
             <div className="flex items-stretch min-h-[26px] hover:bg-[#21262d] transition-colors relative w-full"
@@ -19,6 +20,7 @@ function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; d
                     style={{ paddingLeft: `${0.75 + depth * 0.75}rem` }}>
                     <span className="truncate">{variable.name}</span>
                 </div>
+
                 {/* Right Column: Value */}
                 <div className="w-[55%] py-1 px-3 relative flex items-center font-mono text-[11px] text-[#e6edf3]">
                     <span className={`truncate ${variable.type.includes('string') || variable.type.includes('char') ? 'text-[#a5d6ff]' : ''}`}>
@@ -86,7 +88,7 @@ function HeapNode({ data }: { data: { id: string; label: string; ptr: number; me
 
 const nodeTypes = { stackFrame: StackFrameNode, heapNode: HeapNode }
 
-// ── Graph Layout Engine ──
+// --- Graph Layout Engine ---
 function countRows(vars: MemoryValue[]): number {
     let rows = 0;
     for (const v of vars) {
@@ -188,7 +190,6 @@ function SeparatorOverlay({ separatorX }: { separatorX: number }) {
 
 export function MemoryVisualizer() {
     const { debugMode, memorySnapshot } = useDebugStore()
-
     const [nodes, setNodes] = useState<Node[]>([])
     const [edges, setEdges] = useState<Edge[]>([])
     const [separatorX, setSeparatorX] = useState<number | null>(null)
@@ -200,14 +201,13 @@ export function MemoryVisualizer() {
             setSeparatorX(null)
             return
         }
-        const snapshot = memorySnapshot
 
+        const snapshot = memorySnapshot
         const rawNodes: Node[] = []
         const rawEdges: Edge[] = []
-
         const reversedFrames = [...snapshot.frames].reverse()
 
-        // Build an address → handle map so pointers can target any visualized memory,
+        // Build an address -> handle map so pointers can target any visualized memory,
         // not only heap allocation bases. Heap bases register first and win at the
         // base address; interior member addresses (e.g. &savanna[0].cat) get their
         // own row-level target handle.
@@ -230,8 +230,29 @@ export function MemoryVisualizer() {
         for (const frame of snapshot.frames) {
             registerAddresses(frame.variables, frame.id, frame.id)
         }
+
         for (const alloc of snapshot.heapAllocations) {
             registerAddresses(alloc.members, `heap-${alloc.ptr}`, `heap-${alloc.ptr}`)
+        }
+
+        // Drills recursively down generating edges directly from mapped physical addresses
+        const extractEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string, isActive: boolean, inactiveStroke: string) => {
+            for (const v of vars) {
+                const currentHandleId = `${parentId}-${v.name}`;
+                if (v.isPointer && v.pointsTo) {
+                    const target = addressMap.get(v.pointsTo)
+                    if (target) {
+                        rawEdges.push({
+                            id: `${currentHandleId}->${target.nodeId}/${target.handleId}`,
+                            source: nodeIdentifier, sourceHandle: currentHandleId,
+                            target: target.nodeId, targetHandle: target.handleId,
+                            type: 'bezier', animated: isActive,
+                            style: { stroke: isActive ? '#58a6ff' : inactiveStroke, strokeWidth: 2 }
+                        })
+                    }
+                }
+                if (v.isStruct && v.members) extractEdges(v.members, currentHandleId, nodeIdentifier, isActive, inactiveStroke);
+            }
         }
 
         reversedFrames.forEach((frameData) => {
@@ -240,28 +261,7 @@ export function MemoryVisualizer() {
                 draggable: false,
                 data: { id: frameData.id, label: `${frameData.funcName}()`, isActive: frameData.isActive, variables: frameData.variables },
             })
-
-
-
-            const extractEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string) => {
-                for (const v of vars) {
-                    const currentHandleId = `${parentId}-${v.name}`;
-                    if (v.isPointer && v.pointsTo) {
-                        const target = addressMap.get(v.pointsTo)
-                        if (target) {
-                            rawEdges.push({
-                                id: `${currentHandleId}->${target.nodeId}/${target.handleId}`,
-                                source: nodeIdentifier, sourceHandle: currentHandleId,
-                                target: target.nodeId, targetHandle: target.handleId,
-                                type: 'bezier', animated: frameData.isActive,
-                                style: { stroke: frameData.isActive ? '#58a6ff' : '#475569', strokeWidth: 2 }
-                            })
-                        }
-                    }
-                    if (v.isStruct && v.members) extractEdges(v.members, currentHandleId, nodeIdentifier);
-                }
-            }
-            extractEdges(frameData.variables, frameData.id, frameData.id);
+            extractEdges(frameData.variables, frameData.id, frameData.id, frameData.isActive, '#475569');
         })
 
         snapshot.heapAllocations.forEach((alloc) => {
@@ -271,26 +271,7 @@ export function MemoryVisualizer() {
                 draggable: true,
                 data: { id: nodeId, label: alloc.typeName, ptr: alloc.ptr, members: alloc.members },
             })
-
-            const extractHeapEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string) => {
-                for (const v of vars) {
-                    const currentHandleId = `${parentId}-${v.name}`;
-                    if (v.isPointer && v.pointsTo) {
-                        const target = addressMap.get(v.pointsTo)
-                        if (target) {
-                            rawEdges.push({
-                                id: `${currentHandleId}->${target.nodeId}/${target.handleId}`,
-                                source: nodeIdentifier, sourceHandle: currentHandleId,
-                                target: target.nodeId, targetHandle: target.handleId,
-                                type: 'bezier', animated: false,
-                                style: { stroke: '#8b949e', strokeWidth: 2 }
-                            })
-                        }
-                    }
-                    if (v.isStruct && v.members) extractHeapEdges(v.members, currentHandleId, nodeIdentifier);
-                }
-            }
-            extractHeapEdges(alloc.members, nodeId, nodeId);
+            extractEdges(alloc.members, nodeId, nodeId, false, '#8b949e');
         })
 
         const laidOut = layoutGraph(rawNodes, rawEdges)
@@ -306,11 +287,12 @@ export function MemoryVisualizer() {
                 return newNode
             })
         })
+
         setEdges(rawEdges)
         setSeparatorX(sepX)
     }, [memorySnapshot])
 
-    // Only allow position changes for heap nodes — block stack node drags
+    // Only allow position changes for heap nodes - block stack node drags
     const onNodesChange = useCallback((changes: NodeChange[]) => {
         setNodes(nds => {
             const filtered = changes.filter(change => {

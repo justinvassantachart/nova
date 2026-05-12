@@ -1,12 +1,3 @@
-// ── NpmDapEngine ───────────────────────────────────────────────────
-// Drives the debugger-sh WASM C/C++ engine via standard DAP messages.
-// Replaces the in-house compiler/executor/DWARF stack with a single
-// library call that does all of compile + execute + debug.
-//
-// Heap visualization is reconstructed by walking pointer values returned
-// from DAP `variables` requests, since the runtime does not expose a
-// global allocation list (yet — we have requested this from the team).
-
 import { EventEmitter } from '@/lib/event-emitter';
 import { Engine, type Lang } from 'debugger-sh';
 import type {
@@ -48,16 +39,12 @@ export class NpmDapEngine implements IIDEEngine {
     private activeBreakpoints: Record<string, number[]> = {};
     private running = false;
     private fileMap: Record<string, string> = {};
-
     private inputBuf = '';
 
     async compile(files: Record<string, string>, _isDebug: boolean): Promise<CompileResult> {
-        void _isDebug;
         this.onClearTerminal.emit();
         this.onStdout.emit(`\x1b[1;34m[Nova] Initializing debugger-sh execution environment...\x1b[0m\r\n`);
 
-        // The engine sees a flat virtual filesystem. Strip our /workspace and
-        // /sysroot prefixes so files appear at the engine root (e.g. main.cpp).
         this.fileMap = {};
         for (const [path, content] of Object.entries(files)) {
             let mappedPath = path;
@@ -86,9 +73,8 @@ export class NpmDapEngine implements IIDEEngine {
         }
     }
 
-    async run(_isDebug: boolean): Promise<void> {
+    async run(isDebug: boolean): Promise<void> {
         if (this.engine) this.stop();
-        const isDebug = _isDebug;
 
         try {
             this.engine = await Engine.create('c' as Lang);
@@ -105,26 +91,23 @@ export class NpmDapEngine implements IIDEEngine {
         this.inputBuf = '';
 
         const decoder = new TextDecoder();
-
-        // stdout/stderr are event emitters with 'data' events emitting Uint8Array chunks
         this.engine.stdout.on('data', (chunk: Uint8Array) => {
             this.onStdout.emit(decoder.decode(chunk).replace(/\r?\n/g, '\r\n'));
         });
-
         this.engine.stderr.on('data', (chunk: Uint8Array) => {
             this.onStderr.emit(`\x1b[31m${decoder.decode(chunk).replace(/\r?\n/g, '\r\n')}\x1b[0m`);
         });
 
-        // debugger.enabled controls whether debug mode is active for the next run
         this.engine.debugger.enabled = isDebug;
 
-        // The debugger extends a Node-style EventEmitter.
         const dbg = this.engine.debugger as unknown as {
             on(event: 'event', listener: (msg: unknown) => void): void;
         };
+
         dbg.on('event', (msg: unknown) => {
             const m = msg as DapEvent | null;
             if (m?.type !== 'event') return;
+
             switch (m.event) {
                 case 'initialized':
                     this.configureDebugger(isDebug);
@@ -187,13 +170,11 @@ export class NpmDapEngine implements IIDEEngine {
                     });
                 }
             } else {
-                // Send a stub against /main.cpp so the handshake is satisfied.
                 this.dapSend('setBreakpoints', { source: { path: '/main.cpp' }, breakpoints: [] });
             }
         } else {
             this.dapSend('setBreakpoints', { source: { path: '/main.cpp' }, breakpoints: [] });
         }
-
         this.dapSend('setExceptionBreakpoints', { filters: [] });
         this.dapSend('configurationDone', {});
     }
@@ -208,23 +189,97 @@ export class NpmDapEngine implements IIDEEngine {
     private handleStopped(body: Any) {
         const threadId = body?.threadId ?? 1;
         const stackRes = this.dapSend('stackTrace', { threadId });
+        console.log('[NpmDapEngine] stackTrace response:', stackRes);
         const frames: Any[] = stackRes?.body?.stackFrames ?? [];
 
         const callStack: StackFrame[] = [];
         const heapAllocations = new Map<number, HeapAllocation>();
-        const visitedVars = new Set<number>();
 
+        const stackAddrs = new Set<number>();
+        const heapQueue: { ptr: number; typeStr: string; variablesReference: number; valueStr?: string }[] = [];
+        const visitedRefs = new Set<number>();
+
+        const parseAddr = (v: Any) => this.parseHexAddress(v.memoryReference);
+
+        const processVariable = (v: Any, isHeap: boolean): VariableNode => {
+            const addr = parseAddr(v);
+            const typeStr: string = v.type ?? '';
+            // Match pointer logic including references
+            const isPointer = typeStr.includes('*') || typeStr.includes('&');
+            const variablesReference = v.variablesReference ?? 0;
+            const hasChildren = variablesReference > 0;
+
+            if (!isHeap && addr > 0) {
+                stackAddrs.add(addr);
+            }
+
+            let members: VariableNode[] | undefined;
+            let pointsTo: number | undefined;
+
+            if (isPointer) {
+                if (hasChildren) {
+                    // The engine returns the pointer's own storage address in `value`,
+                    // not the target. Dereference through children to get the actual target.
+                    const varsRes = this.dapSend('variables', { variablesReference });
+                    console.log('[NpmDapEngine] variables response (pointer):', varsRes);
+                    const dapVars: Any[] = varsRes?.body?.variables ?? [];
+                    if (dapVars.length > 0) {
+                        pointsTo = parseAddr(dapVars[0]);
+                    }
+
+                    if (pointsTo && pointsTo > 0 && !visitedRefs.has(variablesReference)) {
+                        visitedRefs.add(variablesReference);
+                        heapQueue.push({
+                            ptr: pointsTo,
+                            typeStr: typeStr.replace(/[\*&]\s*$/, '').trim() || 'unknown',
+                            variablesReference,
+                            valueStr: v.value ?? ''
+                        });
+                    }
+                }
+            } else if (hasChildren && !visitedRefs.has(variablesReference)) {
+                visitedRefs.add(variablesReference);
+                const varsRes = this.dapSend('variables', { variablesReference });
+                console.log('[NpmDapEngine] variables response (struct/hasChildren):', varsRes);
+                const dapVars: Any[] = varsRes?.body?.variables ?? [];
+                members = dapVars.map((child) => processVariable(child, isHeap));
+            }
+
+            // For pointers `v.value` is the variable's own storage address (debugger-sh
+            // deviation from DAP), so never display it — fall back to 0x0 when we can't
+            // dereference through children (NULL or undereferenceable).
+            let displayValue = String(v.value ?? '');
+            if (isPointer) {
+                displayValue = pointsTo && pointsTo > 0 ? `0x${pointsTo.toString(16)}` : '0x0';
+            }
+
+            return {
+                name: v.name ?? '',
+                type: typeStr,
+                value: displayValue,
+                rawValue: pointsTo ?? addr,
+                address: addr,
+                size: 4,
+                isPointer,
+                pointsTo,
+                pointeeType: isPointer ? typeStr.replace(/[\*&]\s*$/, '').trim() : typeStr,
+                isStruct: !isPointer && hasChildren,
+                members,
+            };
+        };
+
+        // Phase 1: Walk stack synchronously and gather actual memory footprints
         for (let i = 0; i < frames.length; i++) {
             const f = frames[i];
             const scopesRes = this.dapSend('scopes', { frameId: f.id });
+            console.log('[NpmDapEngine] scopes response:', scopesRes);
             const variables: VariableNode[] = [];
 
-            const scopes: Any[] = scopesRes?.body?.scopes ?? [];
-            for (const scope of scopes) {
+            for (const scope of scopesRes?.body?.scopes ?? []) {
                 const varsRes = this.dapSend('variables', { variablesReference: scope.variablesReference });
-                const dapVars: Any[] = varsRes?.body?.variables ?? [];
-                for (const v of dapVars) {
-                    variables.push(this.mapDapVariable(v, 0, visitedVars, heapAllocations));
+                console.log('[NpmDapEngine] variables response (scope):', varsRes);
+                for (const v of varsRes?.body?.variables ?? []) {
+                    variables.push(processVariable(v, false));
                 }
             }
 
@@ -235,6 +290,56 @@ export class NpmDapEngine implements IIDEEngine {
                 sp: 0,
                 variables,
                 isActive: i === 0,
+            });
+        }
+
+        // Phase 2: Walk the dynamic pointer relationships to generate objects!
+
+        // debugger-sh's wasm runtime lays memory out as: null page / data (low)
+        // → stack → heap (high). Anything at or below the highest stack-resident
+        // variable cannot be a heap allocation — it's a wild/uninit pointer that
+        // the DAP engine cheerfully dereferenced. Without a malloc tracker this
+        // is the cleanest signal we have for separating real allocations from
+        // garbage (e.g. uninit `Node*` reading bytes that decode as 0xfffc8).
+        const stackCeiling = Math.max(...stackAddrs);
+        const isAboveStack = (addr: number) => addr > stackCeiling;
+
+        let heapNodeCount = 0;
+        const MAX_HEAP_NODES = 200;
+
+        while (heapQueue.length > 0 && heapNodeCount < MAX_HEAP_NODES) {
+            const item = heapQueue.shift()!;
+
+            if (!isAboveStack(item.ptr)) continue;
+            if (heapAllocations.has(item.ptr)) continue;
+
+            heapNodeCount++;
+
+            const varsRes = this.dapSend('variables', { variablesReference: item.variablesReference });
+            console.log('[NpmDapEngine] variables response (heap):', varsRes);
+            let dapVars: Any[] = varsRes?.body?.variables ?? [];
+
+            // Some DAP implementations return a single element named "*varname" when requesting variables of a pointer.
+            // In this case we unwrap it so the properties are top-level on the heap node.
+            if (dapVars.length === 1 && (dapVars[0].name?.startsWith('*') || (item.valueStr && item.valueStr.includes(dapVars[0].value)))) {
+                const derefVar = dapVars[0];
+                if (derefVar.variablesReference > 0) {
+                    const innerRes = this.dapSend('variables', { variablesReference: derefVar.variablesReference });
+                    console.log('[NpmDapEngine] variables response (heap inner):', innerRes);
+                    if (innerRes?.body?.variables) {
+                        dapVars = innerRes.body.variables;
+                    }
+                }
+            }
+
+            const members = dapVars.map((child: Any) => processVariable(child, true));
+
+            heapAllocations.set(item.ptr, {
+                ptr: item.ptr,
+                size: 4,
+                typeName: item.typeStr,
+                label: `0x${item.ptr.toString(16).padStart(6, '0')}`,
+                members,
             });
         }
 
@@ -257,79 +362,15 @@ export class NpmDapEngine implements IIDEEngine {
         });
     }
 
-    private mapDapVariable(
-        v: Any,
-        depth: number,
-        visited: Set<number>,
-        heapAllocations: Map<number, HeapAllocation>,
-    ): VariableNode {
-        const isStruct = (v.variablesReference ?? 0) > 0;
-        let members: VariableNode[] | undefined = undefined;
-
-        const memoryReference = this.parseHexAddress(v.memoryReference);
-        const typeStr: string = v.type ?? '';
-        const isPointer = typeStr.includes('*');
-
-        // DAP pointer values often look like "0x1234 \"hello\"" or just "0x1234".
-        // Pull the leading 0x token out.
-        let rawValue = 0;
-        if (isPointer && typeof v.value === 'string') {
-            const m = /^0x[0-9a-fA-F]+/.exec(v.value.trim());
-            if (m) rawValue = Number(m[0]);
-        } else if (isPointer && typeof v.value === 'number') {
-            rawValue = v.value;
-        }
-
-        const pointsTo = isPointer && rawValue > 0 ? rawValue : undefined;
-
-        // Recurse through children with cycle detection + depth cap.
-        if (isStruct && !visited.has(v.variablesReference)) {
-            visited.add(v.variablesReference);
-            if (depth < 3) {
-                const varsRes = this.dapSend('variables', { variablesReference: v.variablesReference });
-                const dapVars: Any[] = varsRes?.body?.variables ?? [];
-                members = dapVars.map((child) => this.mapDapVariable(child, depth + 1, visited, heapAllocations));
-            }
-        }
-
-        // Heap discovery: any pointer that resolves to children becomes a heap node.
-        // TODO(dap-array): when the runtime implements the two spec extensions
-        // (presentationHint.byteSize and pointer-array variables requests with
-        // start/count), detect array-of-T allocations (e.g. `new Savanna[3]`) by
-        // comparing the pointer's allocation byteSize to the element byteSize, and
-        // issue a second variables request with start=0, count=N to materialize
-        // each element as `[k]`. Without this, T*-typed allocations larger than
-        // sizeof(T) will only render the first element — the same bug fixed in
-        // the legacy memory-reader heap loop.
-        if (isPointer && pointsTo && pointsTo > 0 && !heapAllocations.has(pointsTo)) {
-            const pointeeMembers = isStruct && members ? members : [];
-            heapAllocations.set(pointsTo, {
-                ptr: pointsTo,
-                size: 4,
-                typeName: typeStr.replace(/\*$/, '').trim() || 'unknown',
-                label: `0x${pointsTo.toString(16).padStart(6, '0')}`,
-                members: pointeeMembers,
-            });
-        }
-
-        return {
-            name: v.name ?? '',
-            type: typeStr,
-            value: v.value ?? '',
-            rawValue: rawValue || memoryReference,
-            address: memoryReference,
-            size: 4,
-            isPointer,
-            pointsTo,
-            pointeeType: isPointer ? typeStr.replace(/\*$/, '').trim() : typeStr,
-            isStruct,
-            members,
-        };
-    }
-
     private parseHexAddress(ref: unknown): number {
         if (typeof ref !== 'string' || ref.length === 0) return 0;
-        const n = Number(ref); // handles "0x1234" natively
+        // Allows graceful extraction of pointers embedded in DAP display texts
+        const match = ref.match(/0x[0-9a-fA-F]+/);
+        if (match) {
+            const n = Number(match[0]);
+            return Number.isFinite(n) ? n : 0;
+        }
+        const n = Number(ref);
         return Number.isFinite(n) ? n : 0;
     }
 
@@ -363,7 +404,7 @@ export class NpmDapEngine implements IIDEEngine {
             try {
                 this.engine.stop();
             } catch {
-                /* ignore */
+                // ignore
             }
             this.engine = null;
         }
@@ -375,21 +416,17 @@ export class NpmDapEngine implements IIDEEngine {
 
     writeStdin(data: string): void {
         if (!this.engine) return;
-
         if (data === '\x03') {
-            // Ctrl+C
             this.onStdout.emit('^C\r\n');
             this.stop();
             return;
         }
-
         if (data === '\r') {
             this.onStdout.emit('\r\n');
             this.engine.stdin.write(this.inputBuf + '\n');
             this.inputBuf = '';
             return;
         }
-
         if (data === '\x7f') {
             if (this.inputBuf.length > 0) {
                 this.inputBuf = this.inputBuf.slice(0, -1);
@@ -397,7 +434,6 @@ export class NpmDapEngine implements IIDEEngine {
             }
             return;
         }
-
         if (data >= ' ') {
             this.inputBuf += data;
             this.onStdout.emit(data);
