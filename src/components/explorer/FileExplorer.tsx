@@ -165,14 +165,14 @@ export function FileExplorer() {
     }
 
     return (
-        <div className="flex flex-col h-full bg-card">
-            <div className="flex items-center justify-between px-3 py-2 border-b">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Explorer</span>
+        <div className="flex flex-col h-full bg-background">
+            <div className="nova-panel-header">
+                <span className="nova-panel-label">Explorer</span>
                 <div className="flex gap-0.5">
-                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setCreating('file')}>
+                    <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => setCreating('file')}>
                         <FilePlus className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setCreating('folder')}>
+                    <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => setCreating('folder')}>
                         <FolderPlus className="h-3.5 w-3.5" />
                     </Button>
                 </div>

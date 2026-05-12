@@ -2,14 +2,15 @@
 // Toolbar segment for debugger controls. Shown when debugMode === 'paused'.
 //
 // Two distinct groups:
-//   1. Execution  — Continue, Step Over, Step Into (live engine commands)
+//   1. Execution  — Continue, Step Over, Step Into, Step Out (live engine commands)
 //   2. Time-travel — Back, Forward (replay through step history)
 //   3. Stop
 
 import {
     FastForward,
-    StepForward,
+    Redo2,
     ArrowDown,
+    ArrowUp,
     SkipBack,
     SkipForward,
     Square,
@@ -23,14 +24,15 @@ import { useIDEHost } from '@/ide-host-context'
 
 // ── Types ──────────────────────────────────────────────────────────
 
+type ButtonVariant = 'default' | 'outline' | 'destructive'
+
 interface DebugAction {
     label: string
     shortcut: string
     icon: React.ReactNode
     onClick: () => void
     disabled?: boolean
-    className: string
-    destructive?: boolean
+    variant: ButtonVariant
 }
 
 // ── Component ──────────────────────────────────────────────────────
@@ -52,24 +54,32 @@ export function DebugControls() {
             shortcut: 'F5',
             icon: <FastForward className="h-3.5 w-3.5" />,
             onClick: () => { host?.onEvent?.('debug_continue', {}); engine.continueExecution() },
-            className: 'bg-green-600 hover:bg-green-500 text-white',
-            disabled: !isAtLiveEdge
+            variant: 'default',
+            disabled: !isAtLiveEdge,
         },
         {
             label: 'Step Over',
             shortcut: 'F10',
-            icon: <StepForward className="h-3.5 w-3.5" />,
+            icon: <Redo2 className="h-3.5 w-3.5" />,
             onClick: () => { host?.onEvent?.('debug_step_over', {}); engine.stepOver() },
-            className: 'bg-blue-600 hover:bg-blue-500 text-white',
-            disabled: !isAtLiveEdge
+            variant: 'outline',
+            disabled: !isAtLiveEdge,
         },
         {
             label: 'Step Into',
             shortcut: 'F11',
             icon: <ArrowDown className="h-3.5 w-3.5" />,
             onClick: () => { host?.onEvent?.('debug_step_into', {}); engine.stepInto() },
-            className: 'bg-indigo-600 hover:bg-indigo-500 text-white',
-            disabled: !isAtLiveEdge
+            variant: 'outline',
+            disabled: !isAtLiveEdge,
+        },
+        {
+            label: 'Step Out',
+            shortcut: '⇧F11',
+            icon: <ArrowUp className="h-3.5 w-3.5" />,
+            onClick: () => { host?.onEvent?.('debug_step_out', {}); engine.stepOut() },
+            variant: 'outline',
+            disabled: !isAtLiveEdge,
         },
     ]
 
@@ -82,7 +92,7 @@ export function DebugControls() {
             icon: <SkipBack className="h-3.5 w-3.5" />,
             onClick: () => { host?.onEvent?.('debug_step_back', {}); stepBack() },
             disabled: !canStepBack,
-            className: 'bg-zinc-700 hover:bg-zinc-600 text-white',
+            variant: 'outline',
         },
         {
             label: 'Forward',
@@ -90,7 +100,7 @@ export function DebugControls() {
             icon: <SkipForward className="h-3.5 w-3.5" />,
             onClick: () => { host?.onEvent?.('debug_step_forward', {}); stepForward() },
             disabled: !canStepForward,
-            className: 'bg-zinc-700 hover:bg-zinc-600 text-white',
+            variant: 'outline',
         },
     ]
 
@@ -113,8 +123,7 @@ export function DebugControls() {
                     shortcut: '⇧F5',
                     icon: <Square className="h-3.5 w-3.5" />,
                     onClick: () => { engine.stop(); reset(); },
-                    className: '',
-                    destructive: true,
+                    variant: 'destructive',
                 }}
             />
         </div>
@@ -134,17 +143,11 @@ function ActionGroup({ actions }: { actions: DebugAction[] }) {
 }
 
 function ActionButton({ action }: { action: DebugAction }) {
-    const { label, shortcut, icon, onClick, disabled, className, destructive } = action
+    const { label, shortcut, icon, onClick, disabled, variant } = action
     return (
         <Tooltip>
             <TooltipTrigger asChild>
-                <Button
-                    size="sm"
-                    variant={destructive ? 'destructive' : 'default'}
-                    onClick={onClick}
-                    disabled={disabled}
-                    className={`gap-1 ${className}`}
-                >
+                <Button size="sm" variant={variant} onClick={onClick} disabled={disabled} className="gap-1">
                     {icon}
                     <span className="hidden sm:inline">{label}</span>
                 </Button>

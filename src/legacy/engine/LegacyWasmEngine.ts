@@ -88,5 +88,6 @@ export class LegacyWasmEngine implements IIDEEngine {
 
     async stepInto(): Promise<void> { this.onDebugResumed.emit(); debugStepInto(); }
     async stepOver(): Promise<void> { this.onDebugResumed.emit(); debugStepOver(this.currentDepth); }
+    async stepOut(): Promise<void> { /* legacy executor has no native step-out */ }
     async continueExecution(): Promise<void> { this.onDebugResumed.emit(); debugContinue(); }
 }
