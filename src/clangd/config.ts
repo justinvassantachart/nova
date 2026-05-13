@@ -1,10 +1,12 @@
 // Configuration for the in-browser clangd LSP.
 //
-// SECURITY: the default fetches executable JS/wasm from a third-party
-// personal domain — no SRI, no version pin. Should be self-hosted for
-// production. Override via the two env vars below.
+// Default base is nova's own Cloudflare-fronted R2 bucket — versioned,
+// immutable, and serves the CORP/COEP headers our isolated context
+// needs. Bypass via `VITE_CLANGD_WASM_URL` / `VITE_CLANGD_JS_URL` to
+// point at your own host (e.g. a forked deployment) or back at the
+// upstream `https://clangd.guyutongxue.site/wasm` for testing.
 
-const DEFAULT_BASE = 'https://clangd.guyutongxue.site/wasm'
+const DEFAULT_BASE = 'https://nova-clangd-cdn.simplecore.workers.dev/clangd/21.1.0'
 
 // `import.meta.env` is Vite-only — guard for the Node-based test scripts.
 // Coerce empty strings to undefined so `VITE_CLANGD_WASM_URL=` in .env
@@ -18,12 +20,10 @@ const jsOverride = env?.VITE_CLANGD_JS_URL || undefined
 export const CLANGD_WASM_URL = wasmOverride ?? `${DEFAULT_BASE}/clangd.wasm`
 export const CLANGD_JS_URL = jsOverride ?? `${DEFAULT_BASE}/clangd.js`
 
-// Cache API key. Bump this when the wasm/js pair changes upstream
-// (different clangd build, new sysroot, etc.) — boot will then delete the
-// old cache and refetch. If you self-host with versioned immutable URLs,
-// you don't strictly need to bump this since the URL itself changes too,
-// but keeping the prefix lets `purgeOldClangdCaches` find stale entries.
-export const CLANGD_CACHE_KEY = 'clangd-21.1.0-v1'
+// Cache API key. Bump when the wasm/js pair changes (different clangd
+// build, new sysroot, etc.) so existing users refetch once. Prefix is
+// shared so `purgeOldClangdCaches` finds stale entries from prior keys.
+export const CLANGD_CACHE_KEY = 'clangd-21.1.0-r2'
 export const CLANGD_CACHE_PREFIX = 'clangd-'
 
 export const WORKSPACE_PATH = '/workspace'
