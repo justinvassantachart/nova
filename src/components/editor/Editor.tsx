@@ -29,6 +29,22 @@ export function Editor() {
 
     const lastDebugState = useRef({ file: null as string | null, line: null as number | null })
 
+    // Keep Monaco's per-URI model cache in sync with the editor store.
+    // Monaco models are global state — when the workspace gets re-seeded
+    // (e.g. switching student submissions, where both happen to use the
+    // same file paths), the cached model would otherwise still hold the
+    // previous workspace's content even after `setActiveFile` updates the
+    // store. We only call setValue when the model already exists and is
+    // out of sync, which leaves the normal user-typing path untouched
+    // (model is already equal to activeFileContent at that point).
+    useEffect(() => {
+        if (!monaco || !activeFile) return
+        const model = monaco.editor.getModel(monaco.Uri.parse(activeFile))
+        if (!model) return
+        if (model.getValue() === activeFileContent) return
+        model.setValue(activeFileContent)
+    }, [activeFile, activeFileContent, monaco])
+
     useEffect(() => {
         if (debugMode === 'paused' && currentFile && currentLine !== null) {
             const stepped = lastDebugState.current.file !== currentFile || lastDebugState.current.line !== currentLine

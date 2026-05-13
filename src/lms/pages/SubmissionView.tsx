@@ -23,11 +23,17 @@ export default function SubmissionView() {
   const { assignment, loading: aLoading } = useAssignment(classId, assignmentId)
   const { submission, loading: sLoading } = useStudentSubmission(classId, assignmentId, studentUid)
 
-  // Freeze the IDE host once the submission has loaded once. Subsequent live
-  // updates from Firestore would otherwise re-bootstrap the workspace and lose
-  // any local interaction the teacher had.
+  // Freeze the IDE host within one student's submission so live Firestore
+  // updates (e.g. submittedAt landing) don't re-bootstrap the workspace and
+  // discard the teacher's scroll/selection. The dep deliberately tracks
+  // `submission?.studentUid` rather than `submission !== null` — switching
+  // students keeps `submission` non-null transiently with the previous
+  // student's data, and we must wait for the fresh submission before
+  // rebuilding the host (otherwise the new IDE mount seeds with the old
+  // student's files).
   const host = useMemo<IDEHost | null>(() => {
     if (!submission || !assignmentId || !studentUid) return null
+    if (submission.studentUid !== studentUid) return null
     return {
       mode: 'teacher-review',
       assignmentId,
@@ -35,7 +41,7 @@ export default function SubmissionView() {
       initialFiles: submission.files,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignmentId, studentUid, submission !== null])
+  }, [assignmentId, studentUid, submission?.studentUid])
 
   if (cLoading || aLoading || sLoading) {
     return (
