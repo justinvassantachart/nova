@@ -2,6 +2,7 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   signInWithCredential,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
@@ -27,26 +28,25 @@ import { getFirebaseAuth } from './client'
 // popup entirely, but Firebase's redirect flow relies on cross-origin
 // state at <authDomain> that gets partitioned on localhost (and in
 // Safari/Chrome with third-party cookie restrictions). getRedirectResult
-// would return no user and we'd loop forever. The tab-as-bridge +
-// popup-for-OAuth is the robust compromise.
+// returned no user and the bridge would loop. Tab + popup is the robust
+// compromise.
 //
-// The bridge is also used for any flow that pulls reCAPTCHA (password
-// reset, sign-up with Email Enumeration Protection enabled), since the
-// reCAPTCHA iframe is blocked by COEP `require-corp` in the main app.
+// The bridge is also used for unauthenticated reCAPTCHA-gated flows
+// like password reset, since reCAPTCHA's iframe is blocked by COEP
+// `require-corp` in the main app.
 //
-// Pure email/password sign-in, sign-up, and sendEmailVerification don't
-// need the bridge — they're plain CORS fetches.
+// Pure email/password sign-in, sign-up, and sendEmailVerification on a
+// signed-in user are plain CORS fetches and run directly in the main
+// app — no reCAPTCHA, no popup, no bridge.
 
-const CHANNEL = 'nova_auth'
 const TIMEOUT_MS = 5 * 60 * 1000
 
-type BridgeOp = 'signin' | 'reset' | 'verify'
+type BridgeOp = 'signin' | 'reset'
 
 type BridgeMessage =
   | { ok: true; op: 'signin'; idToken: string | null; accessToken: string | null }
   | { ok: true; op: 'reset' }
-  | { ok: true; op: 'verify' }
-  | { ok: false; code?: string | null; error: string }
+  | { ok: false; op: BridgeOp; code?: string | null; error: string }
 
 type BridgeOutcome =
   | { kind: 'msg'; msg: BridgeMessage }
@@ -54,28 +54,46 @@ type BridgeOutcome =
   | { kind: 'timeout' }
 
 function bridgeConfig(): Record<string, string> {
-  return {
+  const required = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
     projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
   }
+  for (const [k, v] of Object.entries(required)) {
+    if (!v) throw authError(`Firebase env missing: ${k}. Check .env.local.`)
+  }
+  return required as Record<string, string>
 }
 
-function openBridge(op: BridgeOp, extra: Record<string, string> = {}): Window {
-  const params = new URLSearchParams({ op, ...bridgeConfig(), ...extra })
+// Each bridge call gets its own window name and BroadcastChannel name
+// so concurrent flows can't interleave or steal each other's messages.
+function bridgeId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+type OpenedBridge = { tab: Window; channel: BroadcastChannel; id: string }
+
+function openBridge(op: BridgeOp, extra: Record<string, string> = {}): OpenedBridge {
+  const id = bridgeId()
+  const channel = new BroadcastChannel(id)
+  const params = new URLSearchParams({ op, channel: id, ...bridgeConfig(), ...extra })
   // No features string → tab, not popup. Same-origin tab is all we need
-  // for BroadcastChannel + shared auth storage.
-  const tab = window.open(`/auth.html?${params.toString()}`, 'nova_auth')
+  // for BroadcastChannel + shared auth storage. Unique window name per
+  // call so the browser never reuses an in-flight tab.
+  const tab = window.open(`/auth.html?${params.toString()}`, `nova_auth_${id}`)
   if (!tab) {
+    channel.close()
     throw authError('Sign-in window blocked. Please allow pop-ups for this site and try again.')
   }
-  return tab
+  return { tab, channel, id }
 }
 
 // Waits briefly for the next non-null user from Firebase Auth. Used as
-// a fallback after the bridge tab closes — same-origin storage means
-// the bridge's redirect sign-in may already have propagated.
+// a fallback after the Google bridge tab closes — same-origin storage
+// means the bridge's sign-in may already have propagated.
 function waitForAuthUser(graceMs = 1500): Promise<boolean> {
   const auth = getFirebaseAuth()
   if (auth.currentUser) return Promise.resolve(true)
@@ -87,8 +105,11 @@ function waitForAuthUser(graceMs = 1500): Promise<boolean> {
   })
 }
 
-async function awaitBridge(tab: Window): Promise<BridgeOutcome> {
-  const channel = new BroadcastChannel(CHANNEL)
+export async function awaitBridge(
+  opened: OpenedBridge,
+  op: BridgeOp,
+): Promise<BridgeOutcome> {
+  const { tab, channel } = opened
   let watch: ReturnType<typeof setInterval> | undefined
   try {
     return await new Promise<BridgeOutcome>((resolve) => {
@@ -106,6 +127,10 @@ async function awaitBridge(tab: Window): Promise<BridgeOutcome> {
         }
       }, 250)
       channel.onmessage = (e: MessageEvent<BridgeMessage>) => {
+        // Filter by op so a stale or unrelated message can't satisfy
+        // this call. (Per-call channel name already prevents most of
+        // this; the op check is defense in depth.)
+        if (e.data && e.data.op !== op) return
         clearTimeout(timeout)
         if (watch) clearInterval(watch)
         resolve({ kind: 'msg', msg: e.data })
@@ -123,8 +148,8 @@ function authError(message: string, code?: string | null): Error {
 }
 
 export async function signInWithGoogle(): Promise<void> {
-  const tab = openBridge('signin')
-  const outcome = await awaitBridge(tab)
+  const opened = openBridge('signin')
+  const outcome = await awaitBridge(opened, 'signin')
 
   if (outcome.kind === 'timeout') throw authError('Sign-in timed out.')
 
@@ -147,8 +172,8 @@ export async function signInWithGoogle(): Promise<void> {
 }
 
 export async function resetPassword(email: string): Promise<void> {
-  const tab = openBridge('reset', { email })
-  const outcome = await awaitBridge(tab)
+  const opened = openBridge('reset', { email })
+  const outcome = await awaitBridge(opened, 'reset')
   if (outcome.kind === 'timeout') throw authError('Password reset timed out.')
   if (outcome.kind === 'closed') throw authError('Password reset window closed before completing.')
   if (!outcome.msg.ok) throw authError(outcome.msg.error, outcome.msg.code ?? undefined)
@@ -165,29 +190,20 @@ export async function signUpWithEmail(
 ): Promise<void> {
   const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password)
   const trimmed = displayName?.trim()
-  if (trimmed) await updateProfile(cred.user, { displayName: trimmed })
-  // Don't fail the sign-up if the verification email can't be sent —
-  // the user is signed in and can resend from the unverified banner.
-  try { await sendVerificationEmailViaBridge() } catch { /* surfaced via banner */ }
+  if (trimmed) {
+    // Best-effort: a failed display-name update shouldn't break sign-up.
+    try { await updateProfile(cred.user, { displayName: trimmed }) } catch { /* tolerated */ }
+  }
+  // Verification is also best-effort. The unverified banner + Resend
+  // covers the user if this fails silently.
+  try { await sendEmailVerification(cred.user) } catch { /* surfaced via banner */ }
 }
 
 export async function resendVerificationEmail(): Promise<void> {
   const user = getFirebaseAuth().currentUser
   if (!user) throw authError('Not signed in.')
   if (user.emailVerified) return
-  await sendVerificationEmailViaBridge()
-}
-
-// sendEmailVerification goes through the bridge because Firebase
-// triggers reCAPTCHA invisibly on this endpoint, and the reCAPTCHA
-// iframe is blocked by COEP `require-corp` in the main app. The
-// bridge inherits the same auth state via shared storage.
-async function sendVerificationEmailViaBridge(): Promise<void> {
-  const tab = openBridge('verify')
-  const outcome = await awaitBridge(tab)
-  if (outcome.kind === 'timeout') throw authError('Verification email timed out.')
-  if (outcome.kind === 'closed') throw authError('Verification window closed before completing.')
-  if (!outcome.msg.ok) throw authError(outcome.msg.error, outcome.msg.code ?? undefined)
+  await sendEmailVerification(user)
 }
 
 export function signOut() {

@@ -19,10 +19,12 @@
     <div id="err" class="err"></div>
   </div>
 
-  <!-- Firebase compat SDK from CDN — keeps this page fully static and
-       self-contained. Served WITHOUT COOP/COEP (vite.config.ts +
-       netlify.toml) so signInWithPopup's child OAuth popup and any
-       reCAPTCHA challenges can load. -->
+  <!-- Firebase compat SDK from CDN — kept in lockstep with the modular
+       SDK version in package.json (firebase ^12.13.0). Bridge and main
+       app share auth state via same-origin storage; they MUST agree on
+       persistence layout. SRI pinned to the exact build. Served WITHOUT
+       COOP/COEP (vite.config.ts + netlify.toml) so signInWithPopup's
+       child OAuth popup and reCAPTCHA challenges can load. -->
   <!-- Why signInWithPopup and not signInWithRedirect: the redirect flow
        relies on Firebase's helper iframe at <authDomain> to read state
        written before the redirect. On localhost (and increasingly in
@@ -31,37 +33,70 @@
        we'd loop. signInWithPopup just postMessages the credential back
        and avoids the whole hop. The tradeoff is one additional OAuth
        popup — acceptable since the bridge itself is now a tab. -->
-
-  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+  <script
+    src="https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js"
+    integrity="sha384-lZdXyTmqFF084YMao84xKUEMETtezLQrISPWM2frjaZ2soaIyVPMRed2f1aItR+d"
+    crossorigin="anonymous"></script>
+  <script
+    src="https://www.gstatic.com/firebasejs/12.13.0/firebase-auth-compat.js"
+    integrity="sha384-WZRQ9uBbnZ9oCZd85Hbt663LqMA0DvZcdE9PGjybnqECAHSH0m3vPW1geN/tw7NI"
+    crossorigin="anonymous"></script>
   <script>
     (async function () {
       var params = new URLSearchParams(location.search);
       var op = params.get('op') || 'signin';
+      var channelName = params.get('channel');
       var config = {
         apiKey: params.get('apiKey'),
         authDomain: params.get('authDomain'),
         projectId: params.get('projectId'),
         appId: params.get('appId'),
       };
-      var channel = new BroadcastChannel('nova_auth');
+
+      // Capture email BEFORE stripping. Keep the email out of history,
+      // out of the bridge's Referer to gstatic.com on subresource loads,
+      // and out of any access logs that capture query strings.
+      var emailParam = params.get('email');
+      if (emailParam) {
+        try {
+          var u = new URL(location.href);
+          u.searchParams.delete('email');
+          history.replaceState(null, '', u.toString());
+        } catch (e) { /* not fatal */ }
+      }
+
+      if (!channelName) {
+        // No channel means the main app can't hear us — fail loud in the UI.
+        document.getElementById('err').textContent = 'Missing channel param.';
+        return;
+      }
+
+      var channel = new BroadcastChannel(channelName);
       var errEl = document.getElementById('err');
       var msgEl = document.getElementById('msg');
+      var closeTimer = null;
+
+      function closeSoon(delay) {
+        if (closeTimer) return;
+        closeTimer = setTimeout(function () {
+          try { window.close(); } catch (e) {}
+        }, delay);
+      }
 
       function fail(message, code) {
         errEl.textContent = message;
-        channel.postMessage({ ok: false, code: code || null, error: message });
-        // Leave the tab open so the user can read the error; the main
-        // app already surfaced it via BroadcastChannel.
+        channel.postMessage({ ok: false, op: op, code: code || null, error: message });
+        // Close on failure too — the main app surfaces the error in the
+        // primary UI, so leaving a tiny error tab behind is pure noise.
+        // 1500ms gives a glancing user a chance to read it.
+        closeSoon(1500);
       }
 
       function done(payload) {
-        channel.postMessage(Object.assign({ ok: true }, payload));
-        // BroadcastChannel is async — give it a moment before closing so
-        // the message lands in the main app before the tab disappears.
-        // (The main app also has a grace period after detecting the close,
-        // but redundancy is cheap here.)
-        setTimeout(function () { try { window.close(); } catch (e) {} }, 250);
+        channel.postMessage(Object.assign({ ok: true, op: op }, payload));
+        // Async delivery; small grace before close. Main app also has a
+        // matching grace period on its end (see awaitBridge in auth.ts).
+        closeSoon(250);
       }
 
       if (!config.apiKey || !config.authDomain) {
@@ -101,7 +136,7 @@
             fail('Sign-in succeeded but no Google tokens were returned.');
             return;
           }
-          done({ op: 'signin', idToken: idToken, accessToken: accessToken });
+          done({ idToken: idToken, accessToken: accessToken });
         } catch (err) {
           fail((err && (err.message || err.code)) || 'Sign-in failed', err && err.code);
         }
@@ -109,51 +144,16 @@
       }
 
       if (op === 'reset') {
-        var email = params.get('email');
-        if (!email) {
+        if (!emailParam) {
           fail('Missing email for password reset.');
           return;
         }
         msgEl.textContent = 'Sending password reset email…';
         try {
-          await auth.sendPasswordResetEmail(email);
-          done({ op: 'reset' });
+          await auth.sendPasswordResetEmail(emailParam);
+          done({});
         } catch (err) {
           fail((err && (err.message || err.code)) || 'Password reset failed', err && err.code);
-        }
-        return;
-      }
-
-      if (op === 'verify') {
-        msgEl.textContent = 'Sending verification email…';
-        // We read the signed-in user from shared auth storage. Wait for
-        // the first onAuthStateChanged callback so persistence has
-        // hydrated; cap with a timeout so we don't hang if the user
-        // isn't actually signed in.
-        var user = await new Promise(function (resolve) {
-          var settled = false;
-          var unsub = auth.onAuthStateChanged(function (u) {
-            if (settled) return;
-            settled = true;
-            unsub();
-            resolve(u);
-          });
-          setTimeout(function () {
-            if (settled) return;
-            settled = true;
-            unsub();
-            resolve(auth.currentUser);
-          }, 3000);
-        });
-        if (!user) {
-          fail('Not signed in.');
-          return;
-        }
-        try {
-          await user.sendEmailVerification();
-          done({ op: 'verify' });
-        } catch (err) {
-          fail((err && (err.message || err.code)) || 'Verification email failed', err && err.code);
         }
         return;
       }

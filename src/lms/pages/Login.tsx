@@ -6,6 +6,7 @@ import {
   signInWithGoogle,
   signUpWithEmail,
 } from '@/shared/firebase/auth'
+import { humanizeAuthError } from '@/shared/firebase/errors'
 import { useAuth } from '@/shared/context/AuthProvider'
 
 type Mode = 'signin' | 'signup'
@@ -103,9 +104,12 @@ export default function Login() {
       <div className="w-full max-w-sm flex flex-col gap-4">
         <h1 className="text-2xl font-semibold text-center">Nova</h1>
 
-        <div className="flex gap-1 p-1 bg-muted/50 rounded-md">
+        <div role="tablist" aria-label="Authentication method" className="flex gap-1 p-1 bg-muted/50 rounded-md">
           <button
             type="button"
+            role="tab"
+            aria-selected={mode === 'signin'}
+            aria-controls="auth-form"
             onClick={() => switchMode('signin')}
             className={`flex-1 px-3 py-1.5 rounded text-sm transition-colors ${
               mode === 'signin'
@@ -117,6 +121,9 @@ export default function Login() {
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={mode === 'signup'}
+            aria-controls="auth-form"
             onClick={() => switchMode('signup')}
             className={`flex-1 px-3 py-1.5 rounded text-sm transition-colors ${
               mode === 'signup'
@@ -128,10 +135,11 @@ export default function Login() {
           </button>
         </div>
 
-        <form onSubmit={handleEmailSubmit} className="flex flex-col gap-3">
+        <form id="auth-form" role="tabpanel" onSubmit={handleEmailSubmit} className="flex flex-col gap-3">
           {mode === 'signup' && (
             <input
               type="text"
+              aria-label="Display name (optional)"
               placeholder="Display name (optional)"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -142,16 +150,19 @@ export default function Login() {
           )}
           <input
             type="email"
+            aria-label="Email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
             required
+            autoFocus
             disabled={busy}
             className="px-3 py-2 rounded-md border bg-background text-sm disabled:opacity-50"
           />
           <input
             type="password"
+            aria-label="Password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -212,30 +223,3 @@ export default function Login() {
   )
 }
 
-function humanizeAuthError(err: unknown): string {
-  const code = (err as { code?: string } | null)?.code ?? ''
-  const message = (err as { message?: string } | null)?.message ?? 'Something went wrong.'
-  switch (code) {
-    case 'auth/invalid-email':
-      return "That email address doesn't look right."
-    case 'auth/user-not-found':
-      return 'No account found with that email.'
-    case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-      return 'Incorrect email or password.'
-    case 'auth/email-already-in-use':
-      return 'An account with that email already exists. Try signing in instead.'
-    case 'auth/weak-password':
-      return 'Password must be at least 6 characters.'
-    case 'auth/too-many-requests':
-      return 'Too many attempts. Try again in a few minutes.'
-    case 'auth/network-request-failed':
-      return 'Network error. Check your connection.'
-    case 'auth/popup-blocked':
-      return 'Browser blocked the sign-in window. Allow pop-ups for this site.'
-    case 'auth/operation-not-allowed':
-      return 'This sign-in method is disabled. Contact support.'
-    default:
-      return message
-  }
-}
