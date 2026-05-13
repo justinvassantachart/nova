@@ -2,11 +2,14 @@
 // don't pull `vscode-languageserver-protocol` because its types come with a
 // massive transitive dep tree and we use only a handful of methods.
 
-// LSP params/results are JSON-serializable values whose shape varies per
-// method. We use `unknown` rather than a recursive `Json` type because TS
-// can't unify ad-hoc literal objects (e.g. `{position: {line:0,character:0}}`)
-// with a recursive index-signature type — every call site would need a cast.
-// Callers `as`-cast the result at the boundary, then enjoy strong types.
+// Documentation type for "JSON-serializable value". We don't use this as
+// the type of `LspParams` because TS doesn't widen named-property object
+// literals (like `{ line: number; character: number }`) into a recursive
+// index-signature shape — every call site would need an explicit cast.
+// `unknown` keeps the call sites clean; callers narrow at the response
+// boundary via `as` when they want a typed result.
+export type Json = null | boolean | number | string | Json[] | { [k: string]: Json | undefined }
+
 export type LspParams = unknown
 
 export interface LspRequest {
@@ -52,6 +55,8 @@ export interface Diagnostic {
     code?: string | number
     source?: string
     message: string
+    /** LSP DiagnosticTag: 1 = Unnecessary (dim), 2 = Deprecated (strikethrough). */
+    tags?: Array<1 | 2>
     relatedInformation?: Array<{
         location: { uri: string; range: Range }
         message: string
@@ -67,6 +72,8 @@ export interface PublishDiagnosticsParams {
 export interface CompletionItem {
     label: string
     kind?: number
+    /** LSP CompletionItemTag: currently only 1 = Deprecated. */
+    tags?: Array<1>
     detail?: string
     documentation?: string | { kind: 'markdown' | 'plaintext'; value: string }
     sortText?: string
@@ -75,6 +82,7 @@ export interface CompletionItem {
     insertTextFormat?: 1 | 2 // Plain | Snippet
     textEdit?: TextEdit | { insert: Range; replace: Range; newText: string }
     additionalTextEdits?: TextEdit[]
+    /** Legacy LSP <3.15. Modern clangd emits `tags: [1]` instead. Honour both. */
     deprecated?: boolean
     preselect?: boolean
 }
@@ -117,15 +125,12 @@ export interface DocumentSymbol {
     name: string
     detail?: string
     kind: number
+    /** LSP SymbolTag: currently only 1 = Deprecated. */
+    tags?: Array<1>
     range: Range
     selectionRange: Range
     children?: DocumentSymbol[]
 }
-
-// Compat alias for the few spots in `providers.ts` that just want "some
-// JSON-shaped thing". Same as LspParams but named to match what those types
-// were called pre-refactor.
-export type Json = LspParams
 
 // ===== Worker bridge protocol (main thread <-> clangd worker) =====
 

@@ -9,14 +9,19 @@ root="$(cd "$here/.." && pwd)"
 
 cd "$root"
 
+NODE_LOADER_BOOT="data:text/javascript,import{register}from'node:module';import{pathToFileURL}from'node:url';register('./scripts/alias-loader.mjs',pathToFileURL('./'));"
+
 echo "== pure logic tests =="
-node scripts/test-clangd.mjs
+node \
+  --experimental-strip-types \
+  --import "$NODE_LOADER_BOOT" \
+  scripts/test-clangd.mjs
 
 echo
 echo "== ClangdClient integration tests =="
 node \
   --experimental-strip-types \
-  --import "data:text/javascript,import{register}from'node:module';import{pathToFileURL}from'node:url';register('./scripts/alias-loader.mjs',pathToFileURL('./'));" \
+  --import "$NODE_LOADER_BOOT" \
   scripts/test-clangd-client.mjs
 
 echo

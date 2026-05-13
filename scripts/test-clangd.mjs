@@ -1,65 +1,17 @@
 // Pure unit tests for the clangd integration's testable surface.
 //
-// Run with: node scripts/test-clangd.mjs
+// Run with: bash scripts/test-clangd.sh
 //
 // We can't fully exercise the worker (it loads ~120 MB of wasm from a CDN),
-// so we focus on the framing/parsing logic that doesn't need a real
-// clangd attached.
+// so we focus on the framing/parsing logic that doesn't need a real clangd
+// attached. The JsonStream test pulls the real implementation via the
+// alias-loader so a bug fix in `src/clangd/json-stream.ts` shows up here
+// without anyone needing to remember to update a duplicate.
 
 import { strict as assert } from 'node:assert'
 
-// vite-friendly: we copy the JsonStream code so this script can run without a
-// build step. If the original implementation changes, update here too — the
-// test fails loudly if behaviour diverges.
-
-const QUOT = 34
-const LBRACE = 123
-const RBRACE = 125
-const BACKSLASH = 92
-
-class JsonStream {
-    constructor() {
-        this.inJson = false
-        this.rawText = []
-        this.unbalancedBraces = 0
-        this.inString = false
-        this.inEscape = 0
-        this.decoder = new TextDecoder()
-    }
-
-    insert(charCode) {
-        if (!this.inJson && charCode === LBRACE) {
-            this.inJson = true
-            this.rawText = []
-        }
-        if (!this.inJson) return null
-        this.rawText.push(charCode)
-
-        if (this.inString) {
-            if (this.inEscape) {
-                if (charCode === 117) this.inEscape += 4
-                this.inEscape--
-            } else if (charCode === BACKSLASH) {
-                this.inEscape = 1
-            } else if (charCode === QUOT) {
-                this.inString = false
-            }
-            return null
-        }
-        if (charCode === LBRACE) {
-            this.unbalancedBraces++
-        } else if (charCode === RBRACE) {
-            this.unbalancedBraces--
-            if (this.unbalancedBraces === 0) {
-                this.inJson = false
-                return this.decoder.decode(new Uint8Array(this.rawText))
-            }
-        } else if (charCode === QUOT) {
-            this.inString = true
-        }
-        return null
-    }
-}
+const { JsonStream } = await import('../src/clangd/json-stream.ts')
+const config = await import('../src/clangd/config.ts')
 
 function feed(stream, text) {
     const bytes = new TextEncoder().encode(text)
@@ -71,30 +23,6 @@ function feed(stream, text) {
     return completions
 }
 
-// Verify the JsonStream from the actual source matches our copy. Catches
-// "I tweaked the worker but forgot to update this script" drift.
-const stream = new JsonStream()
-const original = await import('../src/clangd/json-stream.ts')
-const origStream = new original.JsonStream()
-
-for (const text of [
-    '{"hello":"world"}',
-    '{"a":1,"b":[1,2,{"c":3}]}',
-    '{"escape":"\\"quoted\\""}',
-    '{"unicode":"\\u00ff"}',
-]) {
-    const got = feed(stream, text)
-    const orig = []
-    for (const b of new TextEncoder().encode(text)) {
-        const r = origStream.insert(b)
-        if (r !== null) orig.push(r)
-    }
-    assert.deepEqual(got, orig, `parity for ${text}`)
-}
-console.log('  ok: JsonStream parity between copy and original')
-
-// ---------- JsonStream behaviour tests ----------
-
 function test(name, fn) {
     try {
         fn()
@@ -105,6 +33,8 @@ function test(name, fn) {
         process.exitCode = 1
     }
 }
+
+// ---------- JsonStream ----------
 
 test('single complete object', () => {
     const s = new JsonStream()
@@ -154,9 +84,16 @@ test('unicode escape sequences inside string', () => {
     assert.deepEqual(feed(s, text), [text])
 })
 
-// ---------- config.ts pure helpers ----------
+test('runaway buffer caps gracefully and re-syncs on next object', () => {
+    const s = new JsonStream()
+    // Open a string and never close it (mid-message corruption shape).
+    const giant = '{"' + 'a'.repeat(20 * 1024 * 1024)
+    feed(s, giant)
+    // After the cap kicks in, a fresh well-formed object should still parse.
+    assert.deepEqual(feed(s, '{"recovered":true}'), ['{"recovered":true}'])
+})
 
-const config = await import('../src/clangd/config.ts')
+// ---------- config helpers ----------
 
 test('isCppPath recognises common C/C++ extensions', () => {
     for (const p of [
@@ -179,6 +116,14 @@ test('isCppPath recognises common C/C++ extensions', () => {
     }
 })
 
+test('monacoLanguageFor maps all CPP extensions to cpp', () => {
+    for (const ext of ['.cpp', '.cc', '.cxx', '.c++', '.hpp', '.hh', '.hxx', '.h', '.cp', '.c']) {
+        assert.equal(config.monacoLanguageFor(`/workspace/foo${ext}`), 'cpp', ext)
+    }
+    assert.equal(config.monacoLanguageFor('/workspace/README.md'), 'plaintext')
+    assert.equal(config.monacoLanguageFor('/workspace/Makefile'), 'plaintext')
+})
+
 test('toClangdPath leaves workspace-prefixed paths alone', () => {
     assert.equal(config.toClangdPath('/workspace/main.cpp'), '/workspace/main.cpp')
     assert.equal(config.toClangdPath('/workspace'), '/workspace')
@@ -189,10 +134,19 @@ test('toClangdPath rewrites non-workspace paths', () => {
     assert.equal(config.toClangdPath('/other.cpp'), '/other.cpp')
 })
 
-test('toClangdUri produces file:// URI', () => {
+test('toClangdUri produces a percent-encoded file:// URI', () => {
     assert.equal(
         config.toClangdUri('/workspace/main.cpp'),
         'file:///workspace/main.cpp',
+    )
+    // Spaces and `#` are illegal in raw URI paths — must be escaped.
+    assert.equal(
+        config.toClangdUri('/workspace/with space.cpp'),
+        'file:///workspace/with%20space.cpp',
+    )
+    assert.equal(
+        config.toClangdUri('/workspace/hash#sign.cpp'),
+        'file:///workspace/hash%23sign.cpp',
     )
 })
 

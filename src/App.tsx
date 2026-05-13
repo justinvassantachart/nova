@@ -47,9 +47,15 @@ export default function App() {
         }
     }, [host])
 
+    // Teacher-review is a read-only flow: a teacher inspects a student's
+    // submission. There's no edit intent, so we skip the 120 MB clangd
+    // download entirely. Other modes default to the user's saved preference
+    // (resolved inside ClangdProvider).
+    const clangdEnabled = host?.mode !== 'teacher-review' ? undefined : false
+
     return (
         <EngineProvider>
-            <ClangdProvider>
+            <ClangdProvider enabled={clangdEnabled}>
                 <TooltipProvider delayDuration={300}>
                     <div className="flex flex-col h-full w-full overflow-hidden">
                         <Toolbar />
