@@ -15,29 +15,44 @@
 <body>
   <div class="wrap">
     <div class="spin"></div>
-    <div>Signing in with Google…</div>
+    <div id="msg">Working…</div>
     <div id="err" class="err"></div>
   </div>
 
-  <!-- Firebase compat SDK from CDN — keeps this file fully static and self-contained.
-       This page is served WITHOUT COOP/COEP headers (see vite.config.ts / netlify.toml)
-       so signInWithPopup can postMessage back from accounts.google.com normally. -->
+  <!-- Firebase compat SDK from CDN — keeps this page fully static and
+       self-contained. Served WITHOUT COOP/COEP (vite.config.ts +
+       netlify.toml) so signInWithRedirect's helper iframe and any
+       reCAPTCHA challenges can load. -->
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
   <script>
-    (function () {
-      const params = new URLSearchParams(location.search);
-      const config = {
+    (async function () {
+      var params = new URLSearchParams(location.search);
+      var op = params.get('op') || 'signin';
+      var config = {
         apiKey: params.get('apiKey'),
         authDomain: params.get('authDomain'),
         projectId: params.get('projectId'),
         appId: params.get('appId'),
       };
-      const channel = new BroadcastChannel('nova_auth');
+      var channel = new BroadcastChannel('nova_auth');
+      var errEl = document.getElementById('err');
+      var msgEl = document.getElementById('msg');
 
-      function fail(msg) {
-        document.getElementById('err').textContent = msg;
-        channel.postMessage({ ok: false, error: msg });
+      function fail(message, code) {
+        errEl.textContent = message;
+        channel.postMessage({ ok: false, code: code || null, error: message });
+        // Leave the tab open so the user can read the error; the main
+        // app already surfaced it via BroadcastChannel.
+      }
+
+      function done(payload) {
+        channel.postMessage(Object.assign({ ok: true }, payload));
+        // BroadcastChannel is async — give it a moment before closing so
+        // the message lands in the main app before the tab disappears.
+        // (The main app also has a grace period after detecting the close,
+        // but redundancy is cheap here.)
+        setTimeout(function () { try { window.close(); } catch (e) {} }, 250);
       }
 
       if (!config.apiKey || !config.authDomain) {
@@ -52,39 +67,68 @@
         return;
       }
 
-      const provider = new firebase.auth.GoogleAuthProvider();
-      // Make sure we get an ID token back, not just an access token.
-      provider.addScope('openid');
-      provider.addScope('email');
-      provider.addScope('profile');
+      var auth = firebase.auth();
 
-      firebase.auth().signInWithPopup(provider)
-        .then(function (result) {
-          // The compat SDK exposes the OAuth credential directly on result.
-          // Fall back to credentialFromResult and the internal _tokenResponse
-          // (covers older/newer SDK shapes).
-          var cred = result && result.credential;
-          if (!cred && firebase.auth.GoogleAuthProvider.credentialFromResult) {
-            try {
-              cred = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
-            } catch (e) { /* ignore */ }
+      if (op === 'signin') {
+        msgEl.textContent = 'Signing in with Google…';
+        try {
+          // If we're returning from a redirect, this resolves with the
+          // UserCredential. On a first load with no pending redirect,
+          // it resolves with a result whose .user is null.
+          var result = await auth.getRedirectResult();
+          if (result && result.user) {
+            var cred = result.credential;
+            if (!cred && firebase.auth.GoogleAuthProvider.credentialFromResult) {
+              try {
+                cred = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
+              } catch (e) { /* ignore */ }
+            }
+            var idToken = (cred && (cred.idToken || cred.oauthIdToken)) || null;
+            var accessToken = (cred && (cred.accessToken || cred.oauthAccessToken)) || null;
+            var tr = result._tokenResponse || (result.user && result.user._tokenResponse);
+            if (!idToken && tr) idToken = tr.oauthIdToken || tr.idToken || null;
+            if (!accessToken && tr) accessToken = tr.oauthAccessToken || tr.accessToken || null;
+            if (!idToken && !accessToken) {
+              fail('Sign-in succeeded but no Google tokens were returned.');
+              return;
+            }
+            done({ op: 'signin', idToken: idToken, accessToken: accessToken });
+            return;
           }
-          var idToken = (cred && (cred.idToken || cred.oauthIdToken)) || null;
-          var accessToken = (cred && (cred.accessToken || cred.oauthAccessToken)) || null;
-          var tr = result && (result._tokenResponse || (result.user && result.user._tokenResponse));
-          if (!idToken && tr) idToken = tr.oauthIdToken || tr.idToken || null;
-          if (!accessToken && tr) accessToken = tr.oauthAccessToken || tr.accessToken || null;
 
-          if (!idToken && !accessToken) {
-            throw new Error('Sign-in succeeded but no Google tokens were returned');
-          }
-          channel.postMessage({ ok: true, idToken: idToken, accessToken: accessToken });
-          // Give the BroadcastChannel a tick to deliver before we close.
-          setTimeout(function () { window.close(); }, 100);
-        })
-        .catch(function (err) {
-          fail((err && (err.code || err.message)) || 'Sign-in failed');
-        });
+          // First load — kick off the redirect. This navigates the tab
+          // to accounts.google.com; we'll re-enter the top of this
+          // script on return with the redirect result available.
+          var provider = new firebase.auth.GoogleAuthProvider();
+          provider.addScope('openid');
+          provider.addScope('email');
+          provider.addScope('profile');
+          msgEl.textContent = 'Redirecting to Google…';
+          await auth.signInWithRedirect(provider);
+          // unreachable — page navigates away
+        } catch (err) {
+          fail((err && (err.message || err.code)) || 'Sign-in failed', err && err.code);
+        }
+        return;
+      }
+
+      if (op === 'reset') {
+        var email = params.get('email');
+        if (!email) {
+          fail('Missing email for password reset.');
+          return;
+        }
+        msgEl.textContent = 'Sending password reset email…';
+        try {
+          await auth.sendPasswordResetEmail(email);
+          done({ op: 'reset' });
+        } catch (err) {
+          fail((err && (err.message || err.code)) || 'Password reset failed', err && err.code);
+        }
+        return;
+      }
+
+      fail('Unknown operation: ' + op);
     })();
   </script>
 </body>
