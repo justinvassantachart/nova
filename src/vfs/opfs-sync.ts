@@ -8,6 +8,7 @@ async function getProjectDir(projectId: string): Promise<FileSystemDirectoryHand
 }
 
 export async function syncToOPFS(projectId: string, path: string, content: string) {
+    if (!projectId) return  // ephemeral session (e.g. teacher review) — don't persist
     try {
         const projectDir = await getProjectDir(projectId)
         const parts = path.replace('/workspace/', '').split('/')
@@ -25,6 +26,7 @@ export async function syncToOPFS(projectId: string, path: string, content: strin
 }
 
 export async function deleteFromOPFS(projectId: string, path: string) {
+    if (!projectId) return
     try {
         const projectDir = await getProjectDir(projectId)
         const parts = path.replace('/workspace/', '').split('/')
@@ -39,6 +41,7 @@ export async function deleteFromOPFS(projectId: string, path: string) {
 }
 
 export async function renameInOPFS(projectId: string, oldPath: string, newPath: string) {
+    if (!projectId) return
     // OPFS has no rename — read old, write new, delete old
     try {
         const projectDir = await getProjectDir(projectId)
@@ -61,6 +64,7 @@ export async function renameInOPFS(projectId: string, oldPath: string, newPath: 
 }
 
 export async function hydrateFromOPFS(projectId: string) {
+    if (!projectId) return
     try {
         const projectDir = await getProjectDir(projectId)
         await walk(projectDir, '/workspace')

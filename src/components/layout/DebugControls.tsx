@@ -2,14 +2,15 @@
 // Toolbar segment for debugger controls. Shown when debugMode === 'paused'.
 //
 // Two distinct groups:
-//   1. Execution  — Continue, Step Over, Step Into (live engine commands)
+//   1. Execution  — Continue, Step Over, Step Into, Step Out (live engine commands)
 //   2. Time-travel — Back, Forward (replay through step history)
 //   3. Stop
 
 import {
     FastForward,
-    StepForward,
+    Redo2,
     ArrowDown,
+    ArrowUp,
     SkipBack,
     SkipForward,
     Square,
@@ -18,14 +19,12 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Separator } from '@/components/ui/separator'
 import { useDebugStore } from '@/store/debug-store'
-import {
-    debugStepInto,
-    debugStepOver,
-    debugContinue,
-    debugStop,
-} from '@/engine/executor'
+import { useEngine } from '@/engine/EngineContext'
+import { useIDEHost } from '@/ide-host-context'
 
 // ── Types ──────────────────────────────────────────────────────────
+
+type ButtonVariant = 'default' | 'outline' | 'destructive'
 
 interface DebugAction {
     label: string
@@ -33,14 +32,15 @@ interface DebugAction {
     icon: React.ReactNode
     onClick: () => void
     disabled?: boolean
-    className: string
-    destructive?: boolean
+    variant: ButtonVariant
 }
 
 // ── Component ──────────────────────────────────────────────────────
 
 export function DebugControls() {
-    const { stepHistory, stepIndex, stepBack, stepForward } = useDebugStore()
+    const { stepHistory, stepIndex, stepBack, stepForward, reset } = useDebugStore()
+    const engine = useEngine()
+    const host = useIDEHost()
 
     const isAtLiveEdge = stepIndex < 0
     const canStepBack = isAtLiveEdge ? stepHistory.length >= 2 : stepIndex > 0
@@ -53,22 +53,33 @@ export function DebugControls() {
             label: 'Continue',
             shortcut: 'F5',
             icon: <FastForward className="h-3.5 w-3.5" />,
-            onClick: debugContinue,
-            className: 'bg-green-600 hover:bg-green-500 text-white',
+            onClick: () => { host?.onEvent?.('debug_continue', {}); engine.continueExecution() },
+            variant: 'default',
+            disabled: !isAtLiveEdge,
         },
         {
             label: 'Step Over',
             shortcut: 'F10',
-            icon: <StepForward className="h-3.5 w-3.5" />,
-            onClick: debugStepOver,
-            className: 'bg-blue-600 hover:bg-blue-500 text-white',
+            icon: <Redo2 className="h-3.5 w-3.5" />,
+            onClick: () => { host?.onEvent?.('debug_step_over', {}); engine.stepOver() },
+            variant: 'outline',
+            disabled: !isAtLiveEdge,
         },
         {
             label: 'Step Into',
             shortcut: 'F11',
             icon: <ArrowDown className="h-3.5 w-3.5" />,
-            onClick: debugStepInto,
-            className: 'bg-indigo-600 hover:bg-indigo-500 text-white',
+            onClick: () => { host?.onEvent?.('debug_step_into', {}); engine.stepInto() },
+            variant: 'outline',
+            disabled: !isAtLiveEdge,
+        },
+        {
+            label: 'Step Out',
+            shortcut: '⇧F11',
+            icon: <ArrowUp className="h-3.5 w-3.5" />,
+            onClick: () => { host?.onEvent?.('debug_step_out', {}); engine.stepOut() },
+            variant: 'outline',
+            disabled: !isAtLiveEdge,
         },
     ]
 
@@ -79,17 +90,17 @@ export function DebugControls() {
             label: 'Back',
             shortcut: '⇧F11',
             icon: <SkipBack className="h-3.5 w-3.5" />,
-            onClick: stepBack,
+            onClick: () => { host?.onEvent?.('debug_step_back', {}); stepBack() },
             disabled: !canStepBack,
-            className: 'bg-zinc-700 hover:bg-zinc-600 text-white',
+            variant: 'outline',
         },
         {
             label: 'Forward',
             shortcut: '⇧F10',
             icon: <SkipForward className="h-3.5 w-3.5" />,
-            onClick: stepForward,
+            onClick: () => { host?.onEvent?.('debug_step_forward', {}); stepForward() },
             disabled: !canStepForward,
-            className: 'bg-zinc-700 hover:bg-zinc-600 text-white',
+            variant: 'outline',
         },
     ]
 
@@ -111,9 +122,8 @@ export function DebugControls() {
                     label: 'Stop',
                     shortcut: '⇧F5',
                     icon: <Square className="h-3.5 w-3.5" />,
-                    onClick: debugStop,
-                    className: '',
-                    destructive: true,
+                    onClick: () => { engine.stop(); reset(); },
+                    variant: 'destructive',
                 }}
             />
         </div>
@@ -133,17 +143,11 @@ function ActionGroup({ actions }: { actions: DebugAction[] }) {
 }
 
 function ActionButton({ action }: { action: DebugAction }) {
-    const { label, shortcut, icon, onClick, disabled, className, destructive } = action
+    const { label, shortcut, icon, onClick, disabled, variant } = action
     return (
         <Tooltip>
             <TooltipTrigger asChild>
-                <Button
-                    size="sm"
-                    variant={destructive ? 'destructive' : 'default'}
-                    onClick={onClick}
-                    disabled={disabled}
-                    className={`gap-1 ${className}`}
-                >
+                <Button size="sm" variant={variant} onClick={onClick} disabled={disabled} className="gap-1">
                     {icon}
                     <span className="hidden sm:inline">{label}</span>
                 </Button>

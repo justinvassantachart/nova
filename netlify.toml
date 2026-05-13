@@ -2,8 +2,23 @@
   command = "npm run build"
   publish = "dist"
 
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
+
+# Auth bridge: strip COOP/COEP so signInWithPopup can postMessage from
+# accounts.google.com, and reCAPTCHA challenges can load (both blocked
+# by require-corp in the main app). The bridge runs in its own tab and
+# posts results back via BroadcastChannel.
+[[headers]]
+  for = "/auth.html"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "unsafe-none"
+    Cross-Origin-Embedder-Policy = "unsafe-none"
