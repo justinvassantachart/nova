@@ -2,9 +2,15 @@ import { useState } from 'react'
 import { resendVerificationEmail, signOut } from '@/shared/firebase/auth'
 import { useAuth } from '@/shared/context/AuthProvider'
 
+type ResendState =
+  | { kind: 'idle' }
+  | { kind: 'sending' }
+  | { kind: 'sent' }
+  | { kind: 'error'; message: string }
+
 export function UserMenu() {
   const { user, appUser } = useAuth()
-  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [resend, setResend] = useState<ResendState>({ kind: 'idle' })
 
   if (!appUser) return null
 
@@ -15,13 +21,14 @@ export function UserMenu() {
   const unverified = user && !user.emailVerified
 
   async function handleResend() {
-    if (resendState === 'sending') return
-    setResendState('sending')
+    if (resend.kind === 'sending') return
+    setResend({ kind: 'sending' })
     try {
       await resendVerificationEmail()
-      setResendState('sent')
-    } catch {
-      setResendState('error')
+      setResend({ kind: 'sent' })
+    } catch (err) {
+      const message = (err as { message?: string } | null)?.message ?? 'Could not send verification email.'
+      setResend({ kind: 'error', message })
     }
   }
 
@@ -31,19 +38,23 @@ export function UserMenu() {
         <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
           <span>Unverified email</span>
           <span className="text-amber-600/40 dark:text-amber-400/40">·</span>
-          {resendState === 'sent' ? (
+          {resend.kind === 'sent' ? (
             <span className="text-amber-700 dark:text-amber-300">Sent — check inbox</span>
-          ) : resendState === 'error' ? (
-            <button onClick={handleResend} className="underline hover:no-underline">
-              Retry resend
+          ) : resend.kind === 'error' ? (
+            <button
+              onClick={handleResend}
+              title={resend.message}
+              className="underline hover:no-underline text-red-600 dark:text-red-400"
+            >
+              Failed — retry
             </button>
           ) : (
             <button
               onClick={handleResend}
-              disabled={resendState === 'sending'}
+              disabled={resend.kind === 'sending'}
               className="underline hover:no-underline disabled:opacity-50"
             >
-              {resendState === 'sending' ? 'Sending…' : 'Resend'}
+              {resend.kind === 'sending' ? 'Sending…' : 'Resend'}
             </button>
           )}
         </span>

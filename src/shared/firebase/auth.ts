@@ -2,7 +2,6 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
-  sendEmailVerification,
   signInWithCredential,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
@@ -41,9 +40,12 @@ import { getFirebaseAuth } from './client'
 const CHANNEL = 'nova_auth'
 const TIMEOUT_MS = 5 * 60 * 1000
 
+type BridgeOp = 'signin' | 'reset' | 'verify'
+
 type BridgeMessage =
   | { ok: true; op: 'signin'; idToken: string | null; accessToken: string | null }
   | { ok: true; op: 'reset' }
+  | { ok: true; op: 'verify' }
   | { ok: false; code?: string | null; error: string }
 
 type BridgeOutcome =
@@ -60,7 +62,7 @@ function bridgeConfig(): Record<string, string> {
   }
 }
 
-function openBridge(op: 'signin' | 'reset', extra: Record<string, string> = {}): Window {
+function openBridge(op: BridgeOp, extra: Record<string, string> = {}): Window {
   const params = new URLSearchParams({ op, ...bridgeConfig(), ...extra })
   // No features string → tab, not popup. Same-origin tab is all we need
   // for BroadcastChannel + shared auth storage.
@@ -165,15 +167,27 @@ export async function signUpWithEmail(
   const trimmed = displayName?.trim()
   if (trimmed) await updateProfile(cred.user, { displayName: trimmed })
   // Don't fail the sign-up if the verification email can't be sent —
-  // the user is signed in and can resend later from the UI.
-  try { await sendEmailVerification(cred.user) } catch { /* surfaced via unverified banner */ }
+  // the user is signed in and can resend from the unverified banner.
+  try { await sendVerificationEmailViaBridge() } catch { /* surfaced via banner */ }
 }
 
 export async function resendVerificationEmail(): Promise<void> {
   const user = getFirebaseAuth().currentUser
   if (!user) throw authError('Not signed in.')
   if (user.emailVerified) return
-  await sendEmailVerification(user)
+  await sendVerificationEmailViaBridge()
+}
+
+// sendEmailVerification goes through the bridge because Firebase
+// triggers reCAPTCHA invisibly on this endpoint, and the reCAPTCHA
+// iframe is blocked by COEP `require-corp` in the main app. The
+// bridge inherits the same auth state via shared storage.
+async function sendVerificationEmailViaBridge(): Promise<void> {
+  const tab = openBridge('verify')
+  const outcome = await awaitBridge(tab)
+  if (outcome.kind === 'timeout') throw authError('Verification email timed out.')
+  if (outcome.kind === 'closed') throw authError('Verification window closed before completing.')
+  if (!outcome.msg.ok) throw authError(outcome.msg.error, outcome.msg.code ?? undefined)
 }
 
 export function signOut() {
