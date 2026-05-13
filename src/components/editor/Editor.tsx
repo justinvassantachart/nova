@@ -6,6 +6,7 @@ import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, getProjectId, fileExists, readFile } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 import { useEngine } from '@/engine/EngineContext'
+import { useClangd } from '@/clangd'
 import { useIDEHost } from '@/ide-host-context'
 
 // Decorations are tracked per file URI so they survive model switching — when
@@ -19,6 +20,7 @@ export function Editor() {
     const monaco = useMonaco()
     const engine = useEngine()
     const host = useIDEHost()
+    const clangd = useClangd()
     const lastEditEmit = useRef<Record<string, number>>({})
 
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -70,6 +72,13 @@ export function Editor() {
 
     const handleMount: OnMount = (editorInstance, monacoInstance) => {
         editorRef.current = editorInstance
+
+        // Arm clangd on first real engagement with the editor. clangd's wasm
+        // is ~120 MB; we defer the fetch until the user shows intent
+        // (focus or keystroke) so the IDE is interactive immediately and
+        // read-only flows (teacher review, etc.) never pay the cost.
+        editorInstance.onDidFocusEditorWidget(() => clangd.arm())
+        editorInstance.onKeyDown(() => clangd.arm())
 
         editorInstance.onMouseDown((e: editor.IEditorMouseEvent) => {
             if (!e.target || !e.target.position) return
