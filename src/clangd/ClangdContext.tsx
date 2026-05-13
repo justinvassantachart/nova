@@ -22,6 +22,7 @@ import { getAllFiles, subscribeWorkspaceChange } from '@/vfs/volume'
 import type { IDisposable } from 'monaco-editor'
 
 import { bootClangd } from './bootstrap'
+import { purgeOldClangdCaches, requestPersistentStorage } from './cache'
 import type { ClangdClient, ClangdStatus } from './ClangdClient'
 import { isCppPath } from './config'
 import { isClangdEnabled } from './preferences'
@@ -66,7 +67,11 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
     const clientRef = useRef<ClangdClient | null>(null)
 
     const arm = useCallback(() => {
-        if (effectivelyEnabled) setArmed(true)
+        if (!effectivelyEnabled) return
+        setArmed(true)
+        // Best-effort: ask the browser to keep the 120 MB clangd cache
+        // around across quota pressure. Fire-and-forget; no UI hook.
+        void requestPersistentStorage()
     }, [effectivelyEnabled])
 
     // Boot exactly once after arm(). `cancelled` keeps StrictMode tidy: if
@@ -76,6 +81,9 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         let cancelled = false
         let unsubStatus: (() => void) | undefined
 
+        // Sweep cache entries from earlier clangd versions. Runs in parallel
+        // with the boot — purge is independent and tiny.
+        void purgeOldClangdCaches()
         bootClangd(collectInitialFiles())
             .then((c) => {
                 if (cancelled) {

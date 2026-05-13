@@ -18,6 +18,14 @@ const jsOverride = env?.VITE_CLANGD_JS_URL || undefined
 export const CLANGD_WASM_URL = wasmOverride ?? `${DEFAULT_BASE}/clangd.wasm`
 export const CLANGD_JS_URL = jsOverride ?? `${DEFAULT_BASE}/clangd.js`
 
+// Cache API key. Bump this when the wasm/js pair changes upstream
+// (different clangd build, new sysroot, etc.) — boot will then delete the
+// old cache and refetch. If you self-host with versioned immutable URLs,
+// you don't strictly need to bump this since the URL itself changes too,
+// but keeping the prefix lets `purgeOldClangdCaches` find stale entries.
+export const CLANGD_CACHE_KEY = 'clangd-21.1.0-v1'
+export const CLANGD_CACHE_PREFIX = 'clangd-'
+
 export const WORKSPACE_PATH = '/workspace'
 
 // Fallback compile flags clangd uses without a compile_commands.json. We
