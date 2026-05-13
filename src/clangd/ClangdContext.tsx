@@ -5,9 +5,10 @@
 //    user actually interacts with the editor (focus or keystroke). The IDE
 //    becomes interactive immediately; intelligence quietly comes online in
 //    the background. Read-only flows (e.g. a teacher reviewing a submission
-//    they won't edit) never pay the download cost. Browser HTTP cache covers
-//    repeat visits — the CDN sets a short `max-age` but an etag, so a 304
-//    revalidate is cheap.
+//    they won't edit) never pay the download cost — the host that mounts
+//    this provider passes `enabled={false}` in those modes. Browser HTTP
+//    cache covers repeat visits; the CDN sets a short max-age but an etag,
+//    so a 304 revalidate is cheap.
 //
 // 2. **Separate lifecycle from EngineProvider.** The compiler engine runs
 //    once per "Run" click and is disposed after; clangd is long-lived and
@@ -35,8 +36,8 @@ import { isCppPath } from './config'
 import { isClangdEnabled } from './preferences'
 import { clearClangdMarkers, registerClangdProviders } from './providers'
 
-const IDLE_STATUS: ClangdStatus = { state: 'starting', loaded: 0, total: 0 }
-const DISABLED_STATUS: ClangdStatus = { state: 'error', message: 'clangd disabled' }
+const IDLE_STATUS: ClangdStatus = { state: 'idle' }
+const DISABLED_STATUS: ClangdStatus = { state: 'disabled' }
 
 interface ClangdContextValue {
     /** Connected client, or null until the user arms the integration. */
@@ -63,7 +64,10 @@ interface ProviderProps {
     children: ReactNode
     /**
      * Set false to skip clangd entirely. Defaults to the user preference
-     * resolution in `preferences.ts` (URL flag > localStorage > on).
+     * resolution in `preferences.ts` (URL flag > localStorage > on). Hosts
+     * that know intelligence is unwanted (e.g. `teacher-review` mode that
+     * displays read-only submissions) should pass `false` explicitly so the
+     * 120 MB binary never downloads.
      */
     enabled?: boolean
 }
@@ -92,6 +96,7 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
     useEffect(() => {
         if (!armed || !effectivelyEnabled) return
         let cancelled = false
+        let unsubStatus: (() => void) | undefined
 
         bootClangd(collectInitialFiles())
             .then((c) => {
@@ -100,7 +105,7 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
                     return
                 }
                 clientRef.current = c
-                c.onStatus.subscribe(setStatus)
+                unsubStatus = c.onStatus.subscribe(setStatus)
                 setClient(c)
                 setStatus(c.getStatus())
             })
@@ -113,6 +118,10 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
 
         return () => {
             cancelled = true
+            // Unsubscribe BEFORE dispose so the `'disposed'` status emitted
+            // by dispose() doesn't try to setStatus on an unmounted tree —
+            // React would warn.
+            unsubStatus?.()
             clientRef.current?.dispose()
             clientRef.current = null
             setClient(null)
@@ -135,28 +144,34 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
     // a slow sweep that catches the rest (explorer creates/deletes/renames)
     // and keeps unopened headers fresh in case they get pulled in later.
     //
-    // We diff against `syncedPathsRef` so renames send `fs:delete` for the
-    // old path — without that, the old name lingers in clangd's FS and
-    // shadows include resolution.
+    // We track previously-synced contents so a flush only writes files that
+    // actually changed and deletes files that disappeared. Without the
+    // delete, renaming `foo.h` → `bar.h` leaves the old name in clangd's FS
+    // and silently shadows include resolution. Without the diff, every
+    // keystroke during a typing burst re-uploads every C/C++ file in the
+    // workspace.
     //
-    // 500 ms debounce: an editor keystroke triggers a writeFile -> notify,
-    // and rewriting every workspace file on every key would be wasteful when
-    // didChange has already given clangd authoritative content for open
-    // files.
-    const syncedPathsRef = useRef<Set<string>>(new Set())
+    // 500 ms debounce so a typing burst collapses to one flush.
+    const syncedRef = useRef<Map<string, string>>(new Map())
     useEffect(() => {
         if (!client) return
-        syncedPathsRef.current = new Set(Object.keys(collectInitialFiles()))
         let timer: ReturnType<typeof setTimeout> | undefined
+
         const flush = () => {
             const files = collectInitialFiles()
-            const next = new Set(Object.keys(files))
-            for (const stale of syncedPathsRef.current) {
+            const prev = syncedRef.current
+            const next = new Map(Object.entries(files))
+            for (const stale of prev.keys()) {
                 if (!next.has(stale)) client.deleteFile(stale)
             }
-            client.writeFiles(files)
-            syncedPathsRef.current = next
+            const changed: Record<string, string> = {}
+            for (const [path, content] of next) {
+                if (prev.get(path) !== content) changed[path] = content
+            }
+            if (Object.keys(changed).length > 0) client.writeFiles(changed)
+            syncedRef.current = next
         }
+
         const schedule = () => {
             if (timer) clearTimeout(timer)
             timer = setTimeout(flush, 500)
@@ -165,9 +180,14 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         // Initial sync in case files arrived between bootClangd and now.
         schedule()
         return () => {
-            if (timer) clearTimeout(timer)
+            // If a flush was scheduled but never ran, force it through so the
+            // last keystroke before unmount isn't lost on clangd's side.
+            if (timer) {
+                clearTimeout(timer)
+                flush()
+            }
             unsub()
-            syncedPathsRef.current = new Set()
+            syncedRef.current = new Map()
         }
     }, [client])
 

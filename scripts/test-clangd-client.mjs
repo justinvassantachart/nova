@@ -265,9 +265,14 @@ await test('error message before ready rejects ready()', async () => {
 
 await test('dispose rejects pending requests and ignores subsequent traffic', async () => {
     const { worker, client } = fresh()
+    const seen = []
+    worker.onMain((m) => seen.push(m))
     worker.sendToMain({ type: 'ready' })
     await client.ready()
     const pending = client.request('slow')
+    // Let the request's postMessage flush so the count reflects it.
+    await new Promise((r) => setTimeout(r, 0))
+    const lenBefore = seen.length
     client.dispose()
     let threw = false
     try {
@@ -278,9 +283,13 @@ await test('dispose rejects pending requests and ignores subsequent traffic', as
     }
     assert.equal(threw, true)
     assert.equal(client.getStatus().state, 'disposed')
-    // After dispose, send/notify/writeFile become no-ops.
+    // After dispose, fs ops AND notify AND request must all be no-ops.
     client.notify('foo')
     client.writeFile('/a', 'b')
+    client.writeFiles({ '/c': 'd' })
+    client.deleteFile('/e')
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(seen.length, lenBefore, 'no postMessage after dispose')
     let rejected = false
     try {
         await client.request('x')
@@ -289,6 +298,84 @@ await test('dispose rejects pending requests and ignores subsequent traffic', as
         assert.match(err.message, /disposed/)
     }
     assert.equal(rejected, true)
+})
+
+await test('dispose during boot rejects ready()', async () => {
+    // Component unmounts during the 120 MB wasm download: bootClangd's
+    // `await client.ready()` must reject, not hang forever.
+    const { worker: _w, client } = fresh()
+    let resolved = false, rejected = false
+    client.ready().then(
+        () => (resolved = true),
+        (err) => {
+            rejected = true
+            assert.match(err.message, /disposed/)
+        },
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(resolved, false)
+    assert.equal(rejected, false)
+    client.dispose()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(rejected, true, 'ready() must reject when dispose fires mid-boot')
+})
+
+await test('worker error rejects pending requests', async () => {
+    const { worker, client } = fresh()
+    worker.sendToMain({ type: 'ready' })
+    await client.ready()
+    const pending = client.request('inflight')
+    worker.sendToMain({ type: 'error', message: 'worker crashed' })
+    let threw = false
+    try {
+        await pending
+    } catch (err) {
+        threw = true
+        assert.match(err.message, /worker crashed/)
+    }
+    assert.equal(threw, true)
+    assert.equal(client.getStatus().state, 'error')
+    client.dispose()
+})
+
+await test('AbortSignal cancels the request and sends $/cancelRequest', async () => {
+    const { worker, client } = fresh()
+    worker.sendToMain({ type: 'ready' })
+    await client.ready()
+    const seen = []
+    worker.onMain((m) => seen.push(m))
+    const ctl = new AbortController()
+    const p = client.request('slow', {}, ctl.signal)
+    await new Promise((r) => setTimeout(r, 0))
+    // The request was sent.
+    const firstReq = seen.find((m) => m.type === 'lsp' && m.message.method === 'slow')
+    assert(firstReq, 'request was posted')
+    ctl.abort()
+    let cancelled = false
+    try { await p } catch (e) { cancelled = /cancel/i.test(e.message) }
+    assert.equal(cancelled, true)
+    // And a $/cancelRequest was emitted to clangd.
+    const cancelMsg = seen.find((m) => m.type === 'lsp' && m.message.method === '$/cancelRequest')
+    assert(cancelMsg, '$/cancelRequest was sent')
+    assert.equal(cancelMsg.message.params.id, firstReq.message.id)
+    client.dispose()
+})
+
+await test('server-initiated request gets a MethodNotFound response', async () => {
+    const { worker, client } = fresh()
+    worker.sendToMain({ type: 'ready' })
+    await client.ready()
+    const seen = []
+    worker.onMain((m) => seen.push(m))
+    worker.sendToMain({
+        type: 'lsp',
+        message: { jsonrpc: '2.0', id: 99, method: 'window/workDoneProgress/create', params: {} },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    const reply = seen.find((m) => m.type === 'lsp' && m.message.id === 99 && m.message.error)
+    assert(reply, 'replied to the server request')
+    assert.equal(reply.message.error.code, -32601)
+    client.dispose()
 })
 
 console.log('\nClangdClient integration tests complete.')

@@ -46,9 +46,11 @@ async function fetchWithProgress(url: string): Promise<ArrayBuffer> {
     if (!response.ok) {
         throw new Error(`clangd: fetch ${url} failed (${response.status})`)
     }
-    // content-length may be missing under gzip; fall back to length-unknown.
+    // content-length may be missing under gzip or `Transfer-Encoding: chunked`;
+    // Number('chunked') is NaN, so guard with isFinite.
     const totalHeader = response.headers.get('content-length')
-    const total = totalHeader ? Number(totalHeader) : 0
+    const totalParsed = totalHeader ? Number(totalHeader) : 0
+    const total = Number.isFinite(totalParsed) ? totalParsed : 0
 
     const reader = response.body?.getReader()
     if (!reader) {
@@ -88,6 +90,16 @@ async function fetchWithProgress(url: string): Promise<ArrayBuffer> {
 
 async function start() {
     // 1. Fetch the wasm binary with progress.
+    //
+    // The two blob URLs we create below are intentionally never revoked:
+    //   - wasmBlobUrl: handed to emscripten via locateFile and consumed during
+    //     WebAssembly.instantiate; in principle we could revoke it after
+    //     Clangd() resolves, but the bytes are already in the runtime so the
+    //     URL is effectively dead anyway and skipping revoke trades a few
+    //     bytes for one fewer race condition.
+    //   - jsBlobUrl: passed as mainScriptUrlOrBlob; emscripten spawns its
+    //     pthread child workers from this URL, so it MUST live as long as
+    //     the worker. Lifetime == this worker == terminate() reclaims it.
     const wasmBuffer = await fetchWithProgress(CLANGD_WASM_URL)
     const wasmBlobUrl = URL.createObjectURL(
         new Blob([wasmBuffer], { type: 'application/wasm' }),
@@ -139,9 +151,27 @@ async function start() {
             send({ type: 'error', message: `clangd: failed to parse stdout: ${String(err)}` })
         }
     }
-    // stderr is intentionally swallowed; emscripten dumps a lot here that's
-    // noisy for end users. Re-enable for debugging by uncommenting.
-    const stderr = () => {}
+    // emscripten's stderr is where clangd dumps both routine info logs
+    // ("Built preamble in 2.7s", "<-- initialize", …) AND crash traces.
+    // We buffer per-line and emit at the right console level so developers
+    // can find a crash without dimming the user's normal console.
+    // Heuristic: clangd prefixes lines `I[…]`/`E[…]`/`F[…]` for Info / Error
+    // / Fatal; anything else (panic backtraces, libc++ asserts) goes through
+    // console.error to be visible.
+    let stderrLine = ''
+    const LF = 10
+    const stderr = (charCode: number) => {
+        if (charCode !== LF) {
+            stderrLine += String.fromCharCode(charCode)
+            return
+        }
+        if (stderrLine.length === 0) return
+        const line = stderrLine
+        stderrLine = ''
+        if (line.startsWith('I[')) console.debug('[clangd]', line)
+        else if (line.startsWith('E[') || line.startsWith('F[')) console.error('[clangd]', line)
+        else console.warn('[clangd]', line)
+    }
 
     const onAbort = (reason: unknown) => {
         send({ type: 'error', message: `clangd aborted: ${String(reason)}` })
@@ -165,46 +195,57 @@ async function start() {
     //    via `fs:writeAll` (initial bootstrap) and `fs:write`/`fs:delete`
     //    after that. We pre-create the workspace dir so writes don't race
     //    on missing-parent.
+    //
+    //    `.clangd` is a YAML-shaped config; this happens to be valid YAML for
+    //    a flat-mapping subset, but if you ever add anchors / dates / strings
+    //    starting with `!` you'll need to actually write YAML instead of
+    //    leaning on JSON-is-also-YAML.
     ensureDir(clangd.FS, WORKSPACE_PATH)
     clangd.FS.writeFile(
         `${WORKSPACE_PATH}/.clangd`,
         JSON.stringify({ CompileFlags: { Add: [...COMPILE_FLAGS] } }),
     )
 
-    // 6. Handle the protocol with the main thread.
+    // 6. Handle the protocol with the main thread. Wrapped in try/catch
+    //    because anything thrown from a message handler becomes an
+    //    unhandled rejection inside the worker — invisible to the caller.
     self.addEventListener('message', (e: MessageEvent<ClientToWorker>) => {
-        const data = e.data
-        switch (data.type) {
-            case 'lsp': {
-                writeLspToStdin(data.message)
-                break
-            }
-            case 'fs:write': {
-                writeFile(clangd.FS, data.path, data.content)
-                break
-            }
-            case 'fs:delete': {
-                tryUnlink(clangd.FS, data.path)
-                break
-            }
-            case 'fs:writeAll': {
-                for (const [path, content] of Object.entries(data.files)) {
-                    writeFile(clangd.FS, path, content)
+        try {
+            const data = e.data
+            switch (data.type) {
+                case 'lsp': {
+                    writeLspToStdin(data.message)
+                    break
                 }
-                break
+                case 'fs:write': {
+                    writeFile(clangd.FS, data.path, data.content)
+                    break
+                }
+                case 'fs:delete': {
+                    tryUnlink(clangd.FS, data.path)
+                    break
+                }
+                case 'fs:writeAll': {
+                    for (const [path, content] of Object.entries(data.files)) {
+                        writeFile(clangd.FS, path, content)
+                    }
+                    break
+                }
             }
+        } catch (err) {
+            send({ type: 'error', message: `clangd: message handler threw: ${String(err)}` })
         }
     })
 
     function writeLspToStdin(message: LspMessage) {
-        // Escape non-ASCII so Content-Length (byte count) matches the actual
-        // string length emscripten will read from stdin. clangd uses the
-        // header to demarcate messages — a mismatch wedges the parser.
-        const body = JSON.stringify(message).replace(/[-￿]/g, (ch) => {
-            const code = ch.codePointAt(0)
-            return code === undefined ? ch : `\\u${code.toString(16).padStart(4, '0')}`
-        })
-        stdinChunks.push(`Content-Length: ${body.length}\r\n\r\n`, body)
+        // LSP Content-Length is byte count, not char count. We previously
+        // escaped non-ASCII to keep them equal, which inflated payloads on
+        // every Unicode identifier and stripped UTF-8 from clangd's own
+        // log output. Counting bytes directly is faster, smaller on the
+        // wire, and lets clangd see the user's source text verbatim.
+        const body = JSON.stringify(message)
+        const byteLen = encoder.encode(body).byteLength
+        stdinChunks.push(`Content-Length: ${byteLen}\r\n\r\n`, body)
         stdinResolve?.()
         stdinResolve = null
     }

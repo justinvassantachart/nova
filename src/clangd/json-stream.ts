@@ -11,13 +11,21 @@ const LBRACE = 123 // {
 const RBRACE = 125 // }
 const BACKSLASH = 92 // \
 
+// Defensive ceiling on the size of one in-progress message. If clangd crashes
+// mid-write the parser would otherwise accumulate bytes forever; this caps
+// runaway growth at 16 MB (well above any real LSP payload) and resets when
+// exceeded so the next `{` starts fresh.
+const MAX_BUFFER_BYTES = 16 * 1024 * 1024
+
 export class JsonStream {
     private inJson = false
     private rawText: number[] = []
     private unbalancedBraces = 0
     private inString = false
-    // While in a string, how many more chars are part of an escape (`ሴ`
-    // uses 5 — the `u` plus 4 hex digits — others use 1).
+    // While in a string, how many more chars are part of an escape. Most
+    // escapes (`\"`, `\\`, `\n`, …) advance one. `\uXXXX` is special: when
+    // we see the `u` we add 4 more so the four hex digits don't get
+    // interpreted as JSON structure.
     private inEscape = 0
     private readonly decoder = new TextDecoder()
 
@@ -33,6 +41,13 @@ export class JsonStream {
         if (!this.inJson) return null
 
         this.rawText.push(charCode)
+        if (this.rawText.length > MAX_BUFFER_BYTES) {
+            // Probably mid-message corruption (clangd crashed mid-write,
+            // framing went sideways). Drop the buffer; the next top-level
+            // `{` re-syncs us.
+            this.reset()
+            return null
+        }
 
         if (this.inString) {
             if (this.inEscape) {
@@ -54,12 +69,21 @@ export class JsonStream {
         } else if (charCode === RBRACE) {
             this.unbalancedBraces--
             if (this.unbalancedBraces === 0) {
-                this.inJson = false
-                return this.decoder.decode(new Uint8Array(this.rawText))
+                const text = this.decoder.decode(new Uint8Array(this.rawText))
+                this.reset()
+                return text
             }
         } else if (charCode === QUOT) {
             this.inString = true
         }
         return null
+    }
+
+    private reset(): void {
+        this.inJson = false
+        this.rawText = []
+        this.unbalancedBraces = 0
+        this.inString = false
+        this.inEscape = 0
     }
 }

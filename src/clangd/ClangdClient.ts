@@ -5,24 +5,29 @@
 import { EventEmitter } from '@/lib/event-emitter'
 import type {
     ClientToWorker,
-    Json,
     LspMessage,
     LspNotification,
+    LspParams,
     LspRequest,
     LspResponse,
     WorkerToClient,
 } from './lsp-types'
 
-type NotificationHandler = (params: Json | undefined) => void
+type NotificationHandler = (params: LspParams) => void
 
+// The full state machine ClangdProvider exposes. `idle` and `disabled` are
+// emitted by the React provider before/instead of booting a client; the
+// remaining four are emitted by ClangdClient itself as the worker progresses.
 export type ClangdStatus =
-    | { state: 'starting'; loaded: number; total: number }
-    | { state: 'ready' }
-    | { state: 'error'; message: string }
-    | { state: 'disposed' }
+    | { state: 'idle' }                                          // arm() not called yet
+    | { state: 'disabled' }                                      // explicitly off (URL flag, localStorage, or host-mode)
+    | { state: 'starting'; loaded: number; total: number }        // wasm + js downloading / booting
+    | { state: 'ready' }                                          // accepting LSP traffic
+    | { state: 'error'; message: string }                         // boot or worker fatal error
+    | { state: 'disposed' }                                       // dispose() called, terminal
 
 type Resolver = {
-    resolve: (value: Json | undefined) => void
+    resolve: (value: LspParams) => void
     reject: (err: Error) => void
 }
 
@@ -48,6 +53,11 @@ export class ClangdClient {
             this.resolveReady = resolve
             this.rejectReady = reject
         })
+        // Attach a no-op catch so a rejection that nobody awaited
+        // (e.g. the consumer disposed before ever calling .ready()) doesn't
+        // surface as an unhandled-rejection warning. Real consumers still
+        // see the rejection via their own .then/await chain.
+        this.readyPromise.catch(() => {})
         this.worker.addEventListener('message', this.handleMessage)
         this.worker.addEventListener('error', this.handleError)
     }
@@ -65,24 +75,41 @@ export class ClangdClient {
     /**
      * Send a request and await the response.
      *
-     * Hot-path methods like `textDocument/completion` are racy by design — by
-     * the time we get an answer, the user may have typed more. Callers should
-     * use their own cancellation (e.g. Monaco's CancellationToken) rather
-     * than relying on something here.
+     * Pass `signal` (e.g. one derived from Monaco's CancellationToken) and
+     * we'll both reject the local promise *and* send `$/cancelRequest` to
+     * clangd so it stops working on the stale request. C++ semantic
+     * analysis is the most expensive thing in this pipeline; without this,
+     * fast typing stacks up cancelled completion requests that clangd
+     * still happily computes.
      */
-    request<T = Json | undefined>(method: string, params?: Json): Promise<T> {
+    request<T = LspParams>(method: string, params?: LspParams, signal?: AbortSignal): Promise<T> {
         if (this.disposed) return Promise.reject(new Error('clangd disposed'))
+        if (signal?.aborted) return Promise.reject(new Error('cancelled'))
         const id = this.nextRequestId++
         const req: LspRequest = { jsonrpc: '2.0', id, method, params }
-        const promise = new Promise<Json | undefined>((resolve, reject) => {
+        const promise = new Promise<LspParams>((resolve, reject) => {
             this.pending.set(id, { resolve, reject })
         })
+        // Attach a no-op catch so a synchronous abort (or any rejection
+        // that fires before the consumer attaches a handler) doesn't
+        // surface as an unhandled rejection. The consumer still sees the
+        // rejection via their own then/await chain — `.catch` returns a
+        // new promise, the original `promise` is unaffected.
+        promise.catch(() => {})
+        if (signal) {
+            const onAbort = () => this.cancel(id)
+            signal.addEventListener('abort', onAbort, { once: true })
+            // `.finally` returns a *new* chained promise that also rejects
+            // when the original does. Without its own catch, that chained
+            // rejection is unhandled.
+            promise.finally(() => signal.removeEventListener('abort', onAbort)).catch(() => {})
+        }
         this.post({ type: 'lsp', message: req })
         return promise as Promise<T>
     }
 
     /** Send a notification — fire and forget, no response expected. */
-    notify(method: string, params?: Json): void {
+    notify(method: string, params?: LspParams): void {
         if (this.disposed) return
         const notif: LspNotification = { jsonrpc: '2.0', method, params }
         this.post({ type: 'lsp', message: notif })
@@ -106,15 +133,43 @@ export class ClangdClient {
 
     /** Bulk-write workspace files into clangd's FS (used at boot + on rename). */
     writeFiles(files: Record<string, string>): void {
+        if (this.disposed) return
         this.post({ type: 'fs:writeAll', files })
     }
 
     writeFile(path: string, content: string): void {
+        if (this.disposed) return
         this.post({ type: 'fs:write', path, content })
     }
 
     deleteFile(path: string): void {
+        if (this.disposed) return
         this.post({ type: 'fs:delete', path })
+    }
+
+    /**
+     * Cancel an in-flight request. The pending promise rejects locally and
+     * we tell clangd to stop working on it (LSP $/cancelRequest). Useful
+     * when Monaco's CancellationToken fires.
+     */
+    cancel(id: number | string): void {
+        if (this.disposed) return
+        const resolver = this.pending.get(id)
+        if (!resolver) return
+        this.pending.delete(id)
+        // Notify clangd first; the resolver rejection might run handlers
+        // that could otherwise send fresh requests we'd want clangd to see
+        // *after* the cancel.
+        this.post({
+            type: 'lsp',
+            message: { jsonrpc: '2.0', method: '$/cancelRequest', params: { id } },
+        })
+        // If no consumer has attached a rejection handler yet (e.g. a
+        // synchronous abort that hasn't reached the awaiter), the
+        // rejection would surface as unhandled. The Promise created in
+        // request() already has a no-op catch attached for the same
+        // reason.
+        resolver.reject(new Error('cancelled'))
     }
 
     dispose(): void {
@@ -123,12 +178,22 @@ export class ClangdClient {
         this.worker.removeEventListener('message', this.handleMessage)
         this.worker.removeEventListener('error', this.handleError)
         this.worker.terminate()
-        for (const { reject } of this.pending.values()) {
-            reject(new Error('clangd disposed'))
+        // Reject the boot promise so any `await client.ready()` in flight
+        // (e.g. component unmounting during the 120 MB wasm download)
+        // unblocks instead of hanging forever.
+        if (this.status.state === 'starting') {
+            this.rejectReady(new Error('clangd disposed'))
         }
-        this.pending.clear()
+        this.rejectAllPending('clangd disposed')
         this.notifHandlers.clear()
         this.setStatus({ state: 'disposed' })
+    }
+
+    private rejectAllPending(message: string): void {
+        for (const { reject } of this.pending.values()) {
+            reject(new Error(message))
+        }
+        this.pending.clear()
     }
 
     private post(msg: ClientToWorker) {
@@ -160,6 +225,9 @@ export class ClangdClient {
                 const err = new Error(msg.message)
                 if (this.status.state === 'starting') this.rejectReady(err)
                 this.setStatus({ state: 'error', message: msg.message })
+                // Anything waiting on a request can't get an answer now.
+                // Without this they pend forever and the UI sits silent.
+                this.rejectAllPending(msg.message)
                 console.error('[clangd]', msg.message)
                 break
             }
@@ -188,8 +256,26 @@ export class ClangdClient {
             return
         }
 
-        // Notification (or unsolicited request — clangd does emit
-        // `window/workDoneProgress/create` etc. but we ignore those).
+        // Server-initiated request (has id + method, no result/error). Per
+        // LSP spec we must respond so clangd's outgoing promise settles —
+        // ignoring leaves background tasks like `window/workDoneProgress/
+        // create` and `client/registerCapability` hanging on the server.
+        if ('id' in message && 'method' in message) {
+            this.post({
+                type: 'lsp',
+                message: {
+                    jsonrpc: '2.0',
+                    id: (message as LspRequest).id,
+                    error: {
+                        code: -32601, // MethodNotFound
+                        message: `nova does not implement ${(message as LspRequest).method}`,
+                    },
+                } as LspResponse,
+            })
+            return
+        }
+
+        // Plain notification.
         const notif = message as LspNotification
         if (!notif.method) return
         const handlers = this.notifHandlers.get(notif.method)

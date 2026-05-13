@@ -9,7 +9,10 @@ const STORAGE_KEY = 'nova.clangd.enabled'
 const URL_FLAG = 'nolsp'
 
 export function isClangdEnabled(): boolean {
-    // SSR / non-browser safety, even though nova is browser-only today.
+    // Non-browser env (Node tests, future SSR) returns false intentionally —
+    // there's no Monaco / Worker, so booting clangd would crash. nova is
+    // browser-only today, so in practice this only matters for the unit
+    // tests, which import this file directly via vite-node.
     if (typeof window === 'undefined') return false
 
     const params = new URLSearchParams(window.location.search)
