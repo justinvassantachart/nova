@@ -124,6 +124,40 @@
         return;
       }
 
+      if (op === 'verify') {
+        msgEl.textContent = 'Sending verification email…';
+        // We read the signed-in user from shared auth storage. Wait for
+        // the first onAuthStateChanged callback so persistence has
+        // hydrated; cap with a timeout so we don't hang if the user
+        // isn't actually signed in.
+        var user = await new Promise(function (resolve) {
+          var settled = false;
+          var unsub = auth.onAuthStateChanged(function (u) {
+            if (settled) return;
+            settled = true;
+            unsub();
+            resolve(u);
+          });
+          setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            unsub();
+            resolve(auth.currentUser);
+          }, 3000);
+        });
+        if (!user) {
+          fail('Not signed in.');
+          return;
+        }
+        try {
+          await user.sendEmailVerification();
+          done({ op: 'verify' });
+        } catch (err) {
+          fail((err && (err.message || err.code)) || 'Verification email failed', err && err.code);
+        }
+        return;
+      }
+
       fail('Unknown operation: ' + op);
     })();
   </script>
