@@ -18,14 +18,18 @@ export default function App() {
 
     // Bootstrap VFS with a per-host project ID so OPFS namespaces are isolated
     // across assignments. Re-runs when the host's assignment/submission changes.
+    // teacher-review is ephemeral: we always re-seed from the latest Firestore
+    // snapshot and skip OPFS so a prior visit's cached files don't shadow a
+    // student's newer edits.
     useEffect(() => {
+        const ephemeral = host?.mode === 'teacher-review'
         const projectId = host?.submissionId
             ? `submission:${host.submissionId}`
             : host?.assignmentId
             ? `assignment:${host.assignmentId}`
             : 'default-project'
-        initVFS({ projectId, initialFiles: host?.initialFiles })
-    }, [host?.assignmentId, host?.submissionId, host?.initialFiles])
+        initVFS({ projectId, initialFiles: host?.initialFiles, ephemeral })
+    }, [host?.mode, host?.assignmentId, host?.submissionId, host?.initialFiles])
 
     // Forward debounced workspace snapshots to the host (e.g. Firestore submission auto-save).
     useEffect(() => {

@@ -15,45 +15,61 @@ import {
 import { getDb } from './client'
 import type { Assignment } from '@/shared/types'
 
-const COL = 'assignments'
+function assignmentsCol(classId: string) {
+  return collection(getDb(), 'classes', classId, 'assignments')
+}
 
-export async function createAssignment(teacherUid: string, title = 'Untitled assignment') {
-  const ref = await addDoc(collection(getDb(), COL), {
-    title,
+function assignmentRef(classId: string, assignmentId: string) {
+  return doc(getDb(), 'classes', classId, 'assignments', assignmentId)
+}
+
+export async function createAssignment(opts: {
+  classId: string
+  teacherUid: string
+  title?: string
+}): Promise<string> {
+  const ref = await addDoc(assignmentsCol(opts.classId), {
+    classId: opts.classId,
+    teacherUid: opts.teacherUid,
+    title: opts.title ?? 'Untitled assignment',
     description: '',
-    teacherUid,
-    starterFiles: { '/workspace/main.cpp': '// TODO: write your solution\nint main() { return 0; }\n' },
+    starterFiles: {
+      '/workspace/main.cpp': '// TODO: write your solution\nint main() { return 0; }\n',
+    },
     published: false,
     createdAt: serverTimestamp(),
   })
   return ref.id
 }
 
-export async function getAssignment(id: string): Promise<Assignment | null> {
-  const snap = await getDoc(doc(getDb(), COL, id))
+export async function getAssignment(
+  classId: string,
+  assignmentId: string,
+): Promise<Assignment | null> {
+  const snap = await getDoc(assignmentRef(classId, assignmentId))
   if (!snap.exists()) return null
   return { id: snap.id, ...(snap.data() as Omit<Assignment, 'id'>) }
 }
 
-export function watchAssignment(id: string, cb: (a: Assignment | null) => void): Unsubscribe {
-  return onSnapshot(doc(getDb(), COL, id), (snap) => {
+export function watchAssignment(
+  classId: string,
+  assignmentId: string,
+  cb: (a: Assignment | null) => void,
+): Unsubscribe {
+  return onSnapshot(assignmentRef(classId, assignmentId), (snap) => {
     if (!snap.exists()) cb(null)
     else cb({ id: snap.id, ...(snap.data() as Omit<Assignment, 'id'>) })
   })
 }
 
-export function watchMyAssignments(teacherUid: string, cb: (list: Assignment[]) => void): Unsubscribe {
-  const q = query(collection(getDb(), COL), where('teacherUid', '==', teacherUid))
-  return onSnapshot(q, (snap) => {
-    const list: Assignment[] = []
-    snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<Assignment, 'id'>) }))
-    list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0))
-    cb(list)
-  })
-}
-
-export function watchPublishedAssignments(cb: (list: Assignment[]) => void): Unsubscribe {
-  const q = query(collection(getDb(), COL), where('published', '==', true))
+export function watchClassAssignments(
+  classId: string,
+  opts: { publishedOnly?: boolean },
+  cb: (list: Assignment[]) => void,
+): Unsubscribe {
+  const q = opts.publishedOnly
+    ? query(assignmentsCol(classId), where('published', '==', true))
+    : query(assignmentsCol(classId))
   return onSnapshot(q, (snap) => {
     const list: Assignment[] = []
     snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<Assignment, 'id'>) }))
@@ -63,16 +79,25 @@ export function watchPublishedAssignments(cb: (list: Assignment[]) => void): Uns
 }
 
 export async function updateAssignmentMeta(
-  id: string,
+  classId: string,
+  assignmentId: string,
   patch: Partial<Pick<Assignment, 'title' | 'description' | 'published'>>,
 ) {
-  await updateDoc(doc(getDb(), COL, id), patch)
+  await updateDoc(assignmentRef(classId, assignmentId), patch)
 }
 
-export async function saveStarterFiles(id: string, files: Record<string, string>) {
-  await setDoc(doc(getDb(), COL, id), { starterFiles: files }, { merge: true })
+export async function saveStarterFiles(
+  classId: string,
+  assignmentId: string,
+  files: Record<string, string>,
+) {
+  await setDoc(
+    assignmentRef(classId, assignmentId),
+    { starterFiles: files },
+    { merge: true },
+  )
 }
 
-export async function deleteAssignment(id: string) {
-  await deleteDoc(doc(getDb(), COL, id))
+export async function deleteAssignment(classId: string, assignmentId: string) {
+  await deleteDoc(assignmentRef(classId, assignmentId))
 }

@@ -184,6 +184,10 @@ export type InitVFSOptions = {
     projectId?: string
     // Seed files when /workspace is empty (overrides default template).
     initialFiles?: Record<string, string>
+    // Skip OPFS entirely. Used for read-mostly views (e.g. teacher reviewing a
+    // student submission) where we always want the latest seed and don't want
+    // local edits to clobber the cached snapshot on the next visit.
+    ephemeral?: boolean
 }
 
 function wipeWorkspace() {
@@ -223,17 +227,22 @@ export function bootstrapWorkspace(files: Record<string, string>) {
 }
 
 export async function initVFS(opts: InitVFSOptions = {}) {
-    if (opts.projectId) activeProjectId = opts.projectId
+    // Ephemeral views (e.g. teacher reviewing a submission) don't persist to
+    // OPFS — set projectId to empty so syncToOPFS/deleteFromOPFS no-op.
+    if (opts.ephemeral) activeProjectId = ''
+    else if (opts.projectId) activeProjectId = opts.projectId
 
     // Reset workspace before hydrating so switching assignments doesn't leak
     wipeWorkspace()
     vol.mkdirSync('/workspace', { recursive: true })
 
-    // Hydrate from OPFS (per-project)
-    try {
-        const { hydrateFromOPFS } = await import('./opfs-sync')
-        await hydrateFromOPFS(activeProjectId)
-    } catch { /* OPFS not available */ }
+    if (!opts.ephemeral) {
+        // Hydrate from OPFS (per-project)
+        try {
+            const { hydrateFromOPFS } = await import('./opfs-sync')
+            await hydrateFromOPFS(activeProjectId)
+        } catch { /* OPFS not available */ }
+    }
 
     const workspaceEmpty = (() => {
         try { return (vol.readdirSync('/workspace', { encoding: 'utf8' }) as string[]).length === 0 }
@@ -248,7 +257,7 @@ export async function initVFS(opts: InitVFSOptions = {}) {
                     : `/workspace/${path.replace(/^\/+/, '')}`
                 writeFile(target, content)
             }
-        } else {
+        } else if (!opts.ephemeral) {
             writeFile('/workspace/main.cpp', DEFAULT_MAIN)
         }
     }
