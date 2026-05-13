@@ -120,21 +120,17 @@ async function fetchWithProgress(url: string): Promise<ArrayBuffer> {
 }
 
 async function start() {
-    // 1. Fetch wasm.
-    //
-    // Both blob URLs created below are intentionally not revoked. The wasm
-    // one is already consumed by WebAssembly.instantiate, so revoking is
-    // pointless. The JS one MUST stay alive because emscripten spawns its
-    // pthread child workers from it. Both die when terminate() reclaims
-    // the whole worker.
+    // 1. Fetch wasm. Both blob URLs are intentionally never revoked: the
+    //    JS one must stay alive for emscripten's pthread workers, and the
+    //    wasm one is already consumed by WebAssembly.instantiate. Both
+    //    die when terminate() reclaims the whole worker.
     const wasmBuffer = await fetchWithProgress(CLANGD_WASM_URL)
     const wasmBlobUrl = URL.createObjectURL(
         new Blob([wasmBuffer], { type: 'application/wasm' }),
     )
 
     // 2. Fetch the emscripten loader as text and import via blob URL —
-    //    bypasses cross-origin module-loading restrictions. Uses the same
-    //    cache as the wasm.
+    //    bypasses cross-origin module-loading restrictions.
     const jsResp = await fetchCached(CLANGD_JS_URL)
     if (!jsResp.ok) {
         throw new Error(`clangd: fetch ${CLANGD_JS_URL} failed (${jsResp.status})`)
@@ -255,9 +251,7 @@ async function start() {
     })
 
     function writeLspToStdin(message: LspMessage) {
-        // LSP Content-Length is byte count, not char count. Counting bytes
-        // directly is faster than escaping non-ASCII and lets clangd see
-        // UTF-8 source verbatim.
+        // LSP Content-Length is bytes, not chars — encode to measure.
         const body = JSON.stringify(message)
         const byteLen = encoder.encode(body).byteLength
         stdinChunks.push(`Content-Length: ${byteLen}\r\n\r\n`, body)
@@ -265,9 +259,9 @@ async function start() {
         stdinResolve = null
     }
 
-    // 7. Hand off to clangd. callMain blocks on stdin (Atomics) in pthread
-    //    mode — the upstream wait_stdin patch makes this responsive
-    //    instead of spinning.
+    // 7. Hand off to clangd. callMain blocks on stdin via Atomics; the
+    //    upstream wait_stdin patch makes that responsive instead of
+    //    spinning.
     send({ type: 'ready' })
     clangd.callMain([])
 }

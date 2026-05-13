@@ -74,15 +74,14 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         void requestPersistentStorage()
     }, [effectivelyEnabled])
 
-    // Boot exactly once after arm(). `cancelled` keeps StrictMode tidy: if
-    // we tear down mid-boot, dispose whatever finished so no worker leaks.
+    // Boot exactly once after arm(). `cancelled` handles teardown mid-boot
+    // (e.g. StrictMode remount) so no worker leaks.
     useEffect(() => {
         if (!armed || !effectivelyEnabled) return
         let cancelled = false
         let unsubStatus: (() => void) | undefined
 
-        // Sweep cache entries from earlier clangd versions. Runs in parallel
-        // with the boot — purge is independent and tiny.
+        // Drop cache entries from prior versions in parallel with the boot.
         void purgeOldClangdCaches()
         bootClangd(collectInitialFiles())
             .then((c) => {
@@ -122,12 +121,11 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         }
     }, [client, monaco])
 
-    // Workspace → clangd FS sweep. didChange already covers open files;
-    // this catches headers and explorer-driven creates/renames/deletes
-    // that didChange wouldn't see. Diff prev vs next so we only write
-    // changed files and delete paths that disappeared (renames need that
-    // — otherwise the old name lingers and shadows include resolution).
-    // 500ms debounce collapses typing bursts.
+    // Workspace → clangd FS sweep for files Monaco doesn't have open
+    // (headers, explorer creates/renames/deletes). Diff prev vs next so we
+    // only write changed files and delete paths that disappeared — without
+    // the delete, renames leave the old name shadowing include resolution.
+    // 500 ms debounce collapses typing bursts.
     const syncedRef = useRef<Map<string, string>>(new Map())
     useEffect(() => {
         if (!client) return

@@ -198,9 +198,8 @@ class DocumentSync {
             textDocument: { uri, languageId: 'cpp', version: 1, text: model.getValue() },
         })
 
-        // didChange is authoritative for the open file. Don't also writeFile()
-        // on every keystroke — the ClangdContext watchdog handles unopened
-        // files for transitive #includes.
+        // didChange is authoritative for the open file. The ClangdContext
+        // watchdog handles unopened files for transitive #includes.
         let version = 1
         const sub = model.onDidChangeContent((e) => {
             version++
@@ -262,8 +261,8 @@ export function registerClangdProviders(
 
     for (const lang of opts.languages) {
         disposables.push(monacoNs.languages.registerCompletionItemProvider(lang, {
-            // Mirrors upstream clangd-in-browser. Dropping space/`*`/`#`/`"`/`/`
-            // avoids spurious requests inside comments and strings.
+            // Restricting to `. > :` avoids spurious requests inside
+            // comments and strings.
             triggerCharacters: ['.', '>', ':'],
             provideCompletionItems: async (model, position, context, token) => {
                 if (!isCppPath(model.uri.path)) return { suggestions: [] }

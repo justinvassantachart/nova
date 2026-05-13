@@ -1,14 +1,11 @@
-// User opt-out for the in-browser LSP. clangd.wasm is ~120 MB; users and
-// tests need a way to skip it without a code change.
-//
+// User opt-out for the in-browser LSP.
 // Resolution: URL flag > localStorage > default-on.
 
 const STORAGE_KEY = 'nova.clangd.enabled'
 const URL_FLAG = 'nolsp'
 
 export function isClangdEnabled(): boolean {
-    // Non-browser returns false — there's no Monaco/Worker to talk to. nova
-    // is browser-only; this guard only matters for the Node unit tests.
+    // Non-browser returns false — no Monaco/Worker to talk to.
     if (typeof window === 'undefined') return false
 
     const params = new URLSearchParams(window.location.search)

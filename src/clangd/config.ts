@@ -8,9 +8,8 @@
 
 const DEFAULT_BASE = 'https://nova-clangd-cdn.simplecore.workers.dev/clangd/21.1.0'
 
-// `import.meta.env` is Vite-only — guard for the Node-based test scripts.
-// Coerce empty strings to undefined so `VITE_CLANGD_WASM_URL=` in .env
-// doesn't silently bypass the default.
+// Coerce empty strings to undefined so an unset `VITE_CLANGD_WASM_URL=`
+// in .env doesn't silently bypass the default.
 const env: Record<string, string | undefined> | undefined = (
     import.meta as unknown as { env?: Record<string, string | undefined> }
 ).env
@@ -61,15 +60,13 @@ export function isCppPath(path: string): boolean {
 
 /**
  * Monaco language ID for a workspace path. Shared with Editor.tsx so the
- * editor's language matches what registerClangdProviders expects —
- * otherwise .hpp/.cc/.cxx fall back to 'plaintext' and clangd diagnostics
- * never surface.
+ * editor language matches what registerClangdProviders expects.
  */
 export function monacoLanguageFor(path: string): 'cpp' | 'plaintext' {
     return isCppPath(path) ? 'cpp' : 'plaintext'
 }
 
-// Centralized so a future remap (sysroot, sub-folders) is a one-edit.
+// Centralised so a future remap (sysroot, sub-folders) is a one-edit.
 export function toClangdPath(novaPath: string): string {
     if (novaPath.startsWith(WORKSPACE_PATH + '/') || novaPath === WORKSPACE_PATH) {
         return novaPath

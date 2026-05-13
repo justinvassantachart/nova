@@ -1,8 +1,5 @@
-// clangd writes LSP messages as `Content-Length: N\r\n\r\n{json}`, but
-// emscripten hands us bytes one at a time. Trusting Content-Length is
-// flaky (gzip + UTF-8 escaping can desync the byte count), so we scan for
-// a top-level `{`, track brace/string state, and emit when braces balance.
-//
+// Stream parser for LSP JSON bodies. emscripten hands us stdout one byte
+// at a time, so we track brace/string state and emit when braces balance.
 // Adapted from guyutongxue/clangd-in-browser (MIT).
 
 const QUOT = 34 // "
@@ -10,8 +7,7 @@ const LBRACE = 123 // {
 const RBRACE = 125 // }
 const BACKSLASH = 92 // \
 
-// Defensive cap. If clangd crashes mid-message we'd otherwise accumulate
-// forever. 16 MB is well above any real LSP payload.
+// Cap so a crash mid-message can't fill memory. Well above any LSP payload.
 const MAX_BUFFER_BYTES = 16 * 1024 * 1024
 
 export class JsonStream {
@@ -19,9 +15,8 @@ export class JsonStream {
     private rawText: number[] = []
     private unbalancedBraces = 0
     private inString = false
-    // Number of bytes left to consume as part of the current escape. Most
-    // escapes use 1 (\", \\, \n…); \uXXXX uses 5 — the `u` plus 4 hex
-    // digits — so we add 4 more when we see `u`.
+    // Bytes left in the current escape sequence. \uXXXX uses 5 (the `u`
+    // plus 4 hex digits); all other escapes use 1.
     private inEscape = 0
     private readonly decoder = new TextDecoder()
 
