@@ -2,21 +2,46 @@ import type { Timestamp } from 'firebase/firestore'
 
 export type { EventType } from '@/ide-host'
 
-export type Role = 'teacher' | 'student'
-
 export type AppUser = {
   uid: string
   email: string
   displayName: string
-  role: Role | null
   createdAt: Timestamp | null
+}
+
+export type Class = {
+  id: string
+  name: string
+  description: string
+  teacherUid: string
+  teacherDisplayName: string
+  inviteCode: string
+  createdAt: Timestamp | null
+}
+
+export type ClassMember = {
+  uid: string
+  email: string
+  displayName: string
+  joinedAt: Timestamp | null
+}
+
+// Mirror of ClassMember stored under users/{uid}/memberships/{classId} so a
+// signed-in user can list their own classes without a collectionGroup query.
+// Denormalized — class rename does not propagate; refreshes on next class write.
+export type Membership = {
+  classId: string
+  className: string
+  teacherDisplayName: string
+  joinedAt: Timestamp | null
 }
 
 export type Assignment = {
   id: string
+  classId: string
+  teacherUid: string
   title: string
   description: string
-  teacherUid: string
   starterFiles: Record<string, string>
   published: boolean
   createdAt: Timestamp | null
@@ -24,9 +49,11 @@ export type Assignment = {
 }
 
 export type Submission = {
-  id: string // `${assignmentId}_${studentUid}`
-  assignmentId: string
   studentUid: string
+  studentDisplayName: string
+  studentEmail: string
+  assignmentId: string
+  classId: string
   files: Record<string, string>
   updatedAt: Timestamp | null
   submittedAt?: Timestamp | null

@@ -6,12 +6,13 @@ import App from './App'
 import { AuthProvider } from '@/shared/context/AuthProvider'
 import { ProtectedRoute } from '@/lms/components/ProtectedRoute'
 import Login from '@/lms/pages/Login'
-import RoleSelect from '@/lms/pages/RoleSelect'
-import TeacherDashboard from '@/lms/pages/TeacherDashboard'
-import AssignmentEditor from '@/lms/pages/AssignmentEditor'
-import StudentDashboard from '@/lms/pages/StudentDashboard'
-import StudentAssignment from '@/lms/pages/StudentAssignment'
 import RootRedirect from '@/lms/pages/RootRedirect'
+import Dashboard from '@/lms/pages/Dashboard'
+import CreateClass from '@/lms/pages/CreateClass'
+import ClassPage from '@/lms/pages/ClassPage'
+import JoinClass from '@/lms/pages/JoinClass'
+import AssignmentPage from '@/lms/pages/AssignmentPage'
+import SubmissionView from '@/lms/pages/SubmissionView'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -21,42 +22,58 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<Login />} />
           <Route
-            path="/role"
+            path="/dashboard"
             element={
               <ProtectedRoute>
-                <RoleSelect />
+                <Dashboard />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/teacher"
+            path="/classes/new"
             element={
-              <ProtectedRoute role="teacher">
-                <TeacherDashboard />
+              <ProtectedRoute>
+                <CreateClass />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/teacher/assignments/:id"
+            path="/classes/:classId"
             element={
-              <ProtectedRoute role="teacher">
-                <AssignmentEditor />
+              <ProtectedRoute>
+                <ClassPage />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/student"
+            path="/classes/:classId/assignments/:assignmentId"
             element={
-              <ProtectedRoute role="student">
-                <StudentDashboard />
+              <ProtectedRoute>
+                <AssignmentPage />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/student/assignments/:id"
+            path="/classes/:classId/assignments/:assignmentId/submissions/:studentUid"
             element={
-              <ProtectedRoute role="student">
-                <StudentAssignment />
+              <ProtectedRoute>
+                <SubmissionView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/join"
+            element={
+              <ProtectedRoute>
+                <JoinClass />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/join/:code"
+            element={
+              <ProtectedRoute>
+                <JoinClass />
               </ProtectedRoute>
             }
           />

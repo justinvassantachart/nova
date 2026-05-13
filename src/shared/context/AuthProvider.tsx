@@ -38,7 +38,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsub
   }, [])
 
-  // Sync /users/{uid} doc. Create on first login (role=null until RoleSelect).
+  // Sync /users/{uid} doc. Create on first login. No role concept — roles
+  // are per-class and derived from class teacherUid + membership docs.
   useEffect(() => {
     if (!user) return
     const db = getDb()
@@ -49,7 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await setDoc(ref, {
           email: user.email ?? '',
           displayName: user.displayName ?? '',
-          role: null,
           createdAt: serverTimestamp(),
         })
         return

@@ -1,55 +1,46 @@
 import { useEffect, useState } from 'react'
 import {
   watchAssignment,
-  watchMyAssignments,
-  watchPublishedAssignments,
+  watchClassAssignments,
 } from '@/shared/firebase/assignments'
 import type { Assignment } from '@/shared/types'
 
-export function useMyAssignments(teacherUid: string | undefined) {
+export function useClassAssignments(
+  classId: string | undefined,
+  opts: { publishedOnly?: boolean } = {},
+) {
   const [list, setList] = useState<Assignment[]>([])
   const [loading, setLoading] = useState(true)
   useEffect(() => {
-    if (!teacherUid) return
+    if (!classId) return
     setLoading(true)
-    const unsub = watchMyAssignments(teacherUid, (l) => {
+    return watchClassAssignments(classId, opts, (l) => {
       setList(l)
       setLoading(false)
     })
-    return unsub
-  }, [teacherUid])
+    // We want to re-watch when publishedOnly flips, but otherwise keep stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classId, opts.publishedOnly])
   return { list, loading }
 }
 
-export function usePublishedAssignments() {
-  const [list, setList] = useState<Assignment[]>([])
-  const [loading, setLoading] = useState(true)
-  useEffect(() => {
-    setLoading(true)
-    const unsub = watchPublishedAssignments((l) => {
-      setList(l)
-      setLoading(false)
-    })
-    return unsub
-  }, [])
-  return { list, loading }
-}
-
-export function useAssignment(id: string | undefined) {
+export function useAssignment(
+  classId: string | undefined,
+  assignmentId: string | undefined,
+) {
   const [assignment, setAssignment] = useState<Assignment | null>(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
-    if (!id) {
+    if (!classId || !assignmentId) {
       setAssignment(null)
       setLoading(false)
       return
     }
     setLoading(true)
-    const unsub = watchAssignment(id, (a) => {
+    return watchAssignment(classId, assignmentId, (a) => {
       setAssignment(a)
       setLoading(false)
     })
-    return unsub
-  }, [id])
+  }, [classId, assignmentId])
   return { assignment, loading }
 }

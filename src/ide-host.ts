@@ -23,7 +23,11 @@ export type EventType =
   | 'file_delete'
   | 'terminal_stdout'
 
-export type IDEMode = 'standalone' | 'teacher-edit' | 'student-work'
+export type IDEMode =
+  | 'standalone'
+  | 'teacher-edit'      // teacher authoring an assignment's starter files
+  | 'student-work'      // student doing an assignment; edits auto-save to their submission
+  | 'teacher-review'    // teacher inspecting a student submission; no persistence
 
 export type IDEHost = {
   mode: IDEMode

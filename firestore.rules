@@ -3,10 +3,16 @@ rules_version = '2';
 // Nova LMS security rules.
 //
 // Data model:
-//   users/{uid}        — one doc per signed-in user; role is immutable after set
-//   assignments/{id}   — owned by a teacher; readable to all authed users when published
-//   submissions/{id}   — id = `${assignmentId}_${studentUid}`; owned by student
-//   events/{id}        — append-only analytics log; client may create only
+//   users/{uid}                                                  one doc per signed-in user
+//   classes/{classId}                                            class owned by a teacher
+//     members/{uid}                                              students enrolled in the class
+//     assignments/{aid}                                          class-scoped assignments
+//       submissions/{studentUid}                                 student's work for an assignment
+//   events/{id}                                                  append-only analytics log
+//
+// Role model: roles are per-class, derived from data — the user who created
+// a class is its teacher; users in members/ are its students. There is no
+// global role.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -15,80 +21,127 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function getUser(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data;
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
     }
 
-    function isTeacher() {
-      return isSignedIn() && getUser(request.auth.uid).role == 'teacher';
+    function isClassTeacher(classId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/classes/$(classId)).data.teacherUid == request.auth.uid;
+    }
+
+    function isClassMember(classId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/classes/$(classId)/members/$(request.auth.uid));
+    }
+
+    function isClassParticipant(classId) {
+      return isClassTeacher(classId) || isClassMember(classId);
     }
 
     // ── users ────────────────────────────────────────────────────
     match /users/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      // A signed-in user reads their own doc. We also allow other signed-in
+      // users to read it so teachers can resolve a student uid to a name —
+      // displayName/email is non-sensitive (already returned by auth provider).
+      allow read: if isSignedIn();
 
-      // First-login self-create. role MUST start null; immutable thereafter.
-      allow create: if isSignedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role == null
-        && request.resource.data.keys().hasOnly(['email', 'displayName', 'role', 'createdAt']);
+      allow create: if isUser(uid)
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'createdAt']);
 
-      // Self-update: only fill in role when it's still null. Email/displayName editable.
-      allow update: if isSignedIn()
-        && request.auth.uid == uid
-        && (resource.data.role == null || request.resource.data.role == resource.data.role)
-        && request.resource.data.role in ['teacher', 'student', null];
+      allow update: if isUser(uid)
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'createdAt']);
 
       allow delete: if false;
+
+      // Mirror of class memberships, kept in sync with classes/{classId}/members/{uid}
+      // via batched writes from the client. Used so a signed-in user can list
+      // their own classes without a collectionGroup query.
+      match /memberships/{classId} {
+        allow read: if isUser(uid);
+        allow create, update: if isUser(uid)
+          && request.resource.data.classId == classId;
+        allow delete: if isUser(uid);
+      }
     }
 
-    // ── assignments ──────────────────────────────────────────────
-    match /assignments/{id} {
-      // Readable by owner, or by anyone signed-in when published.
-      allow read: if isSignedIn()
-        && (resource.data.teacherUid == request.auth.uid
-            || resource.data.published == true);
+    // ── classes ──────────────────────────────────────────────────
+    match /classes/{classId} {
+      // Any signed-in user can read a class doc. Class IDs are
+      // Firestore-generated (unguessable) and joining requires looking up
+      // the class by inviteCode, so read-open here is the simplest model
+      // and matches "Khan Academy class code" semantics.
+      allow read: if isSignedIn();
 
-      // Only teachers may create, and only with themselves as owner.
-      allow create: if isTeacher()
-        && request.resource.data.teacherUid == request.auth.uid;
-
-      // Only the owning teacher may update or delete.
-      allow update, delete: if isSignedIn()
-        && resource.data.teacherUid == request.auth.uid;
-    }
-
-    // ── submissions ──────────────────────────────────────────────
-    match /submissions/{id} {
-      // The student who owns it can read/write. The teacher who owns the
-      // referenced assignment can read (for grading).
-      // resource is null when the doc doesn't exist yet — allow that case
-      // so getOrCreateSubmission's initial getDoc() returns exists=false
-      // instead of permission-denied. The deterministic id encodes the
-      // student uid, so non-existence isn't sensitive.
-      allow read: if isSignedIn() && (
-        resource == null
-        || resource.data.studentUid == request.auth.uid
-        || get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.teacherUid == request.auth.uid
-      );
-
-      // Student creates their own submission, must match their uid + the deterministic id.
       allow create: if isSignedIn()
-        && request.resource.data.studentUid == request.auth.uid
-        && id == request.resource.data.assignmentId + '_' + request.auth.uid;
+        && request.resource.data.teacherUid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'name', 'description', 'teacherUid', 'teacherDisplayName',
+             'inviteCode', 'createdAt'
+           ]);
 
-      // Student updates their own submission only. studentUid + assignmentId immutable.
-      allow update: if isSignedIn()
-        && resource.data.studentUid == request.auth.uid
-        && request.resource.data.studentUid == resource.data.studentUid
-        && request.resource.data.assignmentId == resource.data.assignmentId;
+      // Only the owning teacher may rename/update. teacherUid is immutable.
+      allow update: if isClassTeacher(classId)
+        && request.resource.data.teacherUid == resource.data.teacherUid;
 
-      allow delete: if false;
+      allow delete: if isClassTeacher(classId);
+
+      // ── members (enrollment) ───────────────────────────────────
+      match /members/{memberUid} {
+        // Teacher + members of the class can see the roster.
+        allow read: if isClassParticipant(classId);
+
+        // A signed-in user self-enrolls. We don't enforce invite-code use
+        // at the rules layer (class IDs are unguessable), but the UI only
+        // surfaces classIds via the invite-code lookup.
+        allow create: if isUser(memberUid)
+          && request.resource.data.uid == request.auth.uid;
+
+        allow update: if isUser(memberUid);
+
+        // Student can leave; teacher can remove.
+        allow delete: if isUser(memberUid) || isClassTeacher(classId);
+      }
+
+      // ── assignments (class-scoped) ─────────────────────────────
+      match /assignments/{assignmentId} {
+        allow read: if isClassTeacher(classId)
+          || (isClassMember(classId) && resource.data.published == true);
+
+        allow create: if isClassTeacher(classId)
+          && request.resource.data.teacherUid == request.auth.uid
+          && request.resource.data.classId == classId;
+
+        allow update: if isClassTeacher(classId)
+          && request.resource.data.teacherUid == resource.data.teacherUid
+          && request.resource.data.classId == resource.data.classId;
+
+        allow delete: if isClassTeacher(classId);
+
+        // ── submissions ──────────────────────────────────────────
+        match /submissions/{studentUid} {
+          // Owner student reads/writes their own; teacher can read for grading.
+          allow read: if isUser(studentUid) || isClassTeacher(classId);
+
+          allow create: if isUser(studentUid)
+            && isClassMember(classId)
+            && request.resource.data.studentUid == request.auth.uid
+            && request.resource.data.assignmentId == assignmentId
+            && request.resource.data.classId == classId;
+
+          allow update: if isUser(studentUid)
+            && request.resource.data.studentUid == resource.data.studentUid
+            && request.resource.data.assignmentId == resource.data.assignmentId
+            && request.resource.data.classId == resource.data.classId;
+
+          allow delete: if false;
+        }
+      }
     }
 
     // ── events (append-only analytics) ───────────────────────────
     match /events/{id} {
-      allow read: if false;          // clients never read events
+      allow read: if false;
       allow update, delete: if false;
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid;

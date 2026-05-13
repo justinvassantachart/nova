@@ -4,16 +4,13 @@ import { signInWithGoogle } from '@/shared/firebase/auth'
 import { useAuth } from '@/shared/context/AuthProvider'
 
 export default function Login() {
-  const { user, appUser, loading, configured } = useAuth()
+  const { user, loading, configured } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
     if (loading) return
-    if (user && appUser) {
-      if (!appUser.role) navigate('/role', { replace: true })
-      else navigate(appUser.role === 'teacher' ? '/teacher' : '/student', { replace: true })
-    }
-  }, [user, appUser, loading, navigate])
+    if (user) navigate('/dashboard', { replace: true })
+  }, [user, loading, navigate])
 
   if (!configured) {
     return (
