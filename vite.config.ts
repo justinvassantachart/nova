@@ -52,4 +52,7 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@yowasp/clang'],
   },
+  build: {
+    target: 'esnext',
+  },
 })
