@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/resizable'
 import { initVFS, subscribeWorkspaceChange, getAllFiles } from '@/vfs/volume'
 import { EngineProvider } from '@/engine/EngineContext'
+import { ClangdProvider } from '@/clangd'
 import { useIDEHost } from '@/ide-host-context'
 
 export default function App() {
@@ -46,30 +47,36 @@ export default function App() {
         }
     }, [host])
 
+    // Read-only review mode skips clangd entirely; everything else defers
+    // to the user preference inside ClangdProvider.
+    const clangdEnabled = host?.mode !== 'teacher-review' ? undefined : false
+
     return (
         <EngineProvider>
-            <TooltipProvider delayDuration={300}>
-                <div className="flex flex-col h-full w-full overflow-hidden">
-                    <Toolbar />
-                    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-                        <ResizablePanel defaultSize="15" minSize="10" maxSize="40">
-                            <FileExplorer />
-                        </ResizablePanel>
+            <ClangdProvider enabled={clangdEnabled}>
+                <TooltipProvider delayDuration={300}>
+                    <div className="flex flex-col h-full w-full overflow-hidden">
+                        <Toolbar />
+                        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+                            <ResizablePanel defaultSize="15" minSize="10" maxSize="40">
+                                <FileExplorer />
+                            </ResizablePanel>
 
-                        <ResizableHandle withHandle />
+                            <ResizableHandle withHandle />
 
-                        <ResizablePanel defaultSize="55" minSize="25">
-                            <Editor />
-                        </ResizablePanel>
+                            <ResizablePanel defaultSize="55" minSize="25">
+                                <Editor />
+                            </ResizablePanel>
 
-                        <ResizableHandle withHandle />
+                            <ResizableHandle withHandle />
 
-                        <ResizablePanel defaultSize="30" minSize="15">
-                            <RightPanel />
-                        </ResizablePanel>
-                    </ResizablePanelGroup>
-                </div>
-            </TooltipProvider>
+                            <ResizablePanel defaultSize="30" minSize="15">
+                                <RightPanel />
+                            </ResizablePanel>
+                        </ResizablePanelGroup>
+                    </div>
+                </TooltipProvider>
+            </ClangdProvider>
         </EngineProvider>
     )
 }

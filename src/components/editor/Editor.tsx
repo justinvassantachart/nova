@@ -6,6 +6,8 @@ import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, getProjectId, fileExists, readFile } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 import { useEngine } from '@/engine/EngineContext'
+import { useClangd } from '@/clangd'
+import { isCppPath, monacoLanguageFor } from '@/clangd/config'
 import { useIDEHost } from '@/ide-host-context'
 
 // Decorations are tracked per file URI so they survive model switching — when
@@ -19,6 +21,7 @@ export function Editor() {
     const monaco = useMonaco()
     const engine = useEngine()
     const host = useIDEHost()
+    const clangd = useClangd()
     const lastEditEmit = useRef<Record<string, number>>({})
 
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -70,6 +73,15 @@ export function Editor() {
 
     const handleMount: OnMount = (editorInstance, monacoInstance) => {
         editorRef.current = editorInstance
+
+        // Arm clangd on first focus/keystroke only when a C/C++ file is
+        // active. Monaco tears these listeners down with the instance.
+        const armIfCpp = () => {
+            const path = useEditorStore.getState().activeFile
+            if (path && isCppPath(path)) clangd.arm()
+        }
+        editorInstance.onDidFocusEditorWidget(armIfCpp)
+        editorInstance.onKeyDown(armIfCpp)
 
         editorInstance.onMouseDown((e: editor.IEditorMouseEvent) => {
             if (!e.target || !e.target.position) return
@@ -201,7 +213,9 @@ export function Editor() {
         )
     }
 
-    const lang = activeFile.endsWith('.h') || activeFile.endsWith('.cpp') || activeFile.endsWith('.c') ? 'cpp' : 'plaintext'
+    // Share the extension → language map with clangd so every C/C++
+    // extension we support registers as 'cpp'.
+    const lang = monacoLanguageFor(activeFile)
 
     return (
         <div className="h-full overflow-hidden bg-background flex flex-col">
