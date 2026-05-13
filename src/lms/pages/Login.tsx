@@ -21,6 +21,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null)
   const [resetSent, setResetSent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [popupBlocked, setPopupBlocked] = useState(false)
 
   useEffect(() => {
     if (loading) return
@@ -48,12 +49,14 @@ export default function Login() {
     setMode(next)
     setError(null)
     setResetSent(false)
+    setPopupBlocked(false)
   }
 
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setResetSent(false)
+    setPopupBlocked(false)
     setBusy(true)
     try {
       if (mode === 'signin') {
@@ -68,35 +71,46 @@ export default function Login() {
     }
   }
 
-  async function handleGoogle() {
+  // Sync (not async) so the call stack from the click event reaches
+  // signInWithGoogle → openBridge → window.open without any `await`
+  // microtask boundary in between. That preserves the click's transient
+  // user activation, which is what most browsers require to allow a
+  // popup through, even when the user has popups globally restricted.
+  function handleGoogle() {
     setError(null)
     setResetSent(false)
+    setPopupBlocked(false)
     setBusy(true)
-    try {
-      await signInWithGoogle()
-    } catch (err) {
-      setError(humanizeAuthError(err))
-    } finally {
-      setBusy(false)
-    }
+    signInWithGoogle()
+      .catch((err) => {
+        if (errorCode(err) === 'nova/popup-blocked') {
+          setPopupBlocked(true)
+        } else {
+          setError(humanizeAuthError(err))
+        }
+      })
+      .finally(() => setBusy(false))
   }
 
-  async function handleForgot() {
+  function handleForgot() {
     setError(null)
     setResetSent(false)
+    setPopupBlocked(false)
     if (!email.trim()) {
       setError('Enter your email above first.')
       return
     }
     setBusy(true)
-    try {
-      await resetPassword(email.trim())
-      setResetSent(true)
-    } catch (err) {
-      setError(humanizeAuthError(err))
-    } finally {
-      setBusy(false)
-    }
+    resetPassword(email.trim())
+      .then(() => setResetSent(true))
+      .catch((err) => {
+        if (errorCode(err) === 'nova/popup-blocked') {
+          setPopupBlocked(true)
+        } else {
+          setError(humanizeAuthError(err))
+        }
+      })
+      .finally(() => setBusy(false))
   }
 
   return (
@@ -196,6 +210,16 @@ export default function Login() {
             Password reset email sent. Check your inbox.
           </div>
         )}
+        {popupBlocked && (
+          <div className="text-xs p-3 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+            Pop-ups are blocked for this site. Allow them (look for the blocked-pop-up icon in
+            your address bar, or open site settings), then{' '}
+            <button onClick={handleGoogle} className="underline font-semibold">
+              click here to retry
+            </button>
+            .
+          </div>
+        )}
         {error && (
           <div className="text-xs text-center text-red-500">{error}</div>
         )}
@@ -221,5 +245,10 @@ export default function Login() {
       </div>
     </div>
   )
+}
+
+function errorCode(err: unknown): string | undefined {
+  const code = (err as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : undefined
 }
 

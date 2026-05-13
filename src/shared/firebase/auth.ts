@@ -86,7 +86,14 @@ function openBridge(op: BridgeOp, extra: Record<string, string> = {}): OpenedBri
   const tab = window.open(`/auth.html?${params.toString()}`, `nova_auth_${id}`)
   if (!tab) {
     channel.close()
-    throw authError('Sign-in window blocked. Please allow pop-ups for this site and try again.')
+    // Code lets the UI surface a dedicated retry affordance instead of a
+    // plain error toast — the next click is a fresh user gesture and
+    // usually succeeds even if popups are blocked, as long as the user
+    // has allow-listed this site.
+    throw authError(
+      'Sign-in window blocked. Please allow pop-ups for this site and try again.',
+      'nova/popup-blocked',
+    )
   }
   return { tab, channel, id }
 }
