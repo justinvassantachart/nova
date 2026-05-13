@@ -1,13 +1,11 @@
-// Minimal LSP types — just what nova talks to clangd about. We intentionally
-// don't pull `vscode-languageserver-protocol` because its types come with a
-// massive transitive dep tree and we use only a handful of methods.
+// Minimal LSP types — just what nova talks to clangd about. We don't pull
+// vscode-languageserver-protocol because its dep tree is large and we use
+// only a handful of methods.
 
-// Documentation type for "JSON-serializable value". We don't use this as
-// the type of `LspParams` because TS doesn't widen named-property object
-// literals (like `{ line: number; character: number }`) into a recursive
-// index-signature shape — every call site would need an explicit cast.
-// `unknown` keeps the call sites clean; callers narrow at the response
-// boundary via `as` when they want a typed result.
+// `Json` documents intent but isn't used as the param type. TS won't widen
+// named-property literals into a recursive index-signature shape, so
+// callers would need casts. `unknown` keeps call sites clean; we narrow
+// at the boundary via `as`.
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json | undefined }
 
 export type LspParams = unknown

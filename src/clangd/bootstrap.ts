@@ -1,12 +1,10 @@
-// LSP handshake: boot the worker, then send the standard `initialize` →
-// `initialized` pair so clangd is ready to answer requests.
+// LSP initialize/initialized handshake.
 
 import { ClangdClient } from './ClangdClient'
 import { WORKSPACE_PATH } from './config'
 
-// Capabilities we declare to clangd. Every flag flipped here is matched by
-// a corresponding code path in `providers.ts` — if you remove a flag, drop
-// the consumer too (and vice versa).
+// Every flag here has a matching consumer in providers.ts. Toggling one
+// without updating the other will silently drop features.
 const INITIALIZE_PARAMS = {
     processId: null,
     clientInfo: { name: 'nova', version: '1.0' },
@@ -21,22 +19,16 @@ const INITIALIZE_PARAMS = {
                 dynamicRegistration: false,
             },
             completion: {
-                // Tells clangd we pass a real CompletionContext (the
-                // triggerKind / triggerCharacter pair on each request).
-                contextSupport: true,
+                contextSupport: true, // we forward Monaco's CompletionContext
                 completionItem: {
                     snippetSupport: true,
                     documentationFormat: ['markdown', 'plaintext'],
                     insertReplaceSupport: true,
-                    // Legacy boolean Deprecated flag.
-                    deprecatedSupport: true,
-                    // LSP 3.15+ tag-based Deprecated. Both are honoured in
-                    // providers.ts; modern clangd emits tags, older builds
-                    // emit the boolean.
-                    tagSupport: { valueSet: [1] },
+                    deprecatedSupport: true,                 // legacy boolean
+                    tagSupport: { valueSet: [1] },           // LSP 3.15+ Deprecated
                     preselectSupport: true,
-                    // Lets clangd defer expensive details until the user
-                    // focuses an item — noticeable on large TUs.
+                    // Defers documentation/detail until the user focuses an
+                    // item — visibly faster on large TUs.
                     resolveSupport: { properties: ['documentation', 'detail'] },
                 },
             },
@@ -55,9 +47,8 @@ const INITIALIZE_PARAMS = {
             publishDiagnostics: {
                 versionSupport: false,
                 relatedInformation: true,
-                // LSP 3.15+ DiagnosticTag: 1 = Unnecessary (dim),
-                // 2 = Deprecated (strikethrough). Without this, unused
-                // #include markers don't get visual styling.
+                // 1=Unnecessary (dim), 2=Deprecated (strikethrough).
+                // Without this, unused #include hints miss their styling.
                 tagSupport: { valueSet: [1, 2] },
             },
         },
@@ -70,17 +61,12 @@ const INITIALIZE_PARAMS = {
 }
 
 /**
- * Boot a clangd worker, perform the LSP handshake, seed the initial workspace
- * files. Resolves once clangd is ready to answer requests.
+ * Boot a clangd worker, do the LSP handshake, seed initial files. The
+ * caller owns the returned client and must dispose() it.
  *
- * Caller owns the returned client and is responsible for `dispose()`-ing it.
- *
- * NOTE: `writeFiles` is fire-and-forget before `await client.ready()`. This
- * works because the worker handles `'fs:writeAll'` after callMain via an
- * addEventListener registered before callMain runs (see clangd.worker.ts —
- * the worker queues main-thread messages while it's still booting and drains
- * them once ready). If you ever invert the ordering in the worker, also
- * invert it here.
+ * writeFiles before await ready() works because the worker queues
+ * main-thread messages and drains them once callMain() starts pumping. If
+ * the worker's setup order ever changes, this needs to follow.
  */
 export async function bootClangd(initialFiles: Record<string, string>): Promise<ClangdClient> {
     const client = new ClangdClient()

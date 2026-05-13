@@ -1,10 +1,9 @@
-// Bridges between clangd's LSP messages and Monaco's provider APIs. We
-// deliberately don't go through `monaco-languageclient` — pulling that in
-// would require swapping `monaco-editor` for the `@codingame/monaco-vscode-*`
-// fork, which is a huge dep tree and a breaking change for the rest of nova.
-// Direct providers are ~200 LOC and let us hand-pick which LSP features to
-// expose; lower-priority features (rename, code actions, formatting) can be
-// added in follow-ups without touching this layer's shape.
+// Bridges clangd's LSP responses into Monaco's provider APIs.
+//
+// We bypass `monaco-languageclient` on purpose — it requires swapping
+// `monaco-editor` for `@codingame/monaco-vscode-*`, which would ripple
+// through the rest of nova. Direct providers are ~250 LOC and keep
+// nova's Monaco setup intact.
 
 import type { editor, IDisposable, Position, Range } from 'monaco-editor'
 import type * as monaco from 'monaco-editor'
@@ -27,6 +26,7 @@ import type {
 type MonacoNs = typeof monaco
 
 // ---------- Position / range conversions ----------
+// LSP is 0-indexed, Monaco is 1-indexed for both line and column.
 
 function toLspPos(pos: Position): LspPosition {
     return { line: pos.lineNumber - 1, character: pos.column - 1 }
@@ -42,10 +42,9 @@ function toMonacoRange(monacoNs: MonacoNs, r: LspRange): Range {
 }
 
 // ---------- Enum conversions ----------
+// LSP and Monaco share enum names but not always values — explicit maps
+// catch the mismatches that naked casts would hide.
 
-// LSP CompletionItemKind → Monaco CompletionItemKind.
-// Monaco's enum is intentionally similar to LSP's but the values differ; we
-// can't just cast. Maps unknown kinds to Text.
 function completionKind(monacoNs: MonacoNs, lspKind: number | undefined): monaco.languages.CompletionItemKind {
     const K = monacoNs.languages.CompletionItemKind
     switch (lspKind) {
@@ -89,27 +88,21 @@ function diagSeverity(monacoNs: MonacoNs, lspSev: number | undefined): monaco.Ma
     }
 }
 
-// LSP SymbolKind is 1-indexed (File=1, …, TypeParameter=26). Monaco's enum
-// is 0-indexed (File=0, …, TypeParameter=25). Same names, off by one.
-// Verified against monaco-editor/monaco.d.ts — File: 0, Module: 1, …,
-// TypeParameter: 25.
+// LSP SymbolKind is 1-indexed, Monaco's is 0-indexed. Same names, off by one.
 function symbolKind(monacoNs: MonacoNs, lspKind: number): monaco.languages.SymbolKind {
     const K = monacoNs.languages.SymbolKind
     if (lspKind < 1 || lspKind > 26) return K.Variable
     return (lspKind - 1) as monaco.languages.SymbolKind
 }
 
-// LSP CompletionTriggerKind: 1=Invoked, 2=TriggerCharacter, 3=TriggerForIncompleteCompletions
-// Monaco CompletionTriggerKind: 0=Invoke, 1=TriggerCharacter, 2=TriggerForIncompleteCompletions
+// LSP CompletionTriggerKind is 1-indexed; Monaco is 0-indexed. +1 lands us in LSP's enum.
 function toLspTriggerKind(m: monaco.languages.CompletionTriggerKind): 1 | 2 | 3 {
     return (m + 1) as 1 | 2 | 3
 }
 
-// Hoist outside the loop so clearClangdMarkers and the diagnostic handler
-// share one truth.
 const DIAG_OWNER = 'clangd'
 
-// ---------- Text edit conversion ----------
+// ---------- Text edit + hover helpers ----------
 
 function applyCompletionTextEdit(
     monacoNs: MonacoNs,
@@ -117,22 +110,18 @@ function applyCompletionTextEdit(
     fallbackRange: Range,
 ): { range: Range | monaco.languages.CompletionItemRanges; insertText: string } {
     const insertText = item.insertText ?? item.label
+    if (!item.textEdit) return { range: fallbackRange, insertText }
 
-    if (item.textEdit) {
-        if ('range' in item.textEdit) {
-            return { range: toMonacoRange(monacoNs, item.textEdit.range), insertText: item.textEdit.newText }
-        }
-        // InsertReplaceEdit: monaco supports it natively via insert+replace.
-        return {
-            range: {
-                insert: toMonacoRange(monacoNs, item.textEdit.insert),
-                replace: toMonacoRange(monacoNs, item.textEdit.replace),
-            },
-            insertText: item.textEdit.newText,
-        }
+    if ('range' in item.textEdit) {
+        return { range: toMonacoRange(monacoNs, item.textEdit.range), insertText: item.textEdit.newText }
     }
-
-    return { range: fallbackRange, insertText }
+    return {
+        range: {
+            insert: toMonacoRange(monacoNs, item.textEdit.insert),
+            replace: toMonacoRange(monacoNs, item.textEdit.replace),
+        },
+        insertText: item.textEdit.newText,
+    }
 }
 
 function applyAdditionalEdits(
@@ -147,14 +136,12 @@ function applyAdditionalEdits(
     }))
 }
 
-// ---------- Hover content conversion ----------
-
 function hoverContent(h: Hover): monaco.IMarkdownString[] {
     const out: monaco.IMarkdownString[] = []
-    const c = h.contents
     const push = (text: string) => {
         if (text.trim().length > 0) out.push({ value: text })
     }
+    const c = h.contents
     if (typeof c === 'string') {
         push(c)
     } else if (Array.isArray(c)) {
@@ -163,7 +150,6 @@ function hoverContent(h: Hover): monaco.IMarkdownString[] {
             else push('```' + part.language + '\n' + part.value + '\n```')
         }
     } else if (c && typeof c === 'object' && 'value' in c) {
-        // MarkupContent
         push(c.value)
     }
     return out
@@ -173,24 +159,17 @@ function markdownify(
     s: string | { kind: 'markdown' | 'plaintext'; value: string } | undefined,
 ): string | undefined {
     if (!s) return undefined
-    if (typeof s === 'string') return s
-    return s.value
+    return typeof s === 'string' ? s : s.value
 }
 
 // ---------- Document sync ----------
 
 /**
- * Keeps clangd's view of every C/C++ model in sync with Monaco's. Mirrors the
- * textDocument/didOpen | didChange | didClose handshake so completions, hover,
- * and diagnostics see the same text the user is looking at.
- *
- * One sync per Monaco model: we observe `onDidCreateModel`/`onWillDisposeModel`
- * to catch tab opens/closes/file renames. Each opened doc owns one content
- * subscription that we dispose alongside the close notification.
+ * Mirrors Monaco's open C/C++ models into clangd via didOpen / didChange /
+ * didClose. clangd uses these messages as the source of truth for the file
+ * the user is editing; without them, completions and diagnostics see stale
+ * content.
  */
-// Models are keyed by full URI (`scheme://path`) rather than just path: two
-// in-memory schemes could collide on path alone, and toClangdUri stringifies
-// a different value anyway.
 class DocumentSync {
     private readonly opened = new Map<string, IDisposable>()
     private readonly disposables: IDisposable[] = []
@@ -210,20 +189,18 @@ class DocumentSync {
     }
 
     private openIfCpp(model: editor.ITextModel) {
-        const path = model.uri.path
+        // Key by full URI so two schemes can't collide on path alone.
         const key = model.uri.toString()
-        if (!isCppPath(path) || this.opened.has(key)) return
+        if (!isCppPath(model.uri.path) || this.opened.has(key)) return
 
-        const uri = toClangdUri(path)
+        const uri = toClangdUri(model.uri.path)
         this.client.notify('textDocument/didOpen', {
             textDocument: { uri, languageId: 'cpp', version: 1, text: model.getValue() },
         })
 
-        // didChange alone is authoritative for the open file. We deliberately
-        // don't also `writeFile` to clangd's FS on every keystroke: the
-        // 500 ms watchdog in ClangdContext handles header content used by
-        // *other* open files for include resolution, and posting the whole
-        // document over postMessage on every keystroke just burns bandwidth.
+        // didChange is authoritative for the open file. Don't also writeFile()
+        // on every keystroke — the ClangdContext watchdog handles unopened
+        // files for transitive #includes.
         let version = 1
         const sub = model.onDidChangeContent((e) => {
             version++
@@ -254,9 +231,7 @@ class DocumentSync {
     }
 }
 
-// Bridge a Monaco CancellationToken into a fetch-style AbortSignal. Monaco's
-// token has `onCancellationRequested` + `isCancellationRequested`; we want
-// the standard signal shape so ClangdClient stays Monaco-agnostic.
+// Monaco's CancellationToken → AbortSignal so ClangdClient stays Monaco-agnostic.
 function signalFromToken(token: monaco.CancellationToken): AbortSignal {
     const ctl = new AbortController()
     if (token.isCancellationRequested) ctl.abort()
@@ -264,10 +239,15 @@ function signalFromToken(token: monaco.CancellationToken): AbortSignal {
     return ctl.signal
 }
 
+// Cancellation is a hot-path expected outcome — keep it out of the warn log.
+function isCancellation(err: unknown): boolean {
+    return err instanceof Error && err.message === 'cancelled'
+}
+
 // ---------- Provider registrations ----------
 
 interface RegisterOptions {
-    /** Language IDs that clangd should answer for. */
+    /** Monaco language IDs clangd should answer for. */
     languages: string[]
 }
 
@@ -282,8 +262,8 @@ export function registerClangdProviders(
 
     for (const lang of opts.languages) {
         disposables.push(monacoNs.languages.registerCompletionItemProvider(lang, {
-            // Mirrors upstream clangd-in-browser. Avoiding space/`/`/`*`/`#`/`"`
-            // here cuts spurious requests fired inside comments and strings.
+            // Mirrors upstream clangd-in-browser. Dropping space/`*`/`#`/`"`/`/`
+            // avoids spurious requests inside comments and strings.
             triggerCharacters: ['.', '>', ':'],
             provideCompletionItems: async (model, position, context, token) => {
                 if (!isCppPath(model.uri.path)) return { suggestions: [] }
@@ -333,9 +313,7 @@ export function registerClangdProviders(
                                     : monacoNs.languages.CompletionItemInsertTextRule.None,
                                 additionalTextEdits: applyAdditionalEdits(monacoNs, item),
                             }
-                            // LSP 3.15+ replaced the boolean `deprecated`
-                            // field with `tags: [Deprecated]`. Honour both —
-                            // older clangd builds still emit the boolean.
+                            // Honour both legacy boolean and LSP 3.15+ tags.
                             const deprecated =
                                 item.deprecated ||
                                 (Array.isArray(item.tags) && item.tags.includes(1))
@@ -450,8 +428,6 @@ export function registerClangdProviders(
                         name: s.name,
                         detail: s.detail ?? '',
                         kind: symbolKind(monacoNs, s.kind),
-                        // LSP SymbolTag.Deprecated == 1 → Monaco's enum is
-                        // structurally identical for this value.
                         tags: (s.tags ?? []).includes(1)
                             ? [monacoNs.languages.SymbolTag.Deprecated]
                             : [],
@@ -468,8 +444,7 @@ export function registerClangdProviders(
         }))
     }
 
-    // Diagnostics: clangd pushes these to us via notification rather than as a
-    // response. We route each batch to the matching Monaco model.
+    // Diagnostics arrive as notifications — route to the right Monaco model.
     const unsubscribe = client.on('textDocument/publishDiagnostics', (params) => {
         if (!params || typeof params !== 'object') return
         const p = params as unknown as PublishDiagnosticsParams
@@ -488,14 +463,11 @@ export function registerClangdProviders(
                 startColumn: d.range.start.character + 1,
                 endLineNumber: d.range.end.line + 1,
                 endColumn: d.range.end.character + 1,
-                // LSP 3.15 DiagnosticTag: 1=Unnecessary (dim), 2=Deprecated.
                 tags: (d.tags ?? [])
                     .map((t) =>
-                        t === 1
-                            ? monacoNs.MarkerTag.Unnecessary
-                            : t === 2
-                              ? monacoNs.MarkerTag.Deprecated
-                              : undefined,
+                        t === 1 ? monacoNs.MarkerTag.Unnecessary
+                        : t === 2 ? monacoNs.MarkerTag.Deprecated
+                        : undefined,
                     )
                     .filter((t): t is monaco.MarkerTag => t !== undefined),
             })),
@@ -510,15 +482,7 @@ export function registerClangdProviders(
     }
 }
 
-// Cancellation errors are an expected hot-path outcome (Monaco token fires
-// every time the user types), so we suppress them from the warn log to keep
-// the console useful. Anything else still surfaces.
-function isCancellation(err: unknown): boolean {
-    return err instanceof Error && err.message === 'cancelled'
-}
-
-// Convenience: clear any clangd-owned markers from every model. Useful when
-// disposing without dropping the whole Monaco instance.
+/** Wipe clangd-owned markers from every model. Used when tearing down providers. */
 export function clearClangdMarkers(monacoNs: MonacoNs) {
     for (const model of monacoNs.editor.getModels()) {
         monacoNs.editor.setModelMarkers(model, DIAG_OWNER, [])
