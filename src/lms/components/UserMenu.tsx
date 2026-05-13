@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { resendVerificationEmail, signOut } from '@/shared/firebase/auth'
+import { humanizeAuthError } from '@/shared/firebase/errors'
 import { useAuth } from '@/shared/context/AuthProvider'
 
 type ResendState =
@@ -8,9 +9,20 @@ type ResendState =
   | { kind: 'sent' }
   | { kind: 'error'; message: string }
 
+// After a successful resend, give the user 30 seconds to check their
+// inbox before re-enabling the button. Long enough to discourage
+// spamming, short enough that they aren't locked out if delivery fails.
+const RESEND_COOLDOWN_MS = 30_000
+
 export function UserMenu() {
   const { user, appUser } = useAuth()
   const [resend, setResend] = useState<ResendState>({ kind: 'idle' })
+
+  useEffect(() => {
+    if (resend.kind !== 'sent') return
+    const t = setTimeout(() => setResend({ kind: 'idle' }), RESEND_COOLDOWN_MS)
+    return () => clearTimeout(t)
+  }, [resend.kind])
 
   if (!appUser) return null
 
@@ -27,8 +39,7 @@ export function UserMenu() {
       await resendVerificationEmail()
       setResend({ kind: 'sent' })
     } catch (err) {
-      const message = (err as { message?: string } | null)?.message ?? 'Could not send verification email.'
-      setResend({ kind: 'error', message })
+      setResend({ kind: 'error', message: humanizeAuthError(err) })
     }
   }
 
