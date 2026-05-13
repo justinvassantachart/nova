@@ -6,6 +6,7 @@ export type { ClangdStatus } from './ClangdClient'
 export { ClangdProvider, useClangd } from './ClangdContext'
 export { isClangdEnabled, setClangdEnabled } from './preferences'
 export { bootClangd } from './bootstrap'
+export { purgeOldClangdCaches, requestPersistentStorage } from './cache'
 export {
     CLANGD_JS_URL,
     CLANGD_WASM_URL,

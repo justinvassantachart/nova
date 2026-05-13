@@ -5,7 +5,13 @@
 // our own LSP framing and a fs:write protocol so the main thread can keep
 // clangd's view of the workspace in sync.
 
-import { CLANGD_JS_URL, CLANGD_WASM_URL, COMPILE_FLAGS, WORKSPACE_PATH } from './config'
+import {
+    CLANGD_CACHE_KEY,
+    CLANGD_JS_URL,
+    CLANGD_WASM_URL,
+    COMPILE_FLAGS,
+    WORKSPACE_PATH,
+} from './config'
 import { JsonStream } from './json-stream'
 import type { ClientToWorker, LspMessage, WorkerToClient } from './lsp-types'
 
@@ -40,8 +46,35 @@ function send(message: WorkerToClient) {
     self.postMessage(message)
 }
 
+/**
+ * Cache-aware fetch. Tries the Cache API first; on miss, falls through to
+ * the network and stores the response (best-effort — quota errors don't
+ * fail the boot). Cached responses still expose a streaming body, so
+ * progress reporting works the same way for both cases.
+ */
+async function fetchCached(url: string): Promise<Response> {
+    if (typeof caches === 'undefined') return fetch(url)
+    let cache: Cache
+    try {
+        cache = await caches.open(CLANGD_CACHE_KEY)
+    } catch {
+        // Private mode etc. — fall back to plain fetch.
+        return fetch(url)
+    }
+    const cached = await cache.match(url)
+    if (cached) return cached
+    const fresh = await fetch(url)
+    if (fresh.ok) {
+        // Clone before we hand the original back — body streams are one-shot.
+        cache.put(url, fresh.clone()).catch((err) => {
+            console.warn('[clangd] cache.put failed (quota?):', err)
+        })
+    }
+    return fresh
+}
+
 async function fetchWithProgress(url: string): Promise<ArrayBuffer> {
-    const response = await fetch(url)
+    const response = await fetchCached(url)
     if (!response.ok) {
         throw new Error(`clangd: fetch ${url} failed (${response.status})`)
     }
@@ -100,8 +133,9 @@ async function start() {
     )
 
     // 2. Fetch the emscripten loader as text and import via blob URL —
-    //    bypasses cross-origin module-loading restrictions.
-    const jsResp = await fetch(CLANGD_JS_URL)
+    //    bypasses cross-origin module-loading restrictions. Uses the same
+    //    cache as the wasm.
+    const jsResp = await fetchCached(CLANGD_JS_URL)
     if (!jsResp.ok) {
         throw new Error(`clangd: fetch ${CLANGD_JS_URL} failed (${jsResp.status})`)
     }
