@@ -83,7 +83,7 @@ export default function Login() {
     setBusy(true)
     signInWithGoogle()
       .catch((err) => {
-        if (errorCode(err) === 'nova/popup-blocked') {
+        if (isPopupBlocked(err)) {
           setPopupBlocked(true)
         } else {
           setError(humanizeAuthError(err))
@@ -104,7 +104,7 @@ export default function Login() {
     resetPassword(email.trim())
       .then(() => setResetSent(true))
       .catch((err) => {
-        if (errorCode(err) === 'nova/popup-blocked') {
+        if (isPopupBlocked(err)) {
           setPopupBlocked(true)
         } else {
           setError(humanizeAuthError(err))
@@ -250,5 +250,18 @@ export default function Login() {
 function errorCode(err: unknown): string | undefined {
   const code = (err as { code?: unknown } | null)?.code
   return typeof code === 'string' ? code : undefined
+}
+
+// Two distinct popup-blocked paths lead here:
+//   - `nova/popup-blocked`  → the bridge TAB itself was blocked. We threw
+//     this from openBridge when window.open returned null.
+//   - `auth/popup-blocked`  → Firebase's signInWithPopup INSIDE the bridge
+//     was blocked (the OAuth popup to accounts.google.com). The bridge
+//     forwards Firebase's code in its failure broadcast.
+// Same user remediation either way: allow-list pop-ups for this site,
+// then retry. So both render the same amber banner.
+function isPopupBlocked(err: unknown): boolean {
+  const code = errorCode(err)
+  return code === 'nova/popup-blocked' || code === 'auth/popup-blocked'
 }
 
