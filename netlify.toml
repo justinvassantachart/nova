@@ -13,8 +13,10 @@
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
 
-# Auth bridge: strip COOP/COEP so the bridge popup can run signInWithPopup
-# (its child OAuth popup needs cross-origin postMessage to come back).
+# Auth bridge: strip COOP/COEP so signInWithPopup can postMessage from
+# accounts.google.com, and reCAPTCHA challenges can load (both blocked
+# by require-corp in the main app). The bridge runs in its own tab and
+# posts results back via BroadcastChannel.
 [[headers]]
   for = "/auth.html"
   [headers.values]
