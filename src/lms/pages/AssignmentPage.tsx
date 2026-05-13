@@ -287,10 +287,16 @@ function StudentView({
     submissionId: user?.uid,
   })
 
-  // Build host once submission is ready. Freeze identity once non-null so live
-  // submittedAt updates from Firestore don't re-bootstrap the IDE.
+  // Build host once submission is ready. Freeze identity within a single
+  // assignment so live Firestore updates (submittedAt, etc.) don't
+  // re-bootstrap the IDE and clobber the student's in-progress edits. The
+  // dep tracks `submission?.assignmentId` rather than `submission !== null`
+  // so that navigating to a different assignment — where `submission` is
+  // briefly the previous assignment's data — doesn't seed the new IDE mount
+  // with the old assignment's starter files.
   const host = useMemo<IDEHost | null>(() => {
     if (!user || !submission) return null
+    if (submission.assignmentId !== assignmentId) return null
     return {
       mode: 'student-work',
       assignmentId,
@@ -304,7 +310,7 @@ function StudentView({
       onEvent,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classId, assignmentId, user?.uid, submission !== null])
+  }, [classId, assignmentId, user?.uid, submission?.assignmentId])
 
   async function handleSubmit() {
     if (!user) return
