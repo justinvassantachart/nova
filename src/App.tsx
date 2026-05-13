@@ -47,8 +47,8 @@ export default function App() {
         }
     }, [host])
 
-    // Skip clangd entirely in read-only review mode (no edit intent → no
-    // reason to pull 120 MB). Other modes fall back to the user preference.
+    // Read-only review mode skips clangd entirely; everything else defers
+    // to the user preference inside ClangdProvider.
     const clangdEnabled = host?.mode !== 'teacher-review' ? undefined : false
 
     return (

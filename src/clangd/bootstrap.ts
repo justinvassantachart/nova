@@ -48,7 +48,6 @@ const INITIALIZE_PARAMS = {
                 versionSupport: false,
                 relatedInformation: true,
                 // 1=Unnecessary (dim), 2=Deprecated (strikethrough).
-                // Without this, unused #include hints miss their styling.
                 tagSupport: { valueSet: [1, 2] },
             },
         },
@@ -61,12 +60,11 @@ const INITIALIZE_PARAMS = {
 }
 
 /**
- * Boot a clangd worker, do the LSP handshake, seed initial files. The
- * caller owns the returned client and must dispose() it.
+ * Boot a clangd worker, run the LSP handshake, seed initial files.
+ * Caller owns the returned client and must dispose() it.
  *
  * writeFiles before await ready() works because the worker queues
- * main-thread messages and drains them once callMain() starts pumping. If
- * the worker's setup order ever changes, this needs to follow.
+ * main-thread messages and drains them once callMain pumps stdin.
  */
 export async function bootClangd(initialFiles: Record<string, string>): Promise<ClangdClient> {
     const client = new ClangdClient()

@@ -1,11 +1,9 @@
 // Minimal LSP types — just what nova talks to clangd about. We don't pull
-// vscode-languageserver-protocol because its dep tree is large and we use
-// only a handful of methods.
+// vscode-languageserver-protocol; its dep tree is large and we use a
+// handful of methods.
 
-// `Json` documents intent but isn't used as the param type. TS won't widen
-// named-property literals into a recursive index-signature shape, so
-// callers would need casts. `unknown` keeps call sites clean; we narrow
-// at the boundary via `as`.
+// `Json` documents intent but params use `unknown` so ad-hoc literals
+// type-check without casts. Callers narrow results via `as`.
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json | undefined }
 
 export type LspParams = unknown
@@ -80,7 +78,7 @@ export interface CompletionItem {
     insertTextFormat?: 1 | 2 // Plain | Snippet
     textEdit?: TextEdit | { insert: Range; replace: Range; newText: string }
     additionalTextEdits?: TextEdit[]
-    /** Legacy LSP <3.15. Modern clangd emits `tags: [1]` instead. Honour both. */
+    /** Legacy LSP <3.15. Modern clangd uses `tags: [1]`; we honour both. */
     deprecated?: boolean
     preselect?: boolean
 }
