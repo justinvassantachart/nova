@@ -1,11 +1,25 @@
 import { useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
-import { signInWithGoogle } from '@/shared/firebase/auth'
+import { useEffect, useState, type FormEvent } from 'react'
+import {
+  resetPassword,
+  signInWithEmail,
+  signInWithGoogle,
+  signUpWithEmail,
+} from '@/shared/firebase/auth'
 import { useAuth } from '@/shared/context/AuthProvider'
+
+type Mode = 'signin' | 'signup'
 
 export default function Login() {
   const { user, loading, configured } = useAuth()
   const navigate = useNavigate()
+  const [mode, setMode] = useState<Mode>('signin')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [resetSent, setResetSent] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (loading) return
@@ -29,21 +43,199 @@ export default function Login() {
     )
   }
 
+  function switchMode(next: Mode) {
+    setMode(next)
+    setError(null)
+    setResetSent(false)
+  }
+
+  async function handleEmailSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setResetSent(false)
+    setBusy(true)
+    try {
+      if (mode === 'signin') {
+        await signInWithEmail(email, password)
+      } else {
+        await signUpWithEmail(email, password, displayName)
+      }
+    } catch (err) {
+      setError(humanizeAuthError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleGoogle() {
+    setError(null)
+    setResetSent(false)
+    setBusy(true)
+    try {
+      await signInWithGoogle()
+    } catch (err) {
+      setError(humanizeAuthError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleForgot() {
+    setError(null)
+    setResetSent(false)
+    if (!email.trim()) {
+      setError('Enter your email above first.')
+      return
+    }
+    setBusy(true)
+    try {
+      await resetPassword(email.trim())
+      setResetSent(true)
+    } catch (err) {
+      setError(humanizeAuthError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="h-screen w-screen flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <h1 className="text-2xl font-semibold">Nova</h1>
-        <p className="text-sm text-muted-foreground">Sign in to continue</p>
+    <div className="h-screen w-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold text-center">Nova</h1>
+
+        <div className="flex gap-1 p-1 bg-muted/50 rounded-md">
+          <button
+            type="button"
+            onClick={() => switchMode('signin')}
+            className={`flex-1 px-3 py-1.5 rounded text-sm transition-colors ${
+              mode === 'signin'
+                ? 'bg-background shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('signup')}
+            className={`flex-1 px-3 py-1.5 rounded text-sm transition-colors ${
+              mode === 'signup'
+                ? 'bg-background shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Create account
+          </button>
+        </div>
+
+        <form onSubmit={handleEmailSubmit} className="flex flex-col gap-3">
+          {mode === 'signup' && (
+            <input
+              type="text"
+              placeholder="Display name (optional)"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              autoComplete="name"
+              disabled={busy}
+              className="px-3 py-2 rounded-md border bg-background text-sm disabled:opacity-50"
+            />
+          )}
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            required
+            disabled={busy}
+            className="px-3 py-2 rounded-md border bg-background text-sm disabled:opacity-50"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+            required
+            minLength={mode === 'signup' ? 6 : undefined}
+            disabled={busy}
+            className="px-3 py-2 rounded-md border bg-background text-sm disabled:opacity-50"
+          />
+          {mode === 'signin' && (
+            <button
+              type="button"
+              onClick={handleForgot}
+              disabled={busy}
+              className="self-end text-xs text-muted-foreground hover:underline disabled:opacity-50"
+            >
+              Forgot password?
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? '…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+
+        {resetSent && (
+          <div className="text-xs text-center text-emerald-600 dark:text-emerald-400">
+            Password reset email sent. Check your inbox.
+          </div>
+        )}
+        {error && (
+          <div className="text-xs text-center text-red-500">{error}</div>
+        )}
+
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex-1 h-px bg-border" />
+          <span>or</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
         <button
-          onClick={() => signInWithGoogle()}
-          className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:opacity-90"
+          type="button"
+          onClick={handleGoogle}
+          disabled={busy}
+          className="px-4 py-2 rounded-md border bg-background text-sm hover:bg-muted disabled:opacity-50"
         >
-          Sign in with Google
+          Continue with Google
         </button>
-        <a className="text-xs underline text-muted-foreground" href="/ide">
+
+        <a className="text-xs underline text-muted-foreground text-center" href="/ide">
           or use the standalone IDE
         </a>
       </div>
     </div>
   )
+}
+
+function humanizeAuthError(err: unknown): string {
+  const code = (err as { code?: string } | null)?.code ?? ''
+  const message = (err as { message?: string } | null)?.message ?? 'Something went wrong.'
+  switch (code) {
+    case 'auth/invalid-email':
+      return "That email address doesn't look right."
+    case 'auth/user-not-found':
+      return 'No account found with that email.'
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'Incorrect email or password.'
+    case 'auth/email-already-in-use':
+      return 'An account with that email already exists. Try signing in instead.'
+    case 'auth/weak-password':
+      return 'Password must be at least 6 characters.'
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Try again in a few minutes.'
+    case 'auth/network-request-failed':
+      return 'Network error. Check your connection.'
+    case 'auth/popup-blocked':
+      return 'Browser blocked the sign-in window. Allow pop-ups for this site.'
+    case 'auth/operation-not-allowed':
+      return 'This sign-in method is disabled. Contact support.'
+    default:
+      return message
+  }
 }
