@@ -2,6 +2,7 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   signInWithCredential,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
@@ -17,17 +18,25 @@ import { getFirebaseAuth } from './client'
 // Workaround — auth bridge:
 //   1. Main app opens /auth.html as a same-origin tab. The bridge page
 //      is served WITHOUT COOP/COEP (vite.config.ts + netlify.toml).
-//   2. Bridge runs signInWithRedirect itself — its own tab navigates to
-//      Google and back. On return, it calls getRedirectResult, posts
-//      the credential via BroadcastChannel, and closes itself.
-//   3. Main app receives the credential and calls signInWithCredential.
+//   2. The bridge runs signInWithPopup itself. Without COOP/COEP it can
+//      receive the postMessage from accounts.google.com normally. The
+//      OAuth popup spawned from the bridge is the only visible popup.
+//   3. Bridge posts the credential via BroadcastChannel and closes.
+//   4. Main app calls signInWithCredential — no popup, no COOP issue.
+//
+// signInWithRedirect was tried inside the bridge to drop the OAuth
+// popup entirely, but Firebase's redirect flow relies on cross-origin
+// state at <authDomain> that gets partitioned on localhost (and in
+// Safari/Chrome with third-party cookie restrictions). getRedirectResult
+// would return no user and we'd loop forever. The tab-as-bridge +
+// popup-for-OAuth is the robust compromise.
 //
 // The bridge is also used for any flow that pulls reCAPTCHA (password
 // reset, sign-up with Email Enumeration Protection enabled), since the
 // reCAPTCHA iframe is blocked by COEP `require-corp` in the main app.
 //
-// Pure email/password sign-in and sign-up don't need the bridge — they
-// are plain CORS fetches to identitytoolkit.googleapis.com.
+// Pure email/password sign-in, sign-up, and sendEmailVerification don't
+// need the bridge — they're plain CORS fetches.
 
 const CHANNEL = 'nova_auth'
 const TIMEOUT_MS = 5 * 60 * 1000
@@ -155,6 +164,16 @@ export async function signUpWithEmail(
   const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password)
   const trimmed = displayName?.trim()
   if (trimmed) await updateProfile(cred.user, { displayName: trimmed })
+  // Don't fail the sign-up if the verification email can't be sent —
+  // the user is signed in and can resend later from the UI.
+  try { await sendEmailVerification(cred.user) } catch { /* surfaced via unverified banner */ }
+}
+
+export async function resendVerificationEmail(): Promise<void> {
+  const user = getFirebaseAuth().currentUser
+  if (!user) throw authError('Not signed in.')
+  if (user.emailVerified) return
+  await sendEmailVerification(user)
 }
 
 export function signOut() {
