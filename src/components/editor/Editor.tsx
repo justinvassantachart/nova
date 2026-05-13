@@ -74,11 +74,9 @@ export function Editor() {
     const handleMount: OnMount = (editorInstance, monacoInstance) => {
         editorRef.current = editorInstance
 
-        // Arm clangd on first real engagement with the editor — but only if
-        // the user is actually looking at a C/C++ file. clangd's wasm is
-        // ~120 MB; opening a README or JSON shouldn't trigger that. The
-        // listeners stay registered for the editor's lifetime (Monaco tears
-        // them down with the instance).
+        // Arm clangd on first focus/keystroke, but only when the active
+        // file is C/C++ — opening a README shouldn't trigger a 120 MB
+        // download. Monaco tears these listeners down with the instance.
         const armIfCpp = () => {
             const path = useEditorStore.getState().activeFile
             if (path && isCppPath(path)) clangd.arm()
@@ -216,11 +214,9 @@ export function Editor() {
         )
     }
 
-    // Share the extension → language map with the clangd module so the
-    // Monaco language ID matches what registerClangdProviders expects.
-    // Previously this checked only .h/.cpp/.c, so .hpp/.cc/.cxx/.hxx silently
-    // fell back to plaintext and providers (registered against 'cpp'/'c')
-    // never fired on those files.
+    // Share the extension → language map with clangd so .hpp/.cc/.cxx
+    // also register as 'cpp' (previously they fell through to plaintext
+    // and providers never fired).
     const lang = monacoLanguageFor(activeFile)
 
     return (

@@ -1,19 +1,10 @@
-// React glue for the clangd LSP integration. Two design choices worth
-// flagging:
+// React glue for clangd.
 //
-// 1. **Lazy boot.** clangd's wasm is ~120 MB. We don't fetch it until the
-//    user actually interacts with the editor (focus or keystroke). The IDE
-//    becomes interactive immediately; intelligence quietly comes online in
-//    the background. Read-only flows (e.g. a teacher reviewing a submission
-//    they won't edit) never pay the download cost — the host that mounts
-//    this provider passes `enabled={false}` in those modes. Browser HTTP
-//    cache covers repeat visits; the CDN sets a short max-age but an etag,
-//    so a 304 revalidate is cheap.
-//
-// 2. **Separate lifecycle from EngineProvider.** The compiler engine runs
-//    once per "Run" click and is disposed after; clangd is long-lived and
-//    survives across runs. Keeping them in sibling providers makes that
-//    boundary obvious — neither has knowledge of the other.
+// - Lazy boot: clangd.wasm is ~120 MB. We only download it after `arm()`
+//   (called by Editor.tsx on first focus/keystroke). Hosts pass
+//   `enabled={false}` for read-only flows so it never downloads.
+// - Sibling to EngineProvider: clangd lives for the whole session, the
+//   engine is per-Run. Keeping them independent makes that easy to read.
 
 import { useMonaco } from '@monaco-editor/react'
 import {
@@ -40,20 +31,15 @@ const IDLE_STATUS: ClangdStatus = { state: 'idle' }
 const DISABLED_STATUS: ClangdStatus = { state: 'disabled' }
 
 interface ClangdContextValue {
-    /** Connected client, or null until the user arms the integration. */
     client: ClangdClient | null
-    /** Most recent status; never null. */
     status: ClangdStatus
-    /**
-     * Trigger boot on first call. Subsequent calls are no-ops. Call this from
-     * the editor on focus/keydown so we only pay the download cost when the
-     * user actually intends to write code.
-     */
+    /** First call boots; further calls are no-ops. */
     arm: () => void
 }
 
 const ClangdContext = createContext<ClangdContextValue | null>(null)
 
+// Safe stub for components rendered outside the provider.
 const NOOP_VALUE: ClangdContextValue = {
     client: null,
     status: DISABLED_STATUS,
@@ -62,13 +48,7 @@ const NOOP_VALUE: ClangdContextValue = {
 
 interface ProviderProps {
     children: ReactNode
-    /**
-     * Set false to skip clangd entirely. Defaults to the user preference
-     * resolution in `preferences.ts` (URL flag > localStorage > on). Hosts
-     * that know intelligence is unwanted (e.g. `teacher-review` mode that
-     * displays read-only submissions) should pass `false` explicitly so the
-     * 120 MB binary never downloads.
-     */
+    /** Defaults to `preferences.isClangdEnabled()`. Hosts override for read-only modes. */
     enabled?: boolean
 }
 
@@ -81,18 +61,16 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         effectivelyEnabled ? IDLE_STATUS : DISABLED_STATUS,
     )
 
-    // We hold the booted client in a ref *as well as* state so the dispose
-    // path can read it synchronously inside `useEffect`'s cleanup — setState
-    // is async and the captured `client` closure can be stale.
+    // Ref-backed because the effect cleanup needs the client synchronously
+    // — `setClient` is async, so the closed-over `client` would be stale.
     const clientRef = useRef<ClangdClient | null>(null)
 
     const arm = useCallback(() => {
         if (effectivelyEnabled) setArmed(true)
     }, [effectivelyEnabled])
 
-    // Boot exactly once, after `arm()` is called. Strict-mode-safe via
-    // `cancelled` guard — if React unmounts the effect before bootClangd
-    // resolves, we dispose whatever finished.
+    // Boot exactly once after arm(). `cancelled` keeps StrictMode tidy: if
+    // we tear down mid-boot, dispose whatever finished so no worker leaks.
     useEffect(() => {
         if (!armed || !effectivelyEnabled) return
         let cancelled = false
@@ -118,9 +96,8 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
 
         return () => {
             cancelled = true
-            // Unsubscribe BEFORE dispose so the `'disposed'` status emitted
-            // by dispose() doesn't try to setStatus on an unmounted tree —
-            // React would warn.
+            // Unsubscribe before dispose so the final 'disposed' status
+            // doesn't setState on an unmounted tree.
             unsubStatus?.()
             clientRef.current?.dispose()
             clientRef.current = null
@@ -128,8 +105,6 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         }
     }, [armed, effectivelyEnabled])
 
-    // Monaco providers come up *after* the client. Re-runs when either side
-    // mounts/swaps — in practice only when monaco hot-reloads in dev.
     useEffect(() => {
         if (!client || !monaco) return
         const disposable: IDisposable = registerClangdProviders(monaco, client)
@@ -139,19 +114,12 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
         }
     }, [client, monaco])
 
-    // Watchdog: clangd's read-only view of the FS for `#include` resolution.
-    // The editor-driven didChange path handles open files instantly; this is
-    // a slow sweep that catches the rest (explorer creates/deletes/renames)
-    // and keeps unopened headers fresh in case they get pulled in later.
-    //
-    // We track previously-synced contents so a flush only writes files that
-    // actually changed and deletes files that disappeared. Without the
-    // delete, renaming `foo.h` → `bar.h` leaves the old name in clangd's FS
-    // and silently shadows include resolution. Without the diff, every
-    // keystroke during a typing burst re-uploads every C/C++ file in the
-    // workspace.
-    //
-    // 500 ms debounce so a typing burst collapses to one flush.
+    // Workspace → clangd FS sweep. didChange already covers open files;
+    // this catches headers and explorer-driven creates/renames/deletes
+    // that didChange wouldn't see. Diff prev vs next so we only write
+    // changed files and delete paths that disappeared (renames need that
+    // — otherwise the old name lingers and shadows include resolution).
+    // 500ms debounce collapses typing bursts.
     const syncedRef = useRef<Map<string, string>>(new Map())
     useEffect(() => {
         if (!client) return
@@ -177,11 +145,9 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
             timer = setTimeout(flush, 500)
         }
         const unsub = subscribeWorkspaceChange(schedule)
-        // Initial sync in case files arrived between bootClangd and now.
-        schedule()
+        schedule() // catch files that arrived between boot and now
         return () => {
-            // If a flush was scheduled but never ran, force it through so the
-            // last keystroke before unmount isn't lost on clangd's side.
+            // Force a final flush so the last edit before unmount lands.
             if (timer) {
                 clearTimeout(timer)
                 flush()
@@ -199,10 +165,7 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
     return <ClangdContext.Provider value={value}>{children}</ClangdContext.Provider>
 }
 
-/**
- * Read the clangd context. Returns a disabled stub if no provider is mounted,
- * so callers can always safely call `arm()` without checking for null.
- */
+/** Returns NOOP_VALUE if no provider is mounted — `arm()` is always safe. */
 export function useClangd(): ClangdContextValue {
     return useContext(ClangdContext) ?? NOOP_VALUE
 }
@@ -213,14 +176,11 @@ function collectInitialFiles(): Record<string, string> {
     try {
         files = getAllFiles()
     } catch {
-        // VFS not initialised yet (initVFS runs async, in parallel with our
-        // mount). The watchdog will fire on the next workspace change and
-        // pick up the real files then.
+        // VFS hasn't initialized yet — watchdog will catch up when it does.
         return out
     }
     for (const [path, content] of Object.entries(files)) {
-        if (!isCppPath(path)) continue
-        out[path] = content
+        if (isCppPath(path)) out[path] = content
     }
     return out
 }
