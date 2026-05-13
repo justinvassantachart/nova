@@ -6,16 +6,29 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-// COOP/COEP are needed everywhere EXCEPT /auth.html (the sign-in bridge).
+// COOP `same-origin` + COEP `require-corp` are needed for SharedArrayBuffer
+// (the debugger). They also break Firebase's signInWithPopup though, because
+// the isolated context severs cross-origin postMessage from accounts.google.com.
+//
+// Resolution: serve /login (and / which redirects to it) WITHOUT isolation
+// so signInWithPopup can be called directly from the click handler, matching
+// Firebase's docs. Every other route stays isolated.
+//
+// Login.tsx forces a hard navigation to /dashboard after successful auth so
+// the new page load picks up the isolated headers. On the other end, if
+// /login mounts in an already-isolated document (e.g. signed-out from
+// /dashboard via client-side navigation), it reloads itself to flip back.
+//
 // Done via middleware instead of `server.headers` because Vite's global
 // headers run late in the pipeline and overwrite per-route overrides.
+const NON_ISOLATED_PATHS = new Set(['/', '/login'])
 function novaSecurityHeaders(): Plugin {
   return {
     name: 'nova-security-headers',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const p = req.url ? req.url.split('?')[0] : ''
-        if (p === '/auth.html') {
+        if (NON_ISOLATED_PATHS.has(p)) {
           res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none')
           res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none')
         } else {
