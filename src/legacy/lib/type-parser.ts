@@ -1,8 +1,3 @@
-// ── C++ Type AST Parser ──────────────────────────────────────────
-// Lexer and parser for C++ type signatures. Single source of truth
-// for extracting template arguments, pointer/reference qualifiers,
-// array dimensions, and base type names from DWARF type strings.
-
 export interface ParsedType {
     baseName: string;
     templateArgs: ParsedType[];
@@ -11,18 +6,45 @@ export interface ParsedType {
     isRValueReference: boolean;
     isConst: boolean;
     isVolatile: boolean;
-    arrayDims: number[]; // e.g. [10] becomes 10, [] becomes 0
+    arrayDims: number[];
 }
 
 export function tokenizeCppType(s: string): string[] {
-    const tokens = s.match(/::|[a-zA-Z_]\w*|\d+|[<>,*&()\[\]]/g) || [];
+    const tokens: string[] = [];
+    let i = 0;
+    while (i < s.length) {
+        while (i < s.length && /\s/.test(s[i])) i++;
+        if (i >= s.length) break;
+
+        if (s.startsWith('::', i)) {
+            tokens.push('::');
+            i += 2;
+            continue;
+        }
+
+        if (/[a-zA-Z_]/.test(s[i])) {
+            let start = i;
+            while (i < s.length && /[a-zA-Z0-9_]/.test(s[i])) i++;
+            tokens.push(s.substring(start, i));
+            continue;
+        }
+
+        if (/[0-9]/.test(s[i])) {
+            let start = i;
+            while (i < s.length && /[0-9]/.test(s[i])) i++;
+            tokens.push(s.substring(start, i));
+            continue;
+        }
+
+        tokens.push(s[i]);
+        i++;
+    }
     return tokens;
 }
 
 export function parseCppType(typeStr: string): ParsedType {
     const tokens = tokenizeCppType(typeStr);
     let pos = 0;
-
     function peek() { return pos < tokens.length ? tokens[pos] : null; }
     function consume() { return pos < tokens.length ? tokens[pos++] : null; }
 
@@ -30,36 +52,32 @@ export function parseCppType(typeStr: string): ParsedType {
         let isConst = false;
         let isVolatile = false;
 
-        // 1. Prefix Modifiers
-        while (peek() === 'const' || peek() === 'volatile' || peek() === 'restrict' || peek() === 'struct' || peek() === 'class' || peek() === 'enum') {
-            if (peek() === 'const') isConst = true;
-            if (peek() === 'volatile') isVolatile = true;
+        while (['const', 'volatile', 'restrict', 'struct', 'class', 'enum'].includes(peek() || '')) {
+            const p = peek();
+            if (p === 'const') isConst = true;
+            if (p === 'volatile') isVolatile = true;
             consume();
         }
 
-        // 2. Base Name
         const nameParts: string[] = [];
-        if (peek() === '::') {
-            nameParts.push(consume()!);
-        }
+        if (peek() === '::') nameParts.push(consume()!);
 
         while (peek() && /^[a-zA-Z_]\w*$/.test(peek()!)) {
             nameParts.push(consume()!);
             if (peek() === '::') {
                 nameParts.push(consume()!);
             } else if (['unsigned', 'long', 'short', 'int', 'char', 'double', 'float', 'signed'].includes(peek()!)) {
-                nameParts.push(' '); // join space for primitive modifiers
+                nameParts.push(' ');
             } else {
                 break;
             }
         }
 
         let name = nameParts.join('').replace(/\s*::\s*/g, '::').replace(/\s+/g, ' ').trim();
-        if (!name && !['const', 'volatile', '*', '&', 'restrict', '['].includes(peek() || '')) {
+        if (!name && ['const', 'volatile', '*', '&', 'restrict', '['].includes(peek() || '')) {
             if (peek()) name = consume()!;
         }
 
-        // 3. Template Arguments
         const args: ParsedType[] = [];
         if (peek() === '<') {
             consume();
@@ -78,8 +96,7 @@ export function parseCppType(typeStr: string): ParsedType {
             if (peek() === '>') consume();
         }
 
-        // 4. Suffix Modifiers
-        while (peek() === 'const' || peek() === 'volatile' || peek() === 'restrict') {
+        while (['const', 'volatile', 'restrict'].includes(peek() || '')) {
             if (peek() === 'const') isConst = true;
             if (peek() === 'volatile') isVolatile = true;
             consume();
@@ -93,7 +110,7 @@ export function parseCppType(typeStr: string): ParsedType {
             const t = consume()!;
             if (t === '*') {
                 pointerCount++;
-                while (peek() === 'const' || peek() === 'volatile' || peek() === 'restrict') consume();
+                while (['const', 'volatile', 'restrict'].includes(peek() || '')) consume();
             } else if (t === '&') {
                 if (peek() === '&') {
                     consume();
@@ -131,8 +148,6 @@ export function parseCppType(typeStr: string): ParsedType {
 
 export function stringifyCppType(type: ParsedType, dropUnimportant = true): string {
     let base = type.baseName;
-
-    // Normalize inline libc++ namespaces natively
     base = base.replace(/^std::(?:__1::|__2::)/, 'std::');
 
     if (base === 'std::basic_string' || base === 'basic_string') {
@@ -152,20 +167,16 @@ export function stringifyCppType(type: ParsedType, dropUnimportant = true): stri
     }
 
     let result = base;
-    if (args.length > 0) {
-        result += `<${args.map(a => stringifyCppType(a, dropUnimportant)).join(', ')}>`;
-    }
+    if (args.length > 0) result += `<${args.map(a => stringifyCppType(a, dropUnimportant)).join(', ')}>`;
 
     for (let i = 0; i < type.pointerCount; i++) result += '*';
     if (type.isReference) result += '&';
     if (type.isRValueReference) result += '&&';
-
     if (type.arrayDims && type.arrayDims.length > 0) {
         for (const dim of type.arrayDims) {
             result += dim === 0 ? '[]' : `[${dim}]`;
         }
     }
-
     return result;
 }
 

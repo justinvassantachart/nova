@@ -5,22 +5,24 @@ export type DrawCommand =
     | { type: 'CIRCLE'; x: number; y: number; r: number; color: string }
     | { type: 'RECT'; x: number; y: number; w: number; h: number; color: string }
 
+export type RightTab = 'variables' | 'graph' | 'canvas'
+
 interface ExecutionState {
     isCompiling: boolean
     isRunning: boolean
-    rightTab: 'canvas' | 'memory'
+    rightTab: RightTab
     drawQueue: DrawCommand[]
 
     setIsCompiling: (v: boolean) => void
     setIsRunning: (v: boolean) => void
-    setRightTab: (tab: 'canvas' | 'memory') => void
+    setRightTab: (tab: RightTab) => void
     setDrawQueue: (q: DrawCommand[]) => void
 }
 
 export const useExecutionStore = create<ExecutionState>((set) => ({
     isCompiling: false,
     isRunning: false,
-    rightTab: 'memory',
+    rightTab: 'variables',
     drawQueue: [],
 
     setIsCompiling: (v) => set({ isCompiling: v }),
