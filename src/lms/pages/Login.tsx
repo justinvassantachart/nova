@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   resetPassword,
@@ -13,7 +12,6 @@ type Mode = 'signin' | 'signup'
 
 export default function Login() {
   const { user, loading, configured } = useAuth()
-  const navigate = useNavigate()
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -23,10 +21,22 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   const [popupBlocked, setPopupBlocked] = useState(false)
 
+  // /login is configured non-isolated (no COOP/COEP) so signInWithPopup
+  // works from a direct click handler. If we arrived here via client-side
+  // navigation from an isolated route (e.g., sign-out from /dashboard),
+  // the current document is still isolated and popup auth would fail.
+  // Reload to pick up /login's unsafe-none headers from the server.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.crossOriginIsolated) window.location.reload()
+  }, [])
+
+  // After successful auth, hard-navigate to /dashboard so the new page
+  // load picks up the isolated COOP/COEP headers SharedArrayBuffer needs.
   useEffect(() => {
     if (loading) return
-    if (user) navigate('/dashboard', { replace: true })
-  }, [user, loading, navigate])
+    if (user) window.location.replace('/dashboard')
+  }, [user, loading])
 
   if (!configured) {
     return (
@@ -72,10 +82,9 @@ export default function Login() {
   }
 
   // Sync (not async) so the call stack from the click event reaches
-  // signInWithGoogle → openBridge → window.open without any `await`
-  // microtask boundary in between. That preserves the click's transient
-  // user activation, which is what most browsers require to allow a
-  // popup through, even when the user has popups globally restricted.
+  // signInWithPopup with NO `await` microtask boundary between click and
+  // popup. Required by Firebase docs and Chrome's transient activation:
+  // popups blocked otherwise.
   function handleGoogle() {
     setError(null)
     setResetSent(false)
@@ -83,7 +92,7 @@ export default function Login() {
     setBusy(true)
     signInWithGoogle()
       .catch((err) => {
-        if (errorCode(err) === 'nova/popup-blocked') {
+        if (isPopupBlocked(err)) {
           setPopupBlocked(true)
         } else {
           setError(humanizeAuthError(err))
@@ -104,7 +113,7 @@ export default function Login() {
     resetPassword(email.trim())
       .then(() => setResetSent(true))
       .catch((err) => {
-        if (errorCode(err) === 'nova/popup-blocked') {
+        if (isPopupBlocked(err)) {
           setPopupBlocked(true)
         } else {
           setError(humanizeAuthError(err))
@@ -250,5 +259,9 @@ export default function Login() {
 function errorCode(err: unknown): string | undefined {
   const code = (err as { code?: unknown } | null)?.code
   return typeof code === 'string' ? code : undefined
+}
+
+function isPopupBlocked(err: unknown): boolean {
+  return errorCode(err) === 'auth/popup-blocked'
 }
 
