@@ -6,12 +6,14 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-// COOP `same-origin` + COEP `credentialless` give crossOriginIsolated = true
-// (required for SharedArrayBuffer — the clangd LSP and the debugger worker
-// both need it) while still letting Firebase Auth's iframe and Firestore's
-// Listen channel load. `require-corp` previously broke both because Google's
-// endpoints don't ship CORP headers; `credentialless` permits cross-origin
-// no-cors fetches without requiring CORP, at the cost of stripping credentials.
+// COOP `same-origin` + COEP `require-corp` are needed for SharedArrayBuffer
+// (clangd LSP and the debugger worker both need crossOriginIsolated = true).
+// Firebase Auth iframes and Firestore's Listen channel don't ship CORP
+// headers, so they'd normally be blocked under require-corp; public/coep-sw.js
+// rewrites those responses with CORP: cross-origin so they pass the gate.
+// `credentialless` would let them through natively, but Safari (≤26.5)
+// doesn't support it and silently falls back to unsafe-none, killing
+// SharedArrayBuffer entirely.
 //
 // /login stays fully un-isolated (`unsafe-none`) so signInWithPopup can
 // postMessage to accounts.google.com directly from the click handler per
@@ -33,7 +35,7 @@ function novaSecurityHeaders(): Plugin {
           res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none')
         } else {
           res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-          res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
+          res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
         }
         next()
       })
