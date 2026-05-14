@@ -4,7 +4,8 @@ import { useEditorStore } from '@/store/editor-store'
 import { useDebugStore } from '@/store/debug-store'
 import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, getProjectId, fileExists, readFile, subscribeWorkspaceChange } from '@/vfs/volume'
-import { FileCode2 } from 'lucide-react'
+import { Codicon } from '@/components/ui/codicon'
+import { getFileIconUrl } from '@/lib/vscode-icons'
 import { useEngine } from '@/engine/EngineContext'
 import { useClangd } from '@/clangd'
 import { isCppPath, monacoLanguageFor } from '@/clangd/config'
@@ -244,7 +245,7 @@ export function Editor() {
     if (!activeFile) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-                <FileCode2 className="h-10 w-10" />
+                <Codicon name="file" size={40} />
                 <p className="text-sm">Select a file to start editing</p>
             </div>
         )
@@ -257,7 +258,7 @@ export function Editor() {
     return (
         <div className="h-full overflow-hidden bg-background flex flex-col">
             <div className="h-9 flex items-center px-3 gap-2 border-b border-border bg-[var(--color-chrome)] shrink-0">
-                <FileCode2 className="h-3.5 w-3.5 text-primary" />
+                <img src={getFileIconUrl(activeFile.split('/').pop() ?? activeFile)} className="h-3.5 w-3.5" alt="" draggable={false} />
                 <span className="text-[12px] font-mono text-foreground">
                     {activeFile.replace('/workspace/', '')}
                 </span>

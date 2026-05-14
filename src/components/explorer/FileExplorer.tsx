@@ -1,22 +1,51 @@
-import { useRef, useEffect, useState, type KeyboardEvent } from 'react'
-import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, Pencil } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
-    ContextMenu, ContextMenuContent, ContextMenuItem,
-    ContextMenuSeparator, ContextMenuTrigger,
-} from '@/components/ui/context-menu'
+    useRef, useEffect, useState, useMemo, useCallback,
+    type KeyboardEvent, type ReactNode,
+} from 'react'
 import { useFilesStore, type VFSNode } from '@/store/files-store'
 import { useEditorStore } from '@/store/editor-store'
-import { cn } from '@/lib/utils'
 import {
     readFile, createFile, createFolder, deleteItem, renameItem, fileExists,
 } from '@/vfs/volume'
 import { useIDEHost } from '@/ide-host-context'
+import { getFileIconUrl, getFolderIconUrl } from '@/lib/vscode-icons'
+import './explorer.css'
 
-// ── Inline name input (like VS Code) ───────────────────────────
-function InlineInput({ defaultValue, onSubmit, onCancel }: {
+const ROOT = '/workspace'
+const WORKSPACE_LABEL = 'Workspace'
+
+// ── Flatten the visible tree into a row list ──────────────────────
+// VS Code's tree renders the visible subset as a flat list with depth
+// metadata. We mirror that: gives O(1) keyboard nav and avoids deep
+// React subtree re-renders when a single row's selection state changes.
+
+type Row = {
+    node: VFSNode
+    depth: number
+}
+
+function flattenVisible(nodes: VFSNode[], expanded: Set<string>, depth = 0): Row[] {
+    const rows: Row[] = []
+    for (const node of nodes) {
+        rows.push({ node, depth })
+        if (node.isDirectory && expanded.has(node.path) && node.children?.length) {
+            rows.push(...flattenVisible(node.children, expanded, depth + 1))
+        }
+    }
+    return rows
+}
+
+// ── Codicon helper ────────────────────────────────────────────────
+
+function Codicon({ name, className = '' }: { name: string; className?: string }) {
+    return <span className={`codicon codicon-${name} ${className}`} aria-hidden="true" />
+}
+
+// ── Inline input (rename + create) ────────────────────────────────
+
+function InlineInput({
+    defaultValue, onSubmit, onCancel,
+}: {
     defaultValue?: string
     onSubmit: (name: string) => void
     onCancel: () => void
@@ -24,172 +53,473 @@ function InlineInput({ defaultValue, onSubmit, onCancel }: {
     const ref = useRef<HTMLInputElement>(null)
     const [value, setValue] = useState(defaultValue ?? '')
 
-    useEffect(() => { ref.current?.focus(); ref.current?.select() }, [])
+    useEffect(() => {
+        ref.current?.focus()
+        if (defaultValue) {
+            const dot = defaultValue.lastIndexOf('.')
+            ref.current?.setSelectionRange(0, dot > 0 ? dot : defaultValue.length)
+        }
+    }, [defaultValue])
 
-    const handleKey = (e: KeyboardEvent) => {
-        if (e.key === 'Enter' && value.trim()) onSubmit(value.trim())
-        if (e.key === 'Escape') onCancel()
+    const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            e.preventDefault()
+            if (value.trim()) onSubmit(value.trim())
+        } else if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+        }
     }
 
     return (
-        <Input
-            ref={ref}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKey}
-            onBlur={() => value.trim() ? onSubmit(value.trim()) : onCancel()}
-            className="h-5 text-xs px-1 py-0 rounded-sm"
-        />
+        <span className="vsx-input-wrap">
+            <input
+                ref={ref}
+                className="vsx-input"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={handleKey}
+                onBlur={() => (value.trim() ? onSubmit(value.trim()) : onCancel())}
+                spellCheck={false}
+            />
+        </span>
     )
 }
 
-// ── Single tree item ───────────────────────────────────────────
-function TreeItem({ node, depth }: { node: VFSNode; depth: number }) {
+// ── Context menu ──────────────────────────────────────────────────
+
+type MenuItem =
+    | { kind: 'item'; label: string; onClick: () => void; danger?: boolean }
+    | { kind: 'separator' }
+
+function ContextMenu({
+    x, y, items, onClose,
+}: {
+    x: number
+    y: number
+    items: MenuItem[]
+    onClose: () => void
+}) {
+    const ref = useRef<HTMLDivElement>(null)
+    useEffect(() => {
+        const onDown = (e: MouseEvent) => {
+            if (!ref.current?.contains(e.target as Node)) onClose()
+        }
+        const onKey = (e: globalThis.KeyboardEvent) => {
+            if (e.key === 'Escape') onClose()
+        }
+        window.addEventListener('mousedown', onDown)
+        window.addEventListener('keydown', onKey)
+        return () => {
+            window.removeEventListener('mousedown', onDown)
+            window.removeEventListener('keydown', onKey)
+        }
+    }, [onClose])
+
+    // Clamp to viewport so the menu doesn't bleed off the right/bottom edges.
+    const [pos, setPos] = useState({ x, y })
+    useEffect(() => {
+        const el = ref.current
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const nx = x + r.width > window.innerWidth ? window.innerWidth - r.width - 4 : x
+        const ny = y + r.height > window.innerHeight ? window.innerHeight - r.height - 4 : y
+        setPos({ x: nx, y: ny })
+    }, [x, y])
+
+    return (
+        <div ref={ref} className="vsx-context-menu" style={{ left: pos.x, top: pos.y }} role="menu">
+            {items.map((it, i) =>
+                it.kind === 'separator' ? (
+                    <div key={i} className="vsx-menu-separator" />
+                ) : (
+                    <div
+                        key={i}
+                        className={`vsx-menu-item${it.danger ? ' danger' : ''}`}
+                        role="menuitem"
+                        onClick={() => {
+                            it.onClick()
+                            onClose()
+                        }}
+                    >
+                        {it.label}
+                    </div>
+                )
+            )}
+        </div>
+    )
+}
+
+// ── Tree row ──────────────────────────────────────────────────────
+
+function TreeRow({
+    row, isExpanded, isSelected, isFocused,
+    onClick, onContextMenu, onTwistieClick, renaming, onRenameSubmit, onRenameCancel,
+}: {
+    row: Row
+    isExpanded: boolean
+    isSelected: boolean
+    isFocused: boolean
+    onClick: () => void
+    onContextMenu: (e: React.MouseEvent) => void
+    onTwistieClick: (e: React.MouseEvent) => void
+    renaming: boolean
+    onRenameSubmit: (name: string) => void
+    onRenameCancel: () => void
+}) {
+    const { node, depth } = row
+    const isDir = node.isDirectory
+    const paddingLeft = 8 + depth * 8
+
+    const iconUrl = isDir
+        ? getFolderIconUrl(node.name, isExpanded)
+        : getFileIconUrl(node.name)
+
+    return (
+        <div
+            className={`vsx-row${isSelected ? ' selected' : ''}${isFocused ? ' focused' : ''}`}
+            style={{ paddingLeft }}
+            onClick={onClick}
+            onContextMenu={onContextMenu}
+            role="treeitem"
+            aria-expanded={isDir ? isExpanded : undefined}
+            aria-level={depth + 1}
+        >
+            {depth > 0 && (
+                <span className="vsx-indent">
+                    {Array.from({ length: depth }, (_, i) => (
+                        <span key={i} className="vsx-indent-guide" />
+                    ))}
+                </span>
+            )}
+            <span
+                className={`vsx-twistie${isDir ? (isExpanded ? ' expanded' : '') : ' empty'}`}
+                onClick={isDir ? onTwistieClick : undefined}
+            >
+                {isDir && <Codicon name="chevron-right" />}
+            </span>
+            <img className="vsx-icon" src={iconUrl} alt="" draggable={false} />
+            {renaming ? (
+                <InlineInput
+                    defaultValue={node.name}
+                    onSubmit={onRenameSubmit}
+                    onCancel={onRenameCancel}
+                />
+            ) : (
+                <span className="vsx-label">{node.name}</span>
+            )}
+        </div>
+    )
+}
+
+function InlineCreateRow({
+    depth, kind, onSubmit, onCancel,
+}: {
+    depth: number
+    kind: 'file' | 'folder'
+    onSubmit: (name: string) => void
+    onCancel: () => void
+}) {
+    const iconUrl = kind === 'folder' ? getFolderIconUrl('', false) : getFileIconUrl('untitled')
+    return (
+        <div className="vsx-row" style={{ paddingLeft: 8 + depth * 8 }}>
+            {depth > 0 && (
+                <span className="vsx-indent">
+                    {Array.from({ length: depth }, (_, i) => (
+                        <span key={i} className="vsx-indent-guide" />
+                    ))}
+                </span>
+            )}
+            <span className="vsx-twistie empty" />
+            <img className="vsx-icon" src={iconUrl} alt="" draggable={false} />
+            <InlineInput onSubmit={onSubmit} onCancel={onCancel} />
+        </div>
+    )
+}
+
+// ── Explorer ──────────────────────────────────────────────────────
+
+export function FileExplorer() {
+    const files = useFilesStore((s) => s.files)
+    const expandedDirs = useFilesStore((s) => s.expandedDirs)
+    const toggleDir = useFilesStore((s) => s.toggleDir)
+    const expandDir = useFilesStore((s) => s.expandDir)
     const { activeFile, setActiveFile } = useEditorStore()
-    const { expandedDirs, toggleDir, expandDir } = useFilesStore()
-    const [renaming, setRenaming] = useState(false)
-    const [creating, setCreating] = useState<'file' | 'folder' | null>(null)
     const host = useIDEHost()
 
-    const isExpanded = expandedDirs.has(node.path)
-    const isActive = activeFile === node.path
+    const [focusedPath, setFocusedPath] = useState<string | null>(null)
+    const [renamingPath, setRenamingPath] = useState<string | null>(null)
+    // Inline create has a parent path ('' = root). Null = idle.
+    const [creating, setCreating] = useState<{ parent: string; kind: 'file' | 'folder' } | null>(null)
+    const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+    const [sectionCollapsed, setSectionCollapsed] = useState(false)
 
-    const handleClick = () => {
+    const rows = useMemo(
+        () => (sectionCollapsed ? [] : flattenVisible(files, expandedDirs)),
+        [files, expandedDirs, sectionCollapsed]
+    )
+
+    // Selection follows activeFile so opening a file from elsewhere highlights it.
+    useEffect(() => {
+        if (activeFile) setFocusedPath(activeFile)
+    }, [activeFile])
+
+    // ── Row actions ───────────────────────────────────────────────
+
+    const openOrToggle = useCallback((node: VFSNode) => {
         if (node.isDirectory) {
             toggleDir(node.path)
         } else {
             setActiveFile(node.path, readFile(node.path))
         }
-    }
+        setFocusedPath(node.path)
+    }, [toggleDir, setActiveFile])
 
-    const handleRename = (name: string) => {
+    const handleRename = useCallback((node: VFSNode, name: string) => {
         const parent = node.path.substring(0, node.path.lastIndexOf('/'))
         const newPath = `${parent}/${name}`
         if (newPath !== node.path && !fileExists(newPath)) {
             renameItem(node.path, newPath)
             host?.onEvent?.('file_rename', { from: node.path, to: newPath })
+            if (activeFile === node.path) setActiveFile(newPath, readFile(newPath))
         }
-        setRenaming(false)
-    }
+        setRenamingPath(null)
+    }, [host, activeFile, setActiveFile])
 
-    const handleDelete = () => {
+    const handleDelete = useCallback((node: VFSNode) => {
         host?.onEvent?.('file_delete', { path: node.path })
         deleteItem(node.path)
-    }
+        if (activeFile === node.path) setActiveFile('', '')
+    }, [host, activeFile, setActiveFile])
 
-    const handleCreate = (name: string) => {
-        const basePath = node.isDirectory ? node.path : node.path.substring(0, node.path.lastIndexOf('/'))
-        const newPath = `${basePath}/${name}`
+    const handleCreate = useCallback((parent: string, kind: 'file' | 'folder', name: string) => {
+        const base = parent || ROOT
+        const newPath = `${base}/${name}`
         if (!fileExists(newPath)) {
-            if (creating === 'folder') createFolder(newPath)
+            if (kind === 'folder') createFolder(newPath)
             else createFile(newPath, '')
-            host?.onEvent?.('file_create', { path: newPath, kind: creating ?? 'file' })
+            host?.onEvent?.('file_create', { path: newPath, kind })
+            if (kind === 'file') setActiveFile(newPath, '')
         }
+        if (parent) expandDir(parent)
         setCreating(null)
-        if (node.isDirectory) expandDir(node.path)
+    }, [host, expandDir, setActiveFile])
+
+    const startCreate = useCallback((parent: string, kind: 'file' | 'folder') => {
+        if (parent) expandDir(parent)
+        setCreating({ parent, kind })
+    }, [expandDir])
+
+    // ── Context menu ──────────────────────────────────────────────
+
+    const showRowMenu = (e: React.MouseEvent, node: VFSNode) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setFocusedPath(node.path)
+        const parent = node.isDirectory ? node.path : node.path.substring(0, node.path.lastIndexOf('/'))
+        setMenu({
+            x: e.clientX,
+            y: e.clientY,
+            items: [
+                { kind: 'item', label: 'New File…', onClick: () => startCreate(parent, 'file') },
+                { kind: 'item', label: 'New Folder…', onClick: () => startCreate(parent, 'folder') },
+                { kind: 'separator' },
+                { kind: 'item', label: 'Rename…', onClick: () => setRenamingPath(node.path) },
+                { kind: 'item', label: 'Delete', danger: true, onClick: () => handleDelete(node) },
+            ],
+        })
     }
 
-    const Icon = node.isDirectory ? (isExpanded ? FolderOpen : Folder) : File
-    const iconColor = node.isDirectory ? 'text-blue-400' : node.name.endsWith('.h') ? 'text-purple-400' : 'text-muted-foreground'
+    const showEmptyAreaMenu = (e: React.MouseEvent) => {
+        e.preventDefault()
+        setMenu({
+            x: e.clientX,
+            y: e.clientY,
+            items: [
+                { kind: 'item', label: 'New File…', onClick: () => startCreate('', 'file') },
+                { kind: 'item', label: 'New Folder…', onClick: () => startCreate('', 'folder') },
+            ],
+        })
+    }
 
-    return (
-        <>
-            <ContextMenu>
-                <ContextMenuTrigger asChild>
-                    <div
-                        className={cn(
-                            'flex items-center gap-1 px-2 py-0.5 cursor-pointer text-xs select-none',
-                            'hover:bg-accent/50 transition-colors',
-                            isActive && 'bg-accent text-accent-foreground',
-                        )}
-                        style={{ paddingLeft: 8 + depth * 16 }}
-                        onClick={handleClick}
-                    >
-                        {node.isDirectory && (
-                            <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', isExpanded && 'rotate-90')} />
-                        )}
-                        {!node.isDirectory && <span className="w-3" />}
-                        <Icon className={cn('h-3.5 w-3.5 shrink-0', iconColor)} />
-                        {renaming ? (
-                            <InlineInput defaultValue={node.name} onSubmit={handleRename} onCancel={() => setRenaming(false)} />
-                        ) : (
-                            <span className="truncate">{node.name}</span>
-                        )}
-                    </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-48">
-                    <ContextMenuItem onClick={() => { setCreating('file'); if (node.isDirectory) expandDir(node.path) }}>
-                        <FilePlus className="mr-2 h-3.5 w-3.5" /> New File
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={() => { setCreating('folder'); if (node.isDirectory) expandDir(node.path) }}>
-                        <FolderPlus className="mr-2 h-3.5 w-3.5" /> New Folder
-                    </ContextMenuItem>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onClick={() => setRenaming(true)}>
-                        <Pencil className="mr-2 h-3.5 w-3.5" /> Rename
-                    </ContextMenuItem>
-                    <ContextMenuItem className="text-destructive" onClick={handleDelete}>
-                        <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
-                    </ContextMenuItem>
-                </ContextMenuContent>
-            </ContextMenu>
+    // ── Keyboard nav ──────────────────────────────────────────────
 
-            {/* Children */}
-            {node.isDirectory && isExpanded && node.children?.map((child) => (
-                <TreeItem key={child.path} node={child} depth={depth + 1} />
-            ))}
+    const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+        if (!focusedPath || rows.length === 0) return
+        const idx = rows.findIndex((r) => r.node.path === focusedPath)
+        if (idx === -1) return
+        const row = rows[idx]
 
-            {/* Inline create input */}
-            {creating && (
-                <div style={{ paddingLeft: 8 + (depth + (node.isDirectory ? 1 : 0)) * 16 }} className="flex items-center gap-1 px-2 py-0.5">
-                    {creating === 'folder' ? <Folder className="h-3.5 w-3.5 text-blue-400 shrink-0" /> : <File className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                    <InlineInput onSubmit={handleCreate} onCancel={() => setCreating(null)} />
-                </div>
-            )}
-        </>
-    )
-}
-
-// ── Explorer panel ─────────────────────────────────────────────
-export function FileExplorer() {
-    const files = useFilesStore((s) => s.files)
-    const [creating, setCreating] = useState<'file' | 'folder' | null>(null)
-
-    const handleRootCreate = (name: string) => {
-        const path = `/workspace/${name}`
-        if (!fileExists(path)) {
-            if (creating === 'folder') createFolder(path)
-            else createFile(path, '')
+        switch (e.key) {
+            case 'ArrowDown':
+                e.preventDefault()
+                if (idx < rows.length - 1) setFocusedPath(rows[idx + 1].node.path)
+                break
+            case 'ArrowUp':
+                e.preventDefault()
+                if (idx > 0) setFocusedPath(rows[idx - 1].node.path)
+                break
+            case 'ArrowRight':
+                e.preventDefault()
+                if (row.node.isDirectory) {
+                    if (!expandedDirs.has(row.node.path)) toggleDir(row.node.path)
+                    else if (idx < rows.length - 1) setFocusedPath(rows[idx + 1].node.path)
+                }
+                break
+            case 'ArrowLeft':
+                e.preventDefault()
+                if (row.node.isDirectory && expandedDirs.has(row.node.path)) {
+                    toggleDir(row.node.path)
+                } else if (row.depth > 0) {
+                    for (let i = idx - 1; i >= 0; i--) {
+                        if (rows[i].depth === row.depth - 1) {
+                            setFocusedPath(rows[i].node.path)
+                            break
+                        }
+                    }
+                }
+                break
+            case 'Enter':
+                e.preventDefault()
+                openOrToggle(row.node)
+                break
+            case 'F2':
+                e.preventDefault()
+                setRenamingPath(row.node.path)
+                break
+            case 'Delete':
+            case 'Backspace':
+                e.preventDefault()
+                handleDelete(row.node)
+                break
         }
-        setCreating(null)
+    }
+
+    // ── Render rows + interleave the inline-create stub at the right depth ──
+
+    const renderedRows: ReactNode[] = []
+    if (!sectionCollapsed && creating?.parent === '') {
+        renderedRows.push(
+            <InlineCreateRow
+                key="__create_root"
+                depth={0}
+                kind={creating.kind}
+                onSubmit={(name) => handleCreate('', creating.kind, name)}
+                onCancel={() => setCreating(null)}
+            />
+        )
+    }
+    for (const row of rows) {
+        const expanded = expandedDirs.has(row.node.path)
+        const renaming = renamingPath === row.node.path
+        const isSelected = focusedPath === row.node.path
+        renderedRows.push(
+            <TreeRow
+                key={row.node.path}
+                row={row}
+                isExpanded={expanded}
+                isSelected={isSelected}
+                isFocused={isSelected}
+                onClick={() => openOrToggle(row.node)}
+                onTwistieClick={(e) => {
+                    e.stopPropagation()
+                    toggleDir(row.node.path)
+                    setFocusedPath(row.node.path)
+                }}
+                onContextMenu={(e) => showRowMenu(e, row.node)}
+                renaming={renaming}
+                onRenameSubmit={(name) => handleRename(row.node, name)}
+                onRenameCancel={() => setRenamingPath(null)}
+            />
+        )
+        if (
+            creating &&
+            row.node.isDirectory &&
+            expanded &&
+            creating.parent === row.node.path
+        ) {
+            renderedRows.push(
+                <InlineCreateRow
+                    key={`__create_${row.node.path}`}
+                    depth={row.depth + 1}
+                    kind={creating.kind}
+                    onSubmit={(name) => handleCreate(row.node.path, creating.kind, name)}
+                    onCancel={() => setCreating(null)}
+                />
+            )
+        }
     }
 
     return (
-        <div className="flex flex-col h-full bg-background">
-            <div className="nova-panel-header">
-                <span className="nova-panel-label">Explorer</span>
-                <div className="flex gap-0.5">
-                    <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => setCreating('file')}>
-                        <FilePlus className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => setCreating('folder')}>
-                        <FolderPlus className="h-3.5 w-3.5" />
-                    </Button>
-                </div>
+        <div className="vscode-explorer">
+            <div className="vsx-titlebar">
+                <span className="vsx-titlebar-label">Explorer</span>
             </div>
-            <ScrollArea className="flex-1">
-                <div className="py-1">
-                    {files.map((node) => (
-                        <TreeItem key={node.path} node={node} depth={0} />
-                    ))}
-                    {creating && (
-                        <div className="flex items-center gap-1 px-2 py-0.5" style={{ paddingLeft: 8 }}>
-                            {creating === 'folder' ? <Folder className="h-3.5 w-3.5 text-blue-400 shrink-0" /> : <File className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                            <InlineInput onSubmit={handleRootCreate} onCancel={() => setCreating(null)} />
-                        </div>
-                    )}
-                </div>
-            </ScrollArea>
+
+            <div
+                className="vsx-section-header"
+                onClick={() => setSectionCollapsed((v) => !v)}
+            >
+                <span className={`vsx-section-twistie${sectionCollapsed ? ' collapsed' : ''}`}>
+                    <Codicon name="chevron-down" />
+                </span>
+                <span className="vsx-section-title">{WORKSPACE_LABEL}</span>
+                <span className="vsx-section-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                        className="vsx-action-btn"
+                        title="New File…"
+                        onClick={() => { setSectionCollapsed(false); startCreate('', 'file') }}
+                    >
+                        <Codicon name="new-file" />
+                    </button>
+                    <button
+                        className="vsx-action-btn"
+                        title="New Folder…"
+                        onClick={() => { setSectionCollapsed(false); startCreate('', 'folder') }}
+                    >
+                        <Codicon name="new-folder" />
+                    </button>
+                    <button
+                        className="vsx-action-btn"
+                        title="Refresh Explorer"
+                        onClick={(e) => { e.stopPropagation() }}
+                    >
+                        <Codicon name="refresh" />
+                    </button>
+                    <button
+                        className="vsx-action-btn"
+                        title="Collapse Folders in Explorer"
+                        onClick={(e) => {
+                            e.stopPropagation()
+                            for (const p of [...expandedDirs]) toggleDir(p)
+                        }}
+                    >
+                        <Codicon name="collapse-all" />
+                    </button>
+                </span>
+            </div>
+
+            <div
+                className="vsx-tree"
+                tabIndex={0}
+                onKeyDown={onKeyDown}
+                onContextMenu={showEmptyAreaMenu}
+                role="tree"
+            >
+                {renderedRows}
+                {!sectionCollapsed && rows.length === 0 && !creating && (
+                    <div className="vsx-empty">No files</div>
+                )}
+            </div>
+
+            {menu && (
+                <ContextMenu
+                    x={menu.x}
+                    y={menu.y}
+                    items={menu.items}
+                    onClose={() => setMenu(null)}
+                />
+            )}
         </div>
     )
 }

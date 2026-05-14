@@ -6,15 +6,7 @@
 //   2. Time-travel — Back, Forward (replay through step history)
 //   3. Stop
 
-import {
-    FastForward,
-    Redo2,
-    ArrowDown,
-    ArrowUp,
-    SkipBack,
-    SkipForward,
-    Square,
-} from 'lucide-react'
+import { Codicon } from '@/components/ui/codicon'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Separator } from '@/components/ui/separator'
@@ -52,7 +44,7 @@ export function DebugControls() {
         {
             label: 'Continue',
             shortcut: 'F5',
-            icon: <FastForward className="h-3.5 w-3.5" />,
+            icon: <Codicon name="debug-continue" size={14} />,
             onClick: () => { host?.onEvent?.('debug_continue', {}); engine.continueExecution() },
             variant: 'default',
             disabled: !isAtLiveEdge,
@@ -60,7 +52,7 @@ export function DebugControls() {
         {
             label: 'Step Over',
             shortcut: 'F10',
-            icon: <Redo2 className="h-3.5 w-3.5" />,
+            icon: <Codicon name="debug-step-over" size={14} />,
             onClick: () => { host?.onEvent?.('debug_step_over', {}); engine.stepOver() },
             variant: 'outline',
             disabled: !isAtLiveEdge,
@@ -68,7 +60,7 @@ export function DebugControls() {
         {
             label: 'Step Into',
             shortcut: 'F11',
-            icon: <ArrowDown className="h-3.5 w-3.5" />,
+            icon: <Codicon name="debug-step-into" size={14} />,
             onClick: () => { host?.onEvent?.('debug_step_into', {}); engine.stepInto() },
             variant: 'outline',
             disabled: !isAtLiveEdge,
@@ -76,7 +68,7 @@ export function DebugControls() {
         {
             label: 'Step Out',
             shortcut: '⇧F11',
-            icon: <ArrowUp className="h-3.5 w-3.5" />,
+            icon: <Codicon name="debug-step-out" size={14} />,
             onClick: () => { host?.onEvent?.('debug_step_out', {}); engine.stepOut() },
             variant: 'outline',
             disabled: !isAtLiveEdge,
@@ -89,7 +81,7 @@ export function DebugControls() {
         {
             label: 'Back',
             shortcut: '⇧F11',
-            icon: <SkipBack className="h-3.5 w-3.5" />,
+            icon: <Codicon name="debug-step-back" size={14} />,
             onClick: () => { host?.onEvent?.('debug_step_back', {}); stepBack() },
             disabled: !canStepBack,
             variant: 'outline',
@@ -97,7 +89,7 @@ export function DebugControls() {
         {
             label: 'Forward',
             shortcut: '⇧F10',
-            icon: <SkipForward className="h-3.5 w-3.5" />,
+            icon: <Codicon name="debug-continue-small" size={14} />,
             onClick: () => { host?.onEvent?.('debug_step_forward', {}); stepForward() },
             disabled: !canStepForward,
             variant: 'outline',
@@ -121,7 +113,7 @@ export function DebugControls() {
                 action={{
                     label: 'Stop',
                     shortcut: '⇧F5',
-                    icon: <Square className="h-3.5 w-3.5" />,
+                    icon: <Codicon name="debug-stop" size={14} />,
                     onClick: () => { engine.stop(); reset(); },
                     variant: 'destructive',
                 }}
