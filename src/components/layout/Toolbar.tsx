@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Play, Square, Loader2, Bug } from 'lucide-react'
+import { Codicon } from '@/components/ui/codicon'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -59,7 +59,7 @@ export function Toolbar() {
             {/* Compiler download progress */}
             {cacheState === 'downloading' && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <Codicon name="loading" size={12} spin />
                     <span>Loading compiler…</span>
                     <Progress value={downloadProgress} className="w-24 h-1.5" />
                 </div>
@@ -99,7 +99,7 @@ export function Toolbar() {
                                     disabled={!compilerReady || isCompiling}
                                     className="bg-[oklch(0.65_0.18_145)] hover:bg-[oklch(0.7_0.18_145)] text-black gap-1 font-semibold"
                                 >
-                                    <Play className="h-3.5 w-3.5" /> Run
+                                    <Codicon name="play" size={14} /> Run
                                 </Button>
                             </span>
                         </TooltipTrigger>
@@ -117,12 +117,12 @@ export function Toolbar() {
                         disabled={!compilerReady || isCompiling}
                         className="gap-1"
                     >
-                        <Bug className="h-3.5 w-3.5 text-primary" /> Debug
+                        <Codicon name="bug" size={14} className="text-primary" /> Debug
                     </Button>
                 </div>
             ) : isRunning && debugMode !== 'paused' ? (
                 <Button size="sm" variant="destructive" onClick={handleStop} className="gap-1">
-                    <Square className="h-3.5 w-3.5" /> Stop
+                    <Codicon name="debug-stop" size={14} /> Stop
                 </Button>
             ) : null}
         </div>
