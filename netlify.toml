@@ -11,11 +11,15 @@
   for = "/*"
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"
-    # `credentialless` instead of `require-corp` so Firebase Auth's iframe
-    # and Firestore's Listen channel — which don't ship CORP headers — load
-    # without being blocked, while crossOriginIsolated stays true so the
-    # SharedArrayBuffer-backed clangd + debugger workers keep working.
-    Cross-Origin-Embedder-Policy = "credentialless"
+    # `require-corp` is needed for crossOriginIsolated → SharedArrayBuffer,
+    # which clangd and the debugger workers depend on. Firebase Auth's
+    # iframe and Firestore's Listen channel don't ship CORP headers, so
+    # they would normally be blocked under require-corp — we work around
+    # that with public/coep-sw.js, a service worker that rewrites their
+    # responses to include `Cross-Origin-Resource-Policy: cross-origin`.
+    # `credentialless` would be cleaner but Safari (≤26.5) doesn't support
+    # it and silently falls back to unsafe-none.
+    Cross-Origin-Embedder-Policy = "require-corp"
 
 # Sign-in routes: strip COOP/COEP so signInWithPopup can call
 # postMessage to accounts.google.com directly from the click handler
