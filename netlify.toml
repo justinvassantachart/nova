@@ -11,7 +11,11 @@
   for = "/*"
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"
-    Cross-Origin-Embedder-Policy = "require-corp"
+    # `credentialless` instead of `require-corp` so Firebase Auth's iframe
+    # and Firestore's Listen channel — which don't ship CORP headers — load
+    # without being blocked, while crossOriginIsolated stays true so the
+    # SharedArrayBuffer-backed clangd + debugger workers keep working.
+    Cross-Origin-Embedder-Policy = "credentialless"
 
 # Sign-in routes: strip COOP/COEP so signInWithPopup can call
 # postMessage to accounts.google.com directly from the click handler

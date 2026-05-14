@@ -6,18 +6,18 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-// COOP `same-origin` + COEP `require-corp` are needed for SharedArrayBuffer
-// (the debugger). They also break Firebase's signInWithPopup though, because
-// the isolated context severs cross-origin postMessage from accounts.google.com.
+// COOP `same-origin` + COEP `credentialless` give crossOriginIsolated = true
+// (required for SharedArrayBuffer — the clangd LSP and the debugger worker
+// both need it) while still letting Firebase Auth's iframe and Firestore's
+// Listen channel load. `require-corp` previously broke both because Google's
+// endpoints don't ship CORP headers; `credentialless` permits cross-origin
+// no-cors fetches without requiring CORP, at the cost of stripping credentials.
 //
-// Resolution: serve /login (and / which redirects to it) WITHOUT isolation
-// so signInWithPopup can be called directly from the click handler, matching
-// Firebase's docs. Every other route stays isolated.
-//
-// Login.tsx forces a hard navigation to /dashboard after successful auth so
-// the new page load picks up the isolated headers. On the other end, if
-// /login mounts in an already-isolated document (e.g. signed-out from
-// /dashboard via client-side navigation), it reloads itself to flip back.
+// /login stays fully un-isolated (`unsafe-none`) so signInWithPopup can
+// postMessage to accounts.google.com directly from the click handler per
+// Firebase's docs. Login.tsx forces a hard navigation to /dashboard after
+// successful auth so the isolated context is re-established for the
+// SharedArrayBuffer-using workers downstream.
 //
 // Done via middleware instead of `server.headers` because Vite's global
 // headers run late in the pipeline and overwrite per-route overrides.
@@ -33,7 +33,7 @@ function novaSecurityHeaders(): Plugin {
           res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none')
         } else {
           res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-          res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
+          res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
         }
         next()
       })
