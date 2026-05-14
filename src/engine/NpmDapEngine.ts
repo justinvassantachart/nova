@@ -34,12 +34,29 @@ export class NpmDapEngine implements IIDEEngine {
     public readonly onDebugResumed = new EventEmitter<void>();
     public readonly onExit = new EventEmitter<number>();
 
+    // One Engine for the lifetime of this NpmDapEngine. Engine.create
+    // allocates a Rust DapAdapter on the main thread's WASM heap, which
+    // holds a fresh DebugInfo (DWARF tree, function layouts, locations)
+    // per debug session — easily 50-100 MB. wasm-bindgen only reclaims
+    // that Rust state via FinalizationRegistry, and on Safari that fires
+    // unreliably, so creating a new Engine per run() accumulated tens of
+    // dropped-but-unfreed DapAdapters and pushed the tab to multiple GB.
+    // Reusing the Engine reuses the DapAdapter; each new debug session
+    // replaces the prior DebugInfo via Rust's Drop, capping main-thread
+    // WASM heap at one session's footprint.
     private engine: Engine | null = null;
+    private engineInit: Promise<Engine> | null = null;
+    // Tracks the in-flight `engine.run()` promise. Since we reuse one Engine
+    // across runs, a fresh run() must wait for any prior run's promise to
+    // settle — Engine.run() short-circuits to the stale promise if its
+    // internal `this.promise` field is still set.
+    private currentRun: Promise<unknown> | null = null;
     private dapSeq = 1;
     private activeBreakpoints: Record<string, number[]> = {};
     private running = false;
     private fileMap: Record<string, string> = {};
     private inputBuf = '';
+    private currentIsDebug = false;
 
     async compile(files: Record<string, string>, _isDebug: boolean): Promise<CompileResult> {
         this.onClearTerminal.emit();
@@ -73,44 +90,39 @@ export class NpmDapEngine implements IIDEEngine {
         }
     }
 
-    async run(isDebug: boolean): Promise<void> {
-        if (this.engine) this.stop();
-
-        try {
-            this.engine = await Engine.create('c' as Lang);
-            this.engine.fs = this.fileMap;
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.onStderr.emit(`\x1b[31mFailed to create engine: ${msg}\x1b[0m\r\n`);
-            this.onExit.emit(1);
-            return;
+    private async ensureEngine(): Promise<Engine> {
+        if (this.engine) return this.engine;
+        if (!this.engineInit) {
+            this.engineInit = Engine.create('c' as Lang).then((engine) => {
+                this.attachListeners(engine);
+                this.engine = engine;
+                return engine;
+            });
         }
+        return this.engineInit;
+    }
 
-        this.running = true;
-        this.dapSeq = 1;
-        this.inputBuf = '';
-
+    // Bound once when the Engine is first created, then driven by
+    // `currentIsDebug` so subsequent runs don't need to re-subscribe
+    // (which would duplicate listeners on the shared EventEmitter).
+    private attachListeners(engine: Engine) {
         const decoder = new TextDecoder();
-        this.engine.stdout.on('data', (chunk: Uint8Array) => {
+        engine.stdout.on('data', (chunk: Uint8Array) => {
             this.onStdout.emit(decoder.decode(chunk).replace(/\r?\n/g, '\r\n'));
         });
-        this.engine.stderr.on('data', (chunk: Uint8Array) => {
+        engine.stderr.on('data', (chunk: Uint8Array) => {
             this.onStderr.emit(`\x1b[31m${decoder.decode(chunk).replace(/\r?\n/g, '\r\n')}\x1b[0m`);
         });
-
-        this.engine.debugger.enabled = isDebug;
-
-        const dbg = this.engine.debugger as unknown as {
+        const dbg = engine.debugger as unknown as {
             on(event: 'event', listener: (msg: unknown) => void): void;
         };
-
         dbg.on('event', (msg: unknown) => {
             const m = msg as DapEvent | null;
             if (m?.type !== 'event') return;
 
             switch (m.event) {
                 case 'initialized':
-                    this.configureDebugger(isDebug);
+                    this.configureDebugger(this.currentIsDebug);
                     break;
                 case 'stopped':
                     this.handleStopped(m.body);
@@ -127,6 +139,33 @@ export class NpmDapEngine implements IIDEEngine {
                     break;
             }
         });
+    }
+
+    async run(isDebug: boolean): Promise<void> {
+        // Cancel any in-flight run on the shared engine, then await its
+        // settlement so Engine.run() doesn't short-circuit to the stale
+        // promise on its next call.
+        if (this.currentRun && this.engine) {
+            try { this.engine.stop(); } catch { /* ignore */ }
+            try { await this.currentRun; } catch { /* ignore */ }
+        }
+
+        let engine: Engine;
+        try {
+            engine = await this.ensureEngine();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.onStderr.emit(`\x1b[31mFailed to create engine: ${msg}\x1b[0m\r\n`);
+            this.onExit.emit(1);
+            return;
+        }
+
+        engine.fs = this.fileMap;
+        engine.debugger.enabled = isDebug;
+        this.currentIsDebug = isDebug;
+        this.running = true;
+        this.dapSeq = 1;
+        this.inputBuf = '';
 
         this.dapSend('initialize', {
             clientID: 'nova-ide',
@@ -137,17 +176,19 @@ export class NpmDapEngine implements IIDEEngine {
             supportsVariableType: true,
         });
 
+        const runPromise = engine.run();
+        this.currentRun = runPromise;
         try {
-            const result = await this.engine.run();
+            const result = await runPromise;
             if (result.type === 'completed') {
-                this.onExit.emit(result.exitCode);
                 this.running = false;
+                this.onExit.emit(result.exitCode);
             }
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             this.onStderr.emit(`\x1b[31mRuntime error: ${msg}\x1b[0m\r\n`);
         } finally {
-            this.engine = null;
+            if (this.currentRun === runPromise) this.currentRun = null;
             if (this.running) {
                 this.running = false;
                 this.onExit.emit(0);
@@ -398,13 +439,10 @@ export class NpmDapEngine implements IIDEEngine {
     }
 
     stop(): void {
+        // Stop the in-flight run but keep the Engine so the next run() reuses
+        // the same Rust DapAdapter instead of allocating a new one.
         if (this.engine) {
-            try {
-                this.engine.stop();
-            } catch {
-                // ignore
-            }
-            this.engine = null;
+            try { this.engine.stop(); } catch { /* ignore */ }
         }
         if (this.running) {
             this.running = false;
@@ -422,7 +460,8 @@ export class NpmDapEngine implements IIDEEngine {
     //   ⌫   → erase last char in buffer + visible echo
     //   esc → swallow CSI sequences (arrow keys etc.) so they don't enter the buffer
     writeStdin(data: string): void {
-        if (!this.engine) return;
+        // Engine is now long-lived, so gate on `running` to reject stdin between runs.
+        if (!this.engine || !this.running) return;
         if (data === '\x03') {
             this.onStdout.emit('^C\r\n');
             this.stop();
