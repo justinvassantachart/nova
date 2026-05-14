@@ -3,7 +3,7 @@ import type { editor } from 'monaco-editor'
 import { useEditorStore } from '@/store/editor-store'
 import { useDebugStore } from '@/store/debug-store'
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { writeFile, getProjectId, fileExists, readFile } from '@/vfs/volume'
+import { writeFile, getProjectId, fileExists, readFile, subscribeWorkspaceChange } from '@/vfs/volume'
 import { FileCode2 } from 'lucide-react'
 import { useEngine } from '@/engine/EngineContext'
 import { useClangd } from '@/clangd'
@@ -47,6 +47,43 @@ export function Editor() {
         if (model.getValue() === activeFileContent) return
         model.setValue(activeFileContent)
     }, [activeFile, activeFileContent, monaco])
+
+    // Dispose Monaco models for files that no longer exist in the VFS.
+    // Monaco caches one ITextModel per URI for the lifetime of the editor
+    // instance — without an explicit sweep, every file ever opened (or
+    // every starter-file path across every assignment the user visits)
+    // accumulates in memory, since the model holds the full text buffer
+    // plus tokenization state. The workspace-change event fires on every
+    // VFS mutation, including the initVFS re-bootstrap when assignments
+    // switch, so this runs at the right moments without extra plumbing.
+    useEffect(() => {
+        if (!monaco) return
+        const sweep = () => {
+            for (const model of monaco.editor.getModels()) {
+                const path = model.uri.path
+                if (!path.startsWith('/workspace/')) continue
+                if (fileExists(path)) continue
+                model.dispose()
+                decoIdsByPath.current.delete(path)
+                delete lastEditEmit.current[path]
+                const t = syncTimers.current[path]
+                if (t) {
+                    clearTimeout(t)
+                    delete syncTimers.current[path]
+                }
+            }
+        }
+        return subscribeWorkspaceChange(sweep)
+    }, [monaco])
+
+    // Clear any pending OPFS sync timers when the editor unmounts so they
+    // don't fire against a torn-down VFS / project ID.
+    useEffect(() => {
+        const timers = syncTimers.current
+        return () => {
+            for (const id of Object.values(timers)) clearTimeout(id)
+        }
+    }, [])
 
     useEffect(() => {
         if (debugMode === 'paused' && currentFile && currentLine !== null) {
