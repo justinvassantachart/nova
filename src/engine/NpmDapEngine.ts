@@ -1,5 +1,10 @@
 import { EventEmitter } from '@/lib/event-emitter';
-import { Engine, type Lang } from 'debugger-sh';
+// debugger-sh is imported lazily inside ensureEngine(). Importing it at
+// module load fires off ~80 MB of cross-origin prefetches for llvm.core.wasm
+// and llvm-resources.tar.gz from fabioibanez.github.io, inlines an
+// 8.6 MB wasm asset, and materialises the worker blob URL — all before
+// the user has even pressed Run. Deferring keeps page-open cost flat.
+import type { Engine as EngineType, Lang } from 'debugger-sh';
 import type {
     IIDEEngine,
     CompileResult,
@@ -44,8 +49,8 @@ export class NpmDapEngine implements IIDEEngine {
     // Reusing the Engine reuses the DapAdapter; each new debug session
     // replaces the prior DebugInfo via Rust's Drop, capping main-thread
     // WASM heap at one session's footprint.
-    private engine: Engine | null = null;
-    private engineInit: Promise<Engine> | null = null;
+    private engine: EngineType | null = null;
+    private engineInit: Promise<EngineType> | null = null;
     // Tracks the in-flight `engine.run()` promise. Since we reuse one Engine
     // across runs, a fresh run() must wait for any prior run's promise to
     // settle — Engine.run() short-circuits to the stale promise if its
@@ -90,14 +95,16 @@ export class NpmDapEngine implements IIDEEngine {
         }
     }
 
-    private async ensureEngine(): Promise<Engine> {
+    private async ensureEngine(): Promise<EngineType> {
         if (this.engine) return this.engine;
         if (!this.engineInit) {
-            this.engineInit = Engine.create('c' as Lang).then((engine) => {
-                this.attachListeners(engine);
-                this.engine = engine;
-                return engine;
-            });
+            this.engineInit = import('debugger-sh').then(({ Engine }) =>
+                Engine.create('c' as Lang).then((engine) => {
+                    this.attachListeners(engine);
+                    this.engine = engine;
+                    return engine;
+                }),
+            );
         }
         return this.engineInit;
     }
@@ -105,7 +112,7 @@ export class NpmDapEngine implements IIDEEngine {
     // Bound once when the Engine is first created, then driven by
     // `currentIsDebug` so subsequent runs don't need to re-subscribe
     // (which would duplicate listeners on the shared EventEmitter).
-    private attachListeners(engine: Engine) {
+    private attachListeners(engine: EngineType) {
         const decoder = new TextDecoder();
         engine.stdout.on('data', (chunk: Uint8Array) => {
             this.onStdout.emit(decoder.decode(chunk).replace(/\r?\n/g, '\r\n'));
@@ -150,7 +157,7 @@ export class NpmDapEngine implements IIDEEngine {
             try { await this.currentRun; } catch { /* ignore */ }
         }
 
-        let engine: Engine;
+        let engine: EngineType;
         try {
             engine = await this.ensureEngine();
         } catch (err) {
