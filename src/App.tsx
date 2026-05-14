@@ -22,12 +22,17 @@ export default function App() {
     // teacher-review is ephemeral: we always re-seed from the latest Firestore
     // snapshot and skip OPFS so a prior visit's cached files don't shadow a
     // student's newer edits.
+    //
+    // The project ID composes assignmentId AND submissionId because submissionId
+    // is the student's uid — identical across every assignment that student opens.
+    // Keying OPFS on submissionId alone makes one assignment's cached code shadow
+    // the starter files of the next.
     useEffect(() => {
         const ephemeral = host?.mode === 'teacher-review'
-        const projectId = host?.submissionId
-            ? `submission:${host.submissionId}`
-            : host?.assignmentId
-            ? `assignment:${host.assignmentId}`
+        const projectId = host?.assignmentId
+            ? host.submissionId
+                ? `submission:${host.assignmentId}:${host.submissionId}`
+                : `assignment:${host.assignmentId}`
             : 'default-project'
         initVFS({ projectId, initialFiles: host?.initialFiles, ephemeral })
     }, [host?.mode, host?.assignmentId, host?.submissionId, host?.initialFiles])

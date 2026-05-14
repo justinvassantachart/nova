@@ -7,17 +7,19 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 // COOP `same-origin` + COEP `require-corp` are needed for SharedArrayBuffer
-// (the debugger). They also break Firebase's signInWithPopup though, because
-// the isolated context severs cross-origin postMessage from accounts.google.com.
+// (clangd LSP and the debugger worker both need crossOriginIsolated = true).
+// Firebase Auth iframes and Firestore's Listen channel don't ship CORP
+// headers, so they'd normally be blocked under require-corp; public/coep-sw.js
+// rewrites those responses with CORP: cross-origin so they pass the gate.
+// `credentialless` would let them through natively, but Safari (≤26.5)
+// doesn't support it and silently falls back to unsafe-none, killing
+// SharedArrayBuffer entirely.
 //
-// Resolution: serve /login (and / which redirects to it) WITHOUT isolation
-// so signInWithPopup can be called directly from the click handler, matching
-// Firebase's docs. Every other route stays isolated.
-//
-// Login.tsx forces a hard navigation to /dashboard after successful auth so
-// the new page load picks up the isolated headers. On the other end, if
-// /login mounts in an already-isolated document (e.g. signed-out from
-// /dashboard via client-side navigation), it reloads itself to flip back.
+// /login stays fully un-isolated (`unsafe-none`) so signInWithPopup can
+// postMessage to accounts.google.com directly from the click handler per
+// Firebase's docs. Login.tsx forces a hard navigation to /dashboard after
+// successful auth so the isolated context is re-established for the
+// SharedArrayBuffer-using workers downstream.
 //
 // Done via middleware instead of `server.headers` because Vite's global
 // headers run late in the pipeline and overwrite per-route overrides.
