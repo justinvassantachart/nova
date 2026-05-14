@@ -3,6 +3,8 @@ import type { DebugPauseState, MemorySnapshot, StackFrame } from '@/engine/IIDEE
 
 export type DebugMode = 'idle' | 'compiling' | 'running' | 'paused'
 
+const MAX_STEP_HISTORY = 250
+
 export interface DebugState {
     debugMode: DebugMode
     currentLine: number | null
@@ -47,10 +49,15 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         const s = get()
         const history = s.stepIndex >= 0 ? s.stepHistory.slice(0, s.stepIndex + 1) : [...s.stepHistory]
         history.push(state)
-        set({ 
-            stepHistory: history, stepIndex: -1, 
-            currentLine: state.line, currentFunc: state.func, currentFile: state.file, 
-            callStack: state.callStack, memorySnapshot: state.memorySnapshot, debugMode: 'paused' 
+        // Each entry carries the full callStack + heap snapshot, so an
+        // infinite-loop bug can otherwise grow this array without bound.
+        if (history.length > MAX_STEP_HISTORY) {
+            history.splice(0, history.length - MAX_STEP_HISTORY)
+        }
+        set({
+            stepHistory: history, stepIndex: -1,
+            currentLine: state.line, currentFunc: state.func, currentFile: state.file,
+            callStack: state.callStack, memorySnapshot: state.memorySnapshot, debugMode: 'paused'
         })
     },
     
