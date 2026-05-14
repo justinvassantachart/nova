@@ -1,4 +1,5 @@
 import './index.css'
+import '@vscode/codicons/dist/codicon.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
