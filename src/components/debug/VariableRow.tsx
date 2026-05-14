@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { Codicon } from '@/components/ui/codicon'
 import type { VariableNode } from '@/engine/IIDEEngine'
 
 export type VariableRowProps = {
@@ -43,8 +43,10 @@ export function VariableRow({ variable, depth, resolvePointer }: VariableRowProp
                 }}
                 title={variable.address > 0 ? `0x${variable.address.toString(16).padStart(8, '0')}` : undefined}
             >
-                <ChevronRight
-                    className="h-3 w-3 shrink-0 text-muted-foreground transition-transform"
+                <Codicon
+                    name="chevron-right"
+                    size={12}
+                    className="shrink-0 text-muted-foreground transition-transform"
                     style={{
                         visibility: expandable ? 'visible' : 'hidden',
                         transform: expanded ? 'rotate(90deg)' : undefined,
