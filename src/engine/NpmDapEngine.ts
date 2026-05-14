@@ -189,7 +189,6 @@ export class NpmDapEngine implements IIDEEngine {
     private handleStopped(body: Any) {
         const threadId = body?.threadId ?? 1;
         const stackRes = this.dapSend('stackTrace', { threadId });
-        console.log('[NpmDapEngine] stackTrace response:', stackRes);
         const frames: Any[] = stackRes?.body?.stackFrames ?? [];
 
         const callStack: StackFrame[] = [];
@@ -221,7 +220,6 @@ export class NpmDapEngine implements IIDEEngine {
                     // The engine returns the pointer's own storage address in `value`,
                     // not the target. Dereference through children to get the actual target.
                     const varsRes = this.dapSend('variables', { variablesReference });
-                    console.log('[NpmDapEngine] variables response (pointer):', varsRes);
                     const dapVars: Any[] = varsRes?.body?.variables ?? [];
                     if (dapVars.length > 0) {
                         pointsTo = parseAddr(dapVars[0]);
@@ -240,7 +238,6 @@ export class NpmDapEngine implements IIDEEngine {
             } else if (hasChildren && !visitedRefs.has(variablesReference)) {
                 visitedRefs.add(variablesReference);
                 const varsRes = this.dapSend('variables', { variablesReference });
-                console.log('[NpmDapEngine] variables response (struct/hasChildren):', varsRes);
                 const dapVars: Any[] = varsRes?.body?.variables ?? [];
                 members = dapVars.map((child) => processVariable(child, isHeap));
             }
@@ -272,12 +269,10 @@ export class NpmDapEngine implements IIDEEngine {
         for (let i = 0; i < frames.length; i++) {
             const f = frames[i];
             const scopesRes = this.dapSend('scopes', { frameId: f.id });
-            console.log('[NpmDapEngine] scopes response:', scopesRes);
             const variables: VariableNode[] = [];
 
             for (const scope of scopesRes?.body?.scopes ?? []) {
                 const varsRes = this.dapSend('variables', { variablesReference: scope.variablesReference });
-                console.log('[NpmDapEngine] variables response (scope):', varsRes);
                 for (const v of varsRes?.body?.variables ?? []) {
                     variables.push(processVariable(v, false));
                 }
@@ -316,7 +311,6 @@ export class NpmDapEngine implements IIDEEngine {
             heapNodeCount++;
 
             const varsRes = this.dapSend('variables', { variablesReference: item.variablesReference });
-            console.log('[NpmDapEngine] variables response (heap):', varsRes);
             let dapVars: Any[] = varsRes?.body?.variables ?? [];
 
             // Some DAP implementations return a single element named "*varname" when requesting variables of a pointer.
@@ -325,7 +319,6 @@ export class NpmDapEngine implements IIDEEngine {
                 const derefVar = dapVars[0];
                 if (derefVar.variablesReference > 0) {
                     const innerRes = this.dapSend('variables', { variablesReference: derefVar.variablesReference });
-                    console.log('[NpmDapEngine] variables response (heap inner):', innerRes);
                     if (innerRes?.body?.variables) {
                         dapVars = innerRes.body.variables;
                     }
