@@ -17,6 +17,15 @@ import { useIDEHost } from '@/ide-host-context'
 export default function App() {
     const host = useIDEHost()
 
+    // Safety: if we landed here via client-side navigation from a non-isolated
+    // route (like /), SharedArrayBuffer will be missing. Force a reload to
+    // pick up the COOP/COEP headers from the server.
+    useEffect(() => {
+        if (!window.crossOriginIsolated) {
+            window.location.reload()
+        }
+    }, [])
+
     // Bootstrap VFS with a per-host project ID so OPFS namespaces are isolated
     // across assignments. Re-runs when the host's assignment/submission changes.
     // teacher-review is ephemeral: we always re-seed from the latest Firestore
