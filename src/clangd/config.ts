@@ -6,7 +6,7 @@
 // point at your own host (e.g. a forked deployment) or back at the
 // upstream `https://clangd.guyutongxue.site/wasm` for testing.
 
-const DEFAULT_BASE = 'https://nova-clangd-cdn.simplecore.workers.dev/clangd/21.1.0'
+const DEFAULT_BASE = 'https://nova-clangd-cdn.simplecore.workers.dev/clangd/21.1.0-1.25gb'
 
 // Coerce empty strings to undefined so an unset `VITE_CLANGD_WASM_URL=`
 // in .env doesn't silently bypass the default.
@@ -22,7 +22,7 @@ export const CLANGD_JS_URL = jsOverride ?? `${DEFAULT_BASE}/clangd.js`
 // Cache API key. Bump when the wasm/js pair changes (different clangd
 // build, new sysroot, etc.) so existing users refetch once. Prefix is
 // shared so `purgeOldClangdCaches` finds stale entries from prior keys.
-export const CLANGD_CACHE_KEY = 'clangd-21.1.0-r2'
+export const CLANGD_CACHE_KEY = 'clangd-21.1.0-1.25gb'
 export const CLANGD_CACHE_PREFIX = 'clangd-'
 
 export const WORKSPACE_PATH = '/workspace'
