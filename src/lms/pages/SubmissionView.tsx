@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import App from '@/App'
 import { IDEHostProvider } from '@/ide-host-context'
-import type { IDEHost } from '@/ide-host'
+import { AssignmentInfoProvider } from '@/components/sidebar/assignment-info-context'
+import type { IDEHost, AssignmentInfo } from '@/ide-host'
 import { UserMenu } from '@/lms/components/UserMenu'
 import { useAuth } from '@/shared/context/AuthProvider'
 import { useClass } from '@/lms/hooks/useClasses'
@@ -42,6 +43,20 @@ export default function SubmissionView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignmentId, studentUid, submission?.studentUid])
+
+  const assignmentInfo = useMemo<AssignmentInfo | null>(() => {
+    if (!assignment || !submission) return null
+    return {
+      title: assignment.title,
+      description: [
+        submission.studentDisplayName || submission.studentEmail || submission.studentUid,
+        submission.submittedAt ? 'Submitted' : 'In progress',
+      ].join(' · '),
+      isTeacher: true,
+      submitted: submission.submittedAt != null,
+      onBack: () => navigate(`/classes/${classId}/assignments/${assignmentId}`),
+    }
+  }, [assignment, submission, classId, assignmentId, navigate])
 
   if (cLoading || aLoading || sLoading) {
     return (
@@ -108,7 +123,13 @@ export default function SubmissionView() {
       <div className="flex-1 min-h-0">
         {host && (
           <IDEHostProvider host={host}>
-            <App />
+            {assignmentInfo ? (
+              <AssignmentInfoProvider info={assignmentInfo}>
+                <App />
+              </AssignmentInfoProvider>
+            ) : (
+              <App />
+            )}
           </IDEHostProvider>
         )}
       </div>
