@@ -1,9 +1,11 @@
-import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/shared/context/AuthProvider'
 
 export default function RootRedirect() {
   const { user, loading, configured } = useAuth()
-  if (!configured) return <Navigate to="/ide" replace />
+  if (!configured) {
+    window.location.replace('/ide')
+    return null
+  }
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center text-sm text-muted-foreground">
@@ -11,6 +13,10 @@ export default function RootRedirect() {
       </div>
     )
   }
-  if (!user) return <Navigate to="/login" replace />
-  return <Navigate to="/dashboard" replace />
+  if (!user) {
+    window.location.replace('/login')
+    return null
+  }
+  window.location.replace('/dashboard')
+  return null
 }
