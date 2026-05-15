@@ -1,8 +1,8 @@
-/* VS Code Dark Modern file explorer — pixel-faithful port.
+/* VS Code Modern file explorer — pixel-faithful port.
    All tokens scoped to .vscode-explorer so this drop doesn't leak into the
-   rest of nova until we want it to. Values lifted directly from the
-   microsoft/vscode source: extensions/theme-defaults/themes/dark_modern.json
-   and the dark fallbacks in src/vs/platform/theme/common/colors/*.ts. */
+   rest of nova until we want it to. Dark values lifted from
+   microsoft/vscode/extensions/theme-defaults/themes/dark_modern.json; light
+   overrides from light_modern.json (under [data-theme="light"]). */
 
 .vscode-explorer {
     /* Surfaces */
@@ -38,6 +38,18 @@
     --vsx-menu-border: #454545;
     --vsx-icon-foreground: #cccccc;
     --vsx-descriptionForeground: #9d9d9d;
+
+    /* Action button hover/active — split out so the light theme can flip
+       the alpha from white-on-dark to black-on-light. */
+    --vsx-action-hover: rgba(255, 255, 255, 0.08);
+    --vsx-action-active: rgba(255, 255, 255, 0.12);
+
+    /* Tree scrollbar — same pattern. */
+    --vsx-scrollbar-thumb: rgba(121, 121, 121, 0.4);
+    --vsx-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
+
+    /* Danger row hover (delete confirmation) */
+    --vsx-menu-danger-hover: #5a1d1d;
 
     display: flex;
     flex-direction: column;
@@ -131,10 +143,10 @@
     padding: 0;
 }
 .vsx-action-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--vsx-action-hover);
 }
 .vsx-action-btn:active {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--vsx-action-active);
 }
 .vsx-action-btn .codicon {
     font-size: 16px;
@@ -156,10 +168,10 @@
     background: transparent;
 }
 .vsx-tree::-webkit-scrollbar-thumb {
-    background: rgba(121, 121, 121, 0.4);
+    background: var(--vsx-scrollbar-thumb);
 }
 .vsx-tree::-webkit-scrollbar-thumb:hover {
-    background: rgba(100, 100, 100, 0.7);
+    background: var(--vsx-scrollbar-thumb-hover);
 }
 
 .vsx-row {
@@ -301,7 +313,7 @@
     color: #ffffff;
 }
 .vsx-menu-item.danger:hover {
-    background: #5a1d1d;
+    background: var(--vsx-menu-danger-hover);
     color: #ffffff;
 }
 .vsx-menu-separator {
@@ -316,4 +328,46 @@
     padding: 4px 20px;
     color: var(--vsx-descriptionForeground);
     font-size: 13px;
+}
+
+/* ── Light theme overrides ───────────────────────────────────────── */
+
+[data-theme="light"] .vscode-explorer {
+    --vsx-sideBar-background: #f8f8f8;
+    --vsx-sideBar-foreground: #1f1f1f;
+    --vsx-sideBar-border: #e5e5e5;
+    --vsx-sideBarSectionHeader-background: #f8f8f8;
+    --vsx-sideBarSectionHeader-foreground: #1f1f1f;
+    --vsx-sideBarSectionHeader-border: #e5e5e5;
+
+    --vsx-list-hoverBackground: #e8e8e8;
+    --vsx-list-hoverForeground: #1f1f1f;
+    --vsx-list-activeSelectionBackground: #0060c0;
+    --vsx-list-activeSelectionForeground: #ffffff;
+    --vsx-list-inactiveSelectionBackground: #e4e6f1;
+    --vsx-list-inactiveSelectionForeground: #1f1f1f;
+    --vsx-list-focusOutline: #005fb8;
+    --vsx-list-dropBackground: #cce5ff;
+
+    --vsx-tree-indentGuidesStroke: #a9a9a9;
+    --vsx-tree-inactiveIndentGuidesStroke: rgba(169, 169, 169, 0.4);
+
+    --vsx-input-background: #ffffff;
+    --vsx-input-border: #cecece;
+    --vsx-input-foreground: #1f1f1f;
+    --vsx-focusBorder: #005fb8;
+    --vsx-menu-background: #ffffff;
+    --vsx-menu-foreground: #1f1f1f;
+    --vsx-menu-selectionBackground: #005fb8;
+    --vsx-menu-border: #cecece;
+    --vsx-icon-foreground: #1f1f1f;
+    --vsx-descriptionForeground: #717171;
+
+    --vsx-action-hover: rgba(0, 0, 0, 0.06);
+    --vsx-action-active: rgba(0, 0, 0, 0.12);
+
+    --vsx-scrollbar-thumb: rgba(100, 100, 100, 0.4);
+    --vsx-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
+
+    --vsx-menu-danger-hover: #d13438;
 }

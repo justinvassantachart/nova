@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { zipSync, strToU8 } from 'fflate'
 import App from '@/App'
 import { IDEHostProvider } from '@/ide-host-context'
-import type { IDEHost } from '@/ide-host'
+import { AssignmentInfoProvider } from '@/components/sidebar/assignment-info-context'
+import type { IDEHost, AssignmentInfo } from '@/ide-host'
 import { UserMenu } from '@/lms/components/UserMenu'
 import { useAuth } from '@/shared/context/AuthProvider'
 import { useClass } from '@/lms/hooks/useClasses'
@@ -68,72 +69,48 @@ function TeacherView({
   const navigate = useNavigate()
   const [tab, setTab] = useState<'starter' | 'submissions'>('starter')
 
-  // Local mirrors for the title/description so typing is responsive;
-  // patch back to Firestore on blur.
-  const [title, setTitle] = useState('')
-  const [desc, setDesc] = useState('')
-  const initialized = useRef(false)
-  useEffect(() => {
-    if (initialized.current) return
-    setTitle(assignment.title)
-    setDesc(assignment.description ?? '')
-    initialized.current = true
-  }, [assignment])
-
   const onEvent = useFirestoreEventSink({ uid: user?.uid, assignmentId })
 
-  const host = useMemo<IDEHost | null>(() => {
-    return {
-      mode: 'teacher-edit',
-      assignmentId,
-      initialFiles: assignment.starterFiles,
-      onWorkspaceChange: (files) => {
-        saveStarterFiles(classId, assignmentId, files).catch((e) =>
-          console.warn('[AssignmentPage] save starter failed', e),
-        )
-      },
-      onEvent,
-    }
-    // We intentionally only seed initialFiles once on first load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classId, assignmentId])
+  // Host identity is frozen on first mount so live Firestore updates to
+  // starterFiles don't reseed the IDE and clobber teacher edits.
+  const host = useMemo<IDEHost>(() => ({
+    mode: 'teacher-edit',
+    assignmentId,
+    initialFiles: assignment.starterFiles,
+    onWorkspaceChange: (files) => {
+      saveStarterFiles(classId, assignmentId, files).catch((e) =>
+        console.warn('[AssignmentPage] save starter failed', e),
+      )
+    },
+    onEvent,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [classId, assignmentId])
 
-  async function togglePublish() {
-    await updateAssignmentMeta(classId, assignmentId, { published: !assignment.published })
-  }
+  // Assignment metadata is a separate context — it can re-render freely
+  // on every Firestore push without disturbing the host channel.
+  const assignmentInfo = useMemo<AssignmentInfo>(() => ({
+    title: assignment.title,
+    description: assignment.description ?? '',
+    isTeacher: true,
+    published: assignment.published,
+    onBack: () => navigate(`/classes/${classId}`),
+    onTogglePublish: () => {
+      void updateAssignmentMeta(classId, assignmentId, { published: !assignment.published })
+    },
+    onTitleChange: (title) => {
+      void updateAssignmentMeta(classId, assignmentId, { title })
+    },
+    onDescriptionChange: (description) => {
+      void updateAssignmentMeta(classId, assignmentId, { description })
+    },
+  }), [assignment.title, assignment.description, assignment.published, classId, assignmentId, navigate])
 
   return (
     <div className="h-screen w-screen flex flex-col">
-      <header className="border-b px-4 py-2 flex items-center gap-3">
-        <button onClick={() => navigate(`/classes/${classId}`)} className="text-sm underline">
-          ← Back
-        </button>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => title !== assignment.title && updateAssignmentMeta(classId, assignmentId, { title })}
-          placeholder="Assignment title"
-          className="font-semibold bg-transparent border-b border-transparent focus:border-border outline-none px-1"
-        />
-        <input
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-          onBlur={() => desc !== assignment.description && updateAssignmentMeta(classId, assignmentId, { description: desc })}
-          placeholder="Short description (shown to students)"
-          className="flex-1 text-sm bg-transparent border-b border-transparent focus:border-border outline-none px-1"
-        />
-        <button
-          onClick={togglePublish}
-          className={
-            'px-3 py-1 rounded-md text-xs ' +
-            (assignment.published
-              ? 'bg-green-600/20 text-green-300 border border-green-700'
-              : 'bg-muted text-muted-foreground border')
-          }
-        >
-          {assignment.published ? 'Published' : 'Unpublished'}
-        </button>
-        <UserMenu />
+      <header className="border-b px-3 py-1 flex items-center gap-3 h-10">
+        <div className="ml-auto">
+          <UserMenu />
+        </div>
       </header>
       <div className="border-b px-4 flex items-center gap-1 text-sm">
         <TabButton active={tab === 'starter'} onClick={() => setTab('starter')}>
@@ -145,8 +122,10 @@ function TeacherView({
       </div>
       <div className="flex-1 min-h-0">
         {tab === 'starter' && (
-          <IDEHostProvider host={host!}>
-            <App />
+          <IDEHostProvider host={host}>
+            <AssignmentInfoProvider info={assignmentInfo}>
+              <App />
+            </AssignmentInfoProvider>
           </IDEHostProvider>
         )}
         {tab === 'submissions' && (
@@ -289,11 +268,7 @@ function StudentView({
 
   // Build host once submission is ready. Freeze identity within a single
   // assignment so live Firestore updates (submittedAt, etc.) don't
-  // re-bootstrap the IDE and clobber the student's in-progress edits. The
-  // dep tracks `submission?.assignmentId` rather than `submission !== null`
-  // so that navigating to a different assignment — where `submission` is
-  // briefly the previous assignment's data — doesn't seed the new IDE mount
-  // with the old assignment's starter files.
+  // re-bootstrap the IDE and clobber the student's in-progress edits.
   const host = useMemo<IDEHost | null>(() => {
     if (!user || !submission) return null
     if (submission.assignmentId !== assignmentId) return null
@@ -312,7 +287,7 @@ function StudentView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId, assignmentId, user?.uid, submission?.assignmentId])
 
-  async function handleSubmit() {
+  const handleSubmit = async () => {
     if (!user) return
     setSubmitting(true)
     try {
@@ -322,6 +297,21 @@ function StudentView({
     }
   }
 
+  const submitted = submission?.submittedAt != null
+
+  const assignmentInfo = useMemo<AssignmentInfo>(() => ({
+    title: assignment.title,
+    description: assignment.description ?? '',
+    isTeacher: false,
+    submitted,
+    onBack: () => navigate(`/classes/${classId}`),
+    onSubmit: submitting ? undefined : handleSubmit,
+    onDownload: submission?.files
+      ? () => downloadZip(`${assignment.title || 'submission'}.zip`, submission.files)
+      : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [assignment.title, assignment.description, submitted, submission?.files, submitting, classId, navigate])
+
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center text-sm text-muted-foreground">
@@ -330,43 +320,19 @@ function StudentView({
     )
   }
 
-  const submitted = submission?.submittedAt != null
-
   return (
     <div className="h-screen w-screen flex flex-col">
-      <header className="border-b px-4 py-2 flex items-center gap-3">
-        <button onClick={() => navigate(`/classes/${classId}`)} className="text-sm underline">
-          ← Back
-        </button>
-        <div className="font-semibold">{assignment.title}</div>
-        {assignment.description && (
-          <div className="text-xs text-muted-foreground truncate">· {assignment.description}</div>
-        )}
-        <div className="flex-1" />
-        {submitted && (
-          <span className="text-xs px-2 py-1 rounded bg-green-600/20 text-green-300 border border-green-700">
-            Submitted
-          </span>
-        )}
-        <button
-          onClick={() => submission && downloadZip(`${assignment.title || 'submission'}.zip`, submission.files)}
-          className="px-2 py-1 rounded-md border text-xs hover:bg-accent"
-        >
-          Download .zip
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={submitting}
-          className="px-3 py-1 rounded-md bg-primary text-primary-foreground text-xs disabled:opacity-50"
-        >
-          {submitted ? 'Re-submit' : 'Submit'}
-        </button>
-        <UserMenu />
+      <header className="border-b px-3 py-1 flex items-center gap-3 h-10">
+        <div className="ml-auto">
+          <UserMenu />
+        </div>
       </header>
       <div className="flex-1 min-h-0">
         {host && (
           <IDEHostProvider host={host}>
-            <App />
+            <AssignmentInfoProvider info={assignmentInfo}>
+              <App />
+            </AssignmentInfoProvider>
           </IDEHostProvider>
         )}
       </div>

@@ -10,6 +10,7 @@ import { useEngine } from '@/engine/EngineContext'
 import { useClangd } from '@/clangd'
 import { isCppPath, monacoLanguageFor } from '@/clangd/config'
 import { useIDEHost } from '@/ide-host-context'
+import { useThemeStore } from '@/theme/theme-store'
 
 // Decorations are tracked per file URI so they survive model switching — when
 // the user flips between files we leave each model's gutter/line state intact
@@ -20,6 +21,7 @@ export function Editor() {
     const { activeFile, activeFileContent, setActiveFileContent, setActiveFile } = useEditorStore()
     const { currentLine, currentFile, debugMode, breakpoints, toggleBreakpoint } = useDebugStore()
     const monaco = useMonaco()
+    const theme = useThemeStore((s) => s.theme)
     const engine = useEngine()
     const host = useIDEHost()
     const clangd = useClangd()
@@ -274,7 +276,7 @@ export function Editor() {
                     path={activeFile}
                     defaultValue={activeFileContent}
                     language={lang}
-                    theme="vs-dark"
+                    theme={theme === 'light' ? 'vs' : 'vs-dark'}
                     onChange={handleChange}
                     onMount={handleMount}
                     options={{

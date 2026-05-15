@@ -4,6 +4,12 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import App from './App'
+import { initTheme } from '@/theme/theme-store'
+
+// Paint the persisted theme before React mounts so the first frame already
+// carries the right palette — otherwise the page flashes the dark default
+// for one tick when light is selected.
+initTheme()
 import { AuthProvider } from '@/shared/context/AuthProvider'
 import { ProtectedRoute } from '@/lms/components/ProtectedRoute'
 import Login from '@/lms/pages/Login'

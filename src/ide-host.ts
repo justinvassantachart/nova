@@ -40,3 +40,25 @@ export type IDEHost = {
   // Fires for each instrumented user action. Host owns buffering/flushing.
   onEvent?: (type: EventType, payload: Record<string, unknown>) => void
 }
+
+// Assignment metadata surfaced through a SEPARATE context from IDEHost
+// (see [src/components/sidebar/assignment-info-context.tsx]). Splitting
+// it out matters: IDEHost holds the file/event channels that App.tsx
+// re-runs effects on, so we want its identity stable. AssignmentInfo
+// rerenders on every Firestore push and would force those effects to
+// rebind otherwise.
+export type AssignmentInfo = {
+  title: string
+  description: string
+  isTeacher: boolean
+  published?: boolean
+  submitted?: boolean
+  // Callbacks — undefined means the host doesn't support that action in
+  // the current mode (e.g. students can't toggle publish).
+  onSubmit?: () => void | Promise<void>
+  onDownload?: () => void
+  onBack?: () => void
+  onTogglePublish?: () => void
+  onTitleChange?: (s: string) => void
+  onDescriptionChange?: (s: string) => void
+}

@@ -1,7 +1,9 @@
 import { useEffect } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toolbar } from '@/components/layout/Toolbar'
-import { FileExplorer } from '@/components/explorer/FileExplorer'
+import { ActivityBar } from '@/components/sidebar/ActivityBar'
+import { SidebarPanel } from '@/components/sidebar/SidebarPanel'
+import { useSidebarStore } from '@/components/sidebar/sidebar-store'
 import { Editor } from '@/components/editor/Editor'
 import { RightPanel } from '@/components/layout/RightPanel'
 import {
@@ -13,9 +15,11 @@ import { initVFS, subscribeWorkspaceChange, getAllFiles } from '@/vfs/volume'
 import { EngineProvider } from '@/engine/EngineContext'
 import { ClangdProvider } from '@/clangd'
 import { useIDEHost } from '@/ide-host-context'
+import '@/components/sidebar/sidebar.css'
 
 export default function App() {
     const host = useIDEHost()
+    const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
 
     // Safety: if we landed here via client-side navigation from a non-isolated
     // route (like /), SharedArrayBuffer will be missing. Force a reload to
@@ -71,23 +75,44 @@ export default function App() {
                 <TooltipProvider delayDuration={300}>
                     <div className="flex flex-col h-full w-full overflow-hidden">
                         <Toolbar />
-                        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-                            <ResizablePanel defaultSize="15" minSize="10" maxSize="40">
-                                <FileExplorer />
-                            </ResizablePanel>
+                        <div className="flex-1 min-h-0 flex">
+                            <ActivityBar />
+                            {/* Key changes with collapse state so react-resizable-panels
+                                re-initializes default sizes when the sidebar disappears. */}
+                            <ResizablePanelGroup
+                                key={sidebarCollapsed ? 'no-sidebar' : 'with-sidebar'}
+                                orientation="horizontal"
+                                className="flex-1 min-h-0"
+                            >
+                                {!sidebarCollapsed && (
+                                    <>
+                                        {/* sizes are strings so react-resizable-panels
+                                            treats them as % — a bare number is read
+                                            as a pixel value, which produced a 40px-wide
+                                            sidebar that couldn't be dragged wider. */}
+                                        <ResizablePanel
+                                            id="sidebar"
+                                            defaultSize="18"
+                                            minSize="10"
+                                            maxSize="40"
+                                        >
+                                            <SidebarPanel />
+                                        </ResizablePanel>
+                                        <ResizableHandle withHandle />
+                                    </>
+                                )}
 
-                            <ResizableHandle withHandle />
+                                <ResizablePanel id="editor" defaultSize="55" minSize="25">
+                                    <Editor />
+                                </ResizablePanel>
 
-                            <ResizablePanel defaultSize="55" minSize="25">
-                                <Editor />
-                            </ResizablePanel>
+                                <ResizableHandle withHandle />
 
-                            <ResizableHandle withHandle />
-
-                            <ResizablePanel defaultSize="30" minSize="15">
-                                <RightPanel />
-                            </ResizablePanel>
-                        </ResizablePanelGroup>
+                                <ResizablePanel id="right" defaultSize="27" minSize="15">
+                                    <RightPanel />
+                                </ResizablePanel>
+                            </ResizablePanelGroup>
+                        </div>
                     </div>
                 </TooltipProvider>
             </ClangdProvider>
