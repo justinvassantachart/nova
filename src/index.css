@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+/* Theme variant — fires when <html> carries data-theme="dark" (which the
+   [initTheme] bootstrap always sets before first paint, so this selector
+   reliably matches without a fallback for "no attribute"). */
+@custom-variant dark (&:is([data-theme="dark"] *));
 
-:root {
-  --radius: 0.5rem;
-}
-
-@theme inline {
+/* Tailwind 4 @theme block — declares CSS variables under :root *and*
+   generates utilities (bg-background, text-foreground, …) that reference
+   them via var(). Note: do NOT add `inline` here — that would inline the
+   raw value into every utility, defeating runtime theme swapping. */
+@theme {
   --color-background: oklch(0.145 0 0);
   --color-foreground: oklch(0.925 0 0);
   --color-card: oklch(0.17 0 0);
@@ -49,6 +52,59 @@
   --color-accent-type: oklch(0.7 0.05 270);
 }
 
+:root {
+  --radius: 0.5rem;
+  --color-scrollbar-thumb: oklch(0.3 0 0);
+  --color-scrollbar-thumb-hover: oklch(0.4 0 0);
+}
+
+/* ── Light (VS Code Light Modern) ─────────────────────────────────
+   Values lifted from microsoft/vscode/extensions/theme-defaults/themes/light_modern.json.
+   Same token *names* as the dark palette so utility classes pick up the
+   override automatically. */
+:root[data-theme="light"] {
+  --color-background: #ffffff;
+  --color-foreground: #3b3b3b;
+  --color-card: #ffffff;
+  --color-card-foreground: #3b3b3b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1f1f1f;
+  --color-primary: #005fb8;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e4e6f1;
+  --color-secondary-foreground: #1f1f1f;
+  --color-muted: #f2f2f2;
+  --color-muted-foreground: #616161;
+  --color-accent: #f2f2f2;
+  --color-accent-foreground: #1f1f1f;
+  --color-destructive: #d13438;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e5e5e5;
+  --color-input: #cecece;
+  --color-ring: #005fb8;
+  --color-sidebar: #f8f8f8;
+  --color-sidebar-foreground: #1f1f1f;
+  --color-sidebar-primary: #005fb8;
+  --color-sidebar-primary-foreground: #ffffff;
+  --color-sidebar-accent: #f2f2f2;
+  --color-sidebar-accent-foreground: #1f1f1f;
+  --color-sidebar-border: #e5e5e5;
+  --color-sidebar-ring: #005fb8;
+
+  --color-rail: #f8f8f8;
+  --color-chrome: #f8f8f8;
+  --color-row-hover: #f2f2f2;
+  --color-row-active: #cde6f5;
+
+  --color-accent-pointer: #005fb8;
+  --color-accent-string: #0451a5;
+  --color-accent-number: #098658;
+  --color-accent-type: #267f99;
+
+  --color-scrollbar-thumb: rgba(100, 100, 100, 0.4);
+  --color-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
+}
+
 * {
   border-color: var(--color-border);
 }
@@ -79,12 +135,12 @@ body,
 }
 
 ::-webkit-scrollbar-thumb {
-  background: oklch(0.3 0 0);
+  background: var(--color-scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.4 0 0);
+  background: var(--color-scrollbar-thumb-hover);
 }
 
 /* Nova — shared panel chrome utilities.
