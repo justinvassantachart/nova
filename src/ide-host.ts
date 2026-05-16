@@ -36,7 +36,9 @@ export type IDEHost = {
   // Replaces the IDE's default template files at boot, if provided.
   initialFiles?: Record<string, string>
   // Fires on a debounced VFS change with the full /workspace snapshot.
-  onWorkspaceChange?: (files: Record<string, string>) => void
+  // Return a Promise if persisting is async — the IDE uses that to drive
+  // the save-status indicator and the beforeunload guard.
+  onWorkspaceChange?: (files: Record<string, string>) => void | Promise<void>
   // Fires for each instrumented user action. Host owns buffering/flushing.
   onEvent?: (type: EventType, payload: Record<string, unknown>) => void
 }

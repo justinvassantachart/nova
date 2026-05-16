@@ -3,7 +3,7 @@ import type { editor } from 'monaco-editor'
 import { useEditorStore } from '@/store/editor-store'
 import { useDebugStore } from '@/store/debug-store'
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { writeFile, getProjectId, fileExists, readFile, subscribeWorkspaceChange } from '@/vfs/volume'
+import { writeFile, fileExists, readFile, subscribeWorkspaceChange } from '@/vfs/volume'
 import { Codicon } from '@/components/ui/codicon'
 import { getFileIconUrl } from '@/lib/vscode-icons'
 import { useEngine } from '@/engine/EngineContext'
@@ -30,7 +30,6 @@ export function Editor() {
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
     const decoIdsByPath = useRef<Map<string, DecoIds>>(new Map())
     const ghostIdsRef = useRef<string[]>([])
-    const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
     const [editorReady, setEditorReady] = useState(false)
 
     const lastDebugState = useRef({ file: null as string | null, line: null as number | null })
@@ -69,24 +68,10 @@ export function Editor() {
                 model.dispose()
                 decoIdsByPath.current.delete(path)
                 delete lastEditEmit.current[path]
-                const t = syncTimers.current[path]
-                if (t) {
-                    clearTimeout(t)
-                    delete syncTimers.current[path]
-                }
             }
         }
         return subscribeWorkspaceChange(sweep)
     }, [monaco])
-
-    // Clear any pending OPFS sync timers when the editor unmounts so they
-    // don't fire against a torn-down VFS / project ID.
-    useEffect(() => {
-        const timers = syncTimers.current
-        return () => {
-            for (const id of Object.values(timers)) clearTimeout(id)
-        }
-    }, [])
 
     useEffect(() => {
         if (debugMode === 'paused' && currentFile && currentLine !== null) {
@@ -228,6 +213,9 @@ export function Editor() {
     const handleChange = useCallback((value: string | undefined) => {
         if (value === undefined || !activeFile) return
         setActiveFileContent(value)
+        // writeFile owns local persistence — it coalesces the OPFS write
+        // and fires the workspace-change event. The editor stays a thin
+        // caller; nothing here touches OPFS directly.
         writeFile(activeFile, value)
 
         const now = Date.now()
@@ -236,12 +224,6 @@ export function Editor() {
             lastEditEmit.current[activeFile] = now
             host?.onEvent?.('edit', { file: activeFile, length: value.length })
         }
-
-        if (syncTimers.current[activeFile]) clearTimeout(syncTimers.current[activeFile])
-        syncTimers.current[activeFile] = setTimeout(() => {
-            import('@/vfs/opfs-sync').then(({ syncToOPFS }) => syncToOPFS(getProjectId(), activeFile, value))
-            delete syncTimers.current[activeFile]
-        }, 2000)
     }, [activeFile, setActiveFileContent, host])
 
     if (!activeFile) {

@@ -11,7 +11,10 @@ import {
     ResizablePanel,
     ResizablePanelGroup,
 } from '@/components/ui/resizable'
-import { initVFS, subscribeWorkspaceChange, getAllFiles } from '@/vfs/volume'
+import {
+    initVFS, subscribeWorkspaceChange, getAllFiles,
+    markExternalSaving, hasPendingWrites,
+} from '@/vfs/volume'
 import { EngineProvider } from '@/engine/EngineContext'
 import { ClangdProvider } from '@/clangd'
 import { useIDEHost } from '@/ide-host-context'
@@ -50,20 +53,59 @@ export default function App() {
         initVFS({ projectId, initialFiles: host?.initialFiles, ephemeral })
     }, [host?.mode, host?.assignmentId, host?.submissionId, host?.initialFiles])
 
-    // Forward debounced workspace snapshots to the host (e.g. Firestore submission auto-save).
+    // Forward debounced workspace snapshots to the host (e.g. Firestore
+    // submission auto-save). The IDE tracks "external save in flight" via
+    // markExternalSaving so the toolbar indicator and beforeunload guard
+    // also account for the host's persistence path, not just OPFS.
     useEffect(() => {
         if (!host?.onWorkspaceChange) return
         let timer: ReturnType<typeof setTimeout> | undefined
-        const flush = () => host.onWorkspaceChange!(getAllFiles())
+        let queuedAsPending = false
+        const flush = () => {
+            timer = undefined
+            const result = host.onWorkspaceChange!(getAllFiles())
+            if (result instanceof Promise) {
+                // queuedAsPending was incremented when the timer was set;
+                // it stays in flight until the host promise settles.
+                result.finally(() => {
+                    if (queuedAsPending) {
+                        queuedAsPending = false
+                        markExternalSaving(false)
+                    }
+                })
+            } else if (queuedAsPending) {
+                queuedAsPending = false
+                markExternalSaving(false)
+            }
+        }
         const unsub = subscribeWorkspaceChange(() => {
             if (timer) clearTimeout(timer)
+            if (!queuedAsPending) {
+                queuedAsPending = true
+                markExternalSaving(true)
+            }
             timer = setTimeout(flush, 2000)
         })
         return () => {
             if (timer) clearTimeout(timer)
+            if (queuedAsPending) {
+                queuedAsPending = false
+                markExternalSaving(false)
+            }
             unsub()
         }
     }, [host])
+
+    // Warn before leaving if there's any local or host-side save in flight.
+    useEffect(() => {
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (!hasPendingWrites()) return
+            e.preventDefault()
+            e.returnValue = ''
+        }
+        window.addEventListener('beforeunload', onBeforeUnload)
+        return () => window.removeEventListener('beforeunload', onBeforeUnload)
+    }, [])
 
     // Read-only review mode skips clangd entirely; everything else defers
     // to the user preference inside ClangdProvider.

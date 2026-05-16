@@ -74,7 +74,109 @@ function notifyWorkspaceChange() {
     })
 }
 
+// ── OPFS write coalescer ───────────────────────────────────────
+// Editor keystrokes call writeFile() on every change. We don't want one
+// OPFS round-trip per character — so each write schedules a coalesced
+// flush per-path. Structural ops (create/delete/rename) cancel the
+// pending flush and write through synchronously so the new state is
+// persisted before anything queued by a previous edit can clobber it.
+const FLUSH_DELAY_MS = 500
+const pendingFlushes = new Map<string, ReturnType<typeof setTimeout>>()
+let inFlightCount = 0
+let externalPendingCount = 0
+
+// "saved" → no queued local writes, no in-flight local writes, no host save in flight.
+// "saving" → at least one local or host save is queued or in flight.
+export type SaveState = 'saved' | 'saving'
+
+const saveListeners = new Set<(state: SaveState) => void>()
+export function subscribeSaveState(fn: (state: SaveState) => void): () => void {
+    saveListeners.add(fn)
+    return () => saveListeners.delete(fn)
+}
+export function getSaveState(): SaveState {
+    return pendingFlushes.size === 0 && inFlightCount === 0 && externalPendingCount === 0
+        ? 'saved'
+        : 'saving'
+}
+export function hasPendingWrites(): boolean {
+    return getSaveState() !== 'saved'
+}
+// Hosts call this to report their own pending work (e.g. Firestore writes
+// queued by onWorkspaceChange) so the indicator reflects end-to-end state.
+export function markExternalSaving(active: boolean) {
+    externalPendingCount += active ? 1 : -1
+    if (externalPendingCount < 0) externalPendingCount = 0
+    notifySaveState()
+}
+
+let lastNotified: SaveState = 'saved'
+function notifySaveState() {
+    const next = getSaveState()
+    if (next === lastNotified) return
+    lastNotified = next
+    saveListeners.forEach((fn) => {
+        try { fn(next) } catch (e) { console.warn('[vfs] save listener error', e) }
+    })
+}
+
+function cancelPendingFlush(path: string) {
+    const t = pendingFlushes.get(path)
+    if (t) {
+        clearTimeout(t)
+        pendingFlushes.delete(path)
+    }
+}
+
+function runOpfsWrite(projectId: string, path: string, content: string) {
+    inFlightCount++
+    notifySaveState()
+    void import('./opfs-sync')
+        .then(({ syncToOPFS }) => syncToOPFS(projectId, path, content))
+        .finally(() => {
+            inFlightCount = Math.max(0, inFlightCount - 1)
+            notifySaveState()
+        })
+}
+
+function scheduleOpfsWrite(path: string, content: string) {
+    if (!path.startsWith('/workspace/') || !activeProjectId) return
+    cancelPendingFlush(path)
+    const projectId = activeProjectId
+    const t = setTimeout(() => {
+        pendingFlushes.delete(path)
+        runOpfsWrite(projectId, path, content)
+    }, FLUSH_DELAY_MS)
+    pendingFlushes.set(path, t)
+    notifySaveState()
+}
+
+function writeOpfsNow(path: string, content: string) {
+    if (!path.startsWith('/workspace/') || !activeProjectId) return
+    cancelPendingFlush(path)
+    runOpfsWrite(activeProjectId, path, content)
+}
+
+// Force every queued write to fire now. Useful before navigation /
+// project switch / explicit "save" so nothing sits in the debouncer.
+export function flushPendingWrites() {
+    if (pendingFlushes.size === 0) return
+    const paths = [...pendingFlushes.keys()]
+    for (const path of paths) {
+        cancelPendingFlush(path)
+        if (!vol.existsSync(path)) continue
+        try {
+            const content = vol.readFileSync(path, { encoding: 'utf8' }) as string
+            writeOpfsNow(path, content)
+        } catch { /* gone */ }
+    }
+}
+
 // ── CRUD Operations ────────────────────────────────────────────
+// writeFile is the hot path: every editor keystroke calls it. It updates
+// memfs synchronously, schedules a debounced OPFS write, and fires the
+// workspace-change event. createFile/createFolder/deleteItem/renameItem
+// are the rare structural ops; they always sync OPFS immediately.
 
 export function writeFile(path: string, content: string) {
     const dir = path.substring(0, path.lastIndexOf('/'))
@@ -82,6 +184,7 @@ export function writeFile(path: string, content: string) {
         vol.mkdirSync(dir, { recursive: true })
     }
     vol.writeFileSync(path, content, { encoding: 'utf8' })
+    scheduleOpfsWrite(path, content)
     if (path.startsWith('/workspace/')) notifyWorkspaceChange()
 }
 
@@ -90,28 +193,36 @@ export function readFile(path: string): string {
 }
 
 export function createFile(path: string, content = '') {
-    writeFile(path, content)
+    const dir = path.substring(0, path.lastIndexOf('/'))
+    if (dir && !vol.existsSync(dir)) vol.mkdirSync(dir, { recursive: true })
+    vol.writeFileSync(path, content, { encoding: 'utf8' })
+    writeOpfsNow(path, content)
     refreshFileTree()
+    if (path.startsWith('/workspace/')) notifyWorkspaceChange()
 }
 
 export function createFolder(path: string) {
-    if (!vol.existsSync(path)) {
-        vol.mkdirSync(path, { recursive: true })
+    if (!vol.existsSync(path)) vol.mkdirSync(path, { recursive: true })
+    if (path.startsWith('/workspace/') && activeProjectId) {
+        const projectId = activeProjectId
+        void import('./opfs-sync').then(({ createFolderInOPFS }) => createFolderInOPFS(projectId, path))
     }
     refreshFileTree()
 }
 
 export function deleteItem(path: string) {
+    cancelPendingFlush(path)
     const stat = vol.statSync(path)
     if (stat.isDirectory()) {
         vol.rmdirSync(path, { recursive: true } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
     } else {
         vol.unlinkSync(path)
     }
-    // Also delete from OPFS to prevent "ghost files"
-    import('./opfs-sync').then(({ deleteFromOPFS }) => deleteFromOPFS(activeProjectId, path))
+    if (activeProjectId) {
+        const projectId = activeProjectId
+        void import('./opfs-sync').then(({ deleteFromOPFS }) => deleteFromOPFS(projectId, path))
+    }
 
-    // If deleted file was active, clear editor
     const { activeFile } = useEditorStore.getState()
     if (activeFile === path) {
         useEditorStore.getState().setActiveFile('', '')
@@ -121,14 +232,24 @@ export function deleteItem(path: string) {
 }
 
 export function renameItem(oldPath: string, newPath: string) {
+    cancelPendingFlush(oldPath)
     vol.renameSync(oldPath, newPath)
-    // Persist rename to OPFS
-    import('./opfs-sync').then(({ renameInOPFS }) => renameInOPFS(activeProjectId, oldPath, newPath))
+    // Pass in-memory content as a fallback so files that were just created
+    // (and never synced) still rename. Directories carry no content.
+    let fallback: string | undefined
+    try {
+        if (!vol.statSync(newPath).isDirectory()) {
+            fallback = vol.readFileSync(newPath, { encoding: 'utf8' }) as string
+        }
+    } catch { /* directory or unreadable */ }
+    if (activeProjectId) {
+        const projectId = activeProjectId
+        void import('./opfs-sync').then(({ renameInOPFS }) => renameInOPFS(projectId, oldPath, newPath, fallback))
+    }
 
     const { activeFile } = useEditorStore.getState()
     if (activeFile === oldPath) {
-        const content = readFile(newPath)
-        useEditorStore.getState().setActiveFile(newPath, content)
+        useEditorStore.getState().setActiveFile(newPath, readFile(newPath))
     }
     refreshFileTree()
     if (oldPath.startsWith('/workspace/') || newPath.startsWith('/workspace/')) notifyWorkspaceChange()
@@ -227,6 +348,11 @@ export function bootstrapWorkspace(files: Record<string, string>) {
 }
 
 export async function initVFS(opts: InitVFSOptions = {}) {
+    // Drop any queued writes from the previous project — they'd target the
+    // OLD activeProjectId if they fired after the project switch.
+    for (const t of pendingFlushes.values()) clearTimeout(t)
+    pendingFlushes.clear()
+
     // Ephemeral views (e.g. teacher reviewing a submission) don't persist to
     // OPFS — set projectId to empty so syncToOPFS/deleteFromOPFS no-op.
     if (opts.ephemeral) activeProjectId = ''

@@ -10,6 +10,7 @@ import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
 import { useEngine } from '@/engine/EngineContext'
 import { DebugControls } from './DebugControls'
+import { SaveStatus } from './SaveStatus'
 import { useIDEHost } from '@/ide-host-context'
 
 export function Toolbar() {
@@ -52,9 +53,13 @@ export function Toolbar() {
 
     return (
         <div className="flex items-center h-10 px-3 gap-2 border-b border-border bg-[var(--color-chrome)]">
-            <span className="font-bold text-sm tracking-[0.18em] text-foreground mr-auto select-none">
+            <span className="font-bold text-sm tracking-[0.18em] text-foreground select-none">
                 NOVA<span className="text-primary">·</span>IDE
             </span>
+
+            <SaveStatus />
+
+            <div className="mr-auto" />
 
             {/* Compiler download progress */}
             {cacheState === 'downloading' && (

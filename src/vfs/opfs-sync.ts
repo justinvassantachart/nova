@@ -1,5 +1,5 @@
 // ── OPFS Sync ─────────────────────────────────────────────────────
-import { writeFile } from './volume'
+import { writeFile, vol } from './volume'
 
 async function getProjectDir(projectId: string): Promise<FileSystemDirectoryHandle> {
     const root = await navigator.storage.getDirectory()
@@ -40,26 +40,45 @@ export async function deleteFromOPFS(projectId: string, path: string) {
     }
 }
 
-export async function renameInOPFS(projectId: string, oldPath: string, newPath: string) {
+export async function renameInOPFS(projectId: string, oldPath: string, newPath: string, fallbackContent?: string) {
     if (!projectId) return
     // OPFS has no rename — read old, write new, delete old
     try {
         const projectDir = await getProjectDir(projectId)
-        // Read old file
         const oldParts = oldPath.replace('/workspace/', '').split('/')
-        let dir = projectDir
-        for (let i = 0; i < oldParts.length - 1; i++) {
-            dir = await dir.getDirectoryHandle(oldParts[i])
+        let content: string
+        try {
+            let dir = projectDir
+            for (let i = 0; i < oldParts.length - 1; i++) {
+                dir = await dir.getDirectoryHandle(oldParts[i])
+            }
+            const oldHandle = await dir.getFileHandle(oldParts[oldParts.length - 1])
+            const file = await oldHandle.getFile()
+            content = await file.text()
+        } catch {
+            // Old path not in OPFS (e.g. file was created but never synced).
+            // Fall back to the in-memory content so rename still persists.
+            if (fallbackContent === undefined) throw new Error('source missing in OPFS and no fallback content')
+            content = fallbackContent
         }
-        const oldHandle = await dir.getFileHandle(oldParts[oldParts.length - 1])
-        const file = await oldHandle.getFile()
-        const content = await file.text()
-        // Write to new path
         await syncToOPFS(projectId, newPath, content)
-        // Delete old
         await deleteFromOPFS(projectId, oldPath)
     } catch (err) {
         console.warn('[OPFS] rename failed:', err)
+    }
+}
+
+export async function createFolderInOPFS(projectId: string, path: string) {
+    if (!projectId) return
+    try {
+        const projectDir = await getProjectDir(projectId)
+        const parts = path.replace('/workspace/', '').split('/').filter(Boolean)
+        let dir = projectDir
+        for (const part of parts) {
+            dir = await dir.getDirectoryHandle(part, { create: true })
+        }
+    } catch (err) {
+        console.warn('[OPFS] create folder failed:', err)
     }
 }
 
@@ -77,6 +96,9 @@ async function walk(dir: FileSystemDirectoryHandle, base: string) {
     for await (const [name, handle] of (dir as any).entries()) { // eslint-disable-line @typescript-eslint/no-explicit-any
         const path = `${base}/${name}`
         if (handle.kind === 'directory') {
+            // Materialize the directory eagerly so empty folders survive reload;
+            // writeFile below auto-creates non-empty ones.
+            if (!vol.existsSync(path)) vol.mkdirSync(path, { recursive: true })
             await walk(handle as FileSystemDirectoryHandle, path)
         } else {
             const file = await (handle as FileSystemFileHandle).getFile()

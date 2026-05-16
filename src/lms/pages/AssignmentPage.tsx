@@ -77,11 +77,10 @@ function TeacherView({
     mode: 'teacher-edit',
     assignmentId,
     initialFiles: assignment.starterFiles,
-    onWorkspaceChange: (files) => {
+    onWorkspaceChange: (files) =>
       saveStarterFiles(classId, assignmentId, files).catch((e) =>
         console.warn('[AssignmentPage] save starter failed', e),
-      )
-    },
+      ),
     onEvent,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [classId, assignmentId])
@@ -277,11 +276,10 @@ function StudentView({
       assignmentId,
       submissionId: user.uid,
       initialFiles: submission.files,
-      onWorkspaceChange: (files) => {
+      onWorkspaceChange: (files) =>
         saveSubmissionFiles(classId, assignmentId, user.uid, files).catch((e) =>
           console.warn('[AssignmentPage] save submission failed', e),
-        )
-      },
+        ),
       onEvent,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
