@@ -1,12 +1,63 @@
 import { useEffect, useRef } from 'react'
-import { Terminal as XTerm } from '@xterm/xterm'
+import { Terminal as XTerm, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useEngine } from '@/engine/EngineContext'
+import { useThemeStore, type Theme } from '@/theme/theme-store'
 import '@xterm/xterm/css/xterm.css'
+
+const DARK_THEME: ITheme = {
+    background: '#0a0a0a',
+    foreground: '#d4d4d4',
+    cursor: '#5BC2EE',
+    black: '#000',
+    brightBlack: '#666',
+    red: '#cd3131',
+    brightRed: '#f14c4c',
+    green: '#0dbc79',
+    brightGreen: '#23d18b',
+    yellow: '#e5e510',
+    brightYellow: '#f5f543',
+    blue: '#2472c8',
+    brightBlue: '#3b8eea',
+    magenta: '#bc3fbc',
+    brightMagenta: '#d670d6',
+    cyan: '#11a8cd',
+    brightCyan: '#29b8db',
+    white: '#e5e5e5',
+    brightWhite: '#fff',
+}
+
+// VS Code Light Modern terminal palette — matches the editor light theme so
+// the terminal panel doesn't look like a hole punched into the IDE.
+const LIGHT_THEME: ITheme = {
+    background: '#ffffff',
+    foreground: '#3b3b3b',
+    cursor: '#005fb8',
+    black: '#000000',
+    brightBlack: '#666666',
+    red: '#cd3131',
+    brightRed: '#cd3131',
+    green: '#00bc00',
+    brightGreen: '#14ce14',
+    yellow: '#949800',
+    brightYellow: '#b5ba00',
+    blue: '#0451a5',
+    brightBlue: '#0451a5',
+    magenta: '#bc05bc',
+    brightMagenta: '#bc05bc',
+    cyan: '#0598bc',
+    brightCyan: '#0598bc',
+    white: '#555555',
+    brightWhite: '#a5a5a5',
+}
+
+const themeFor = (t: Theme): ITheme => (t === 'light' ? LIGHT_THEME : DARK_THEME)
 
 export function Terminal() {
     const containerRef = useRef<HTMLDivElement>(null)
     const engine = useEngine()
+    const theme = useThemeStore((s) => s.theme)
+    const termRef = useRef<XTerm | null>(null)
 
     useEffect(() => {
         if (!containerRef.current) return
@@ -33,28 +84,9 @@ export function Terminal() {
                 lineHeight: 1.3,
                 cursorBlink: true,
                 cursorStyle: 'bar',
-                theme: {
-                    background: '#0a0a0a',
-                    foreground: '#d4d4d4',
-                    cursor: '#5BC2EE',
-                    black: '#000',
-                    brightBlack: '#666',
-                    red: '#cd3131',
-                    brightRed: '#f14c4c',
-                    green: '#0dbc79',
-                    brightGreen: '#23d18b',
-                    yellow: '#e5e510',
-                    brightYellow: '#f5f543',
-                    blue: '#2472c8',
-                    brightBlue: '#3b8eea',
-                    magenta: '#bc3fbc',
-                    brightMagenta: '#d670d6',
-                    cyan: '#11a8cd',
-                    brightCyan: '#29b8db',
-                    white: '#e5e5e5',
-                    brightWhite: '#fff',
-                },
+                theme: themeFor(useThemeStore.getState().theme),
             })
+            termRef.current = term
             const fit = new FitAddon()
             term.loadAddon(fit)
             term.open(containerRef.current)
@@ -83,6 +115,7 @@ export function Terminal() {
                 onDataDisposable.dispose()
                 ro.disconnect()
                 term.dispose()
+                if (termRef.current === term) termRef.current = null
             }
         })
 
@@ -92,5 +125,21 @@ export function Terminal() {
         }
     }, [engine])
 
-    return <div ref={containerRef} className="w-full h-full bg-[#0a0a0a]" />
+    // Repaint xterm's palette whenever the IDE theme flips. The terminal is
+    // constructed asynchronously (after the font loads), so termRef may be
+    // null on the first run for a given theme — that's fine, construction
+    // already reads the current theme via useThemeStore.getState().
+    useEffect(() => {
+        const term = termRef.current
+        if (!term) return
+        term.options.theme = themeFor(theme)
+    }, [theme])
+
+    return (
+        <div
+            ref={containerRef}
+            className="w-full h-full"
+            style={{ background: theme === 'light' ? '#ffffff' : '#0a0a0a' }}
+        />
+    )
 }
