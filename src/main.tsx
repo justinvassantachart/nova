@@ -27,22 +27,35 @@ import SubmissionView from '@/lms/pages/SubmissionView'
 // (they don't ship CORP headers). The SW rewrites those responses with
 // CORP: cross-origin so they pass the gate. Skip on /login since that
 // route is unsafe-none anyway and Firebase loads there without the gate.
+//
+// First-time install: register resolves while the SW is still
+// `installing`, so reg.active is null at that point. We must wait for
+// it to reach `activated` before reloading — checking reg.active in the
+// then() callback always misses the first install.
 if (
   typeof navigator !== 'undefined' &&
   'serviceWorker' in navigator &&
   window.location.pathname !== '/login' &&
   window.location.pathname !== '/'
 ) {
-  navigator.serviceWorker.register('/coep-sw.js').then((reg) => {
-    // First-time install: the page that registered the SW is not yet
-    // controlled by it, so the in-flight Firebase fetches still fail.
-    // Reload once so they go through the SW.
-    if (reg.active && !navigator.serviceWorker.controller) {
+  void (async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/coep-sw.js')
+      if (navigator.serviceWorker.controller) return
+      const sw = reg.installing ?? reg.waiting ?? reg.active
+      if (!sw) return
+      if (sw.state !== 'activated') {
+        await new Promise<void>((resolve) => {
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'activated') resolve()
+          })
+        })
+      }
       window.location.reload()
+    } catch (err) {
+      console.warn('[coep-sw] registration failed:', err)
     }
-  }).catch((err) => {
-    console.warn('[coep-sw] registration failed:', err)
-  })
+  })()
 }
 
 createRoot(document.getElementById('root')!).render(

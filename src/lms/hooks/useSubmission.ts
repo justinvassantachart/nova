@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getOrCreateSubmission,
   watchAssignmentSubmissions,
@@ -20,8 +20,23 @@ export function useSubmission(opts: {
   const [submission, setSubmission] = useState<Submission | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // starterFiles comes from a Firestore snapshot, so its reference changes
+  // on every assignment update — including ones triggered by our own
+  // saveSubmissionFiles. If we put it in the dep array, every save flips
+  // loading=true, which unmounts <App/> in AssignmentPage. App's unmount
+  // clears the pending workspace flush timer, so any in-flight save is
+  // cancelled, and the remount re-runs initVFS, which wipeWorkspace()s and
+  // rehydrates from OPFS — losing any newly-created-but-not-yet-typed-in
+  // file. Stash starterFiles in a ref instead so the effect re-runs only
+  // on identity changes (different student / assignment).
+  const starterRef = useRef(starterFiles)
+  starterRef.current = starterFiles
+  const starterReady = Boolean(starterFiles)
+
   useEffect(() => {
-    if (!classId || !assignmentId || !studentUid || !starterFiles) return
+    if (!classId || !assignmentId || !studentUid || !starterReady) return
+    const seed = starterRef.current
+    if (!seed) return
     let cancelled = false
     setLoading(true)
     getOrCreateSubmission({
@@ -30,7 +45,7 @@ export function useSubmission(opts: {
       studentUid,
       studentDisplayName: studentDisplayName ?? '',
       studentEmail: studentEmail ?? '',
-      starterFiles,
+      starterFiles: seed,
     })
       .then((s) => {
         if (cancelled) return
@@ -44,7 +59,7 @@ export function useSubmission(opts: {
     return () => {
       cancelled = true
     }
-  }, [classId, assignmentId, studentUid, studentDisplayName, studentEmail, starterFiles])
+  }, [classId, assignmentId, studentUid, studentDisplayName, studentEmail, starterReady])
 
   // Live-update for things like submittedAt timestamp from other tabs.
   useEffect(() => {

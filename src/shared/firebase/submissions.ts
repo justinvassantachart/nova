@@ -5,6 +5,7 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore'
 import { getDb } from './client'
@@ -84,10 +85,13 @@ export async function saveSubmissionFiles(
   studentUid: string,
   files: Record<string, string>,
 ) {
-  await setDoc(
+  // updateDoc, not setDoc({ merge: true }): setDoc's merge recursively
+  // merges nested maps, so deletions never propagate (the removed key
+  // stays in Firestore). updateDoc replaces the top-level `files` field
+  // wholesale. getOrCreateSubmission guarantees the doc exists.
+  await updateDoc(
     submissionRef(classId, assignmentId, studentUid),
     { files, updatedAt: serverTimestamp() },
-    { merge: true },
   )
 }
 

@@ -345,6 +345,10 @@ export function FileExplorer() {
     // ── Keyboard nav ──────────────────────────────────────────────
 
     const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+        // Ignore keys that bubbled up from a child input (inline rename /
+        // create) — otherwise Backspace in the new-file field deletes the
+        // currently focused file in the tree.
+        if (e.target !== e.currentTarget) return
         if (!focusedPath || rows.length === 0) return
         const idx = rows.findIndex((r) => r.node.path === focusedPath)
         if (idx === -1) return

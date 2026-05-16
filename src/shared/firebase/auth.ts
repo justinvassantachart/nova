@@ -8,7 +8,7 @@ import {
   signOut as fbSignOut,
   updateProfile,
 } from 'firebase/auth'
-import { getFirebaseAuth } from './client'
+import { browserPopupRedirectResolver, getFirebaseAuth } from './client'
 
 // Auth runs on the /login route, which is served WITHOUT COOP/COEP (see
 // vite.config.ts + netlify.toml). That means we can call Firebase's
@@ -31,7 +31,15 @@ export async function signInWithGoogle(): Promise<void> {
   // No `await` between the click handler and this call. Provider
   // construction is synchronous; signInWithPopup itself opens the
   // popup synchronously before returning its Promise.
-  await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider())
+  //
+  // The resolver is passed explicitly because client.ts skips it from
+  // the auth init on isolated routes — initializeAuth without a default
+  // resolver means signInWithPopup needs one passed at the call site.
+  await signInWithPopup(
+    getFirebaseAuth(),
+    new GoogleAuthProvider(),
+    browserPopupRedirectResolver,
+  )
 }
 
 export async function resetPassword(email: string): Promise<void> {

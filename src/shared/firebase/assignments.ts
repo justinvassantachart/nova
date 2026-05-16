@@ -91,11 +91,11 @@ export async function saveStarterFiles(
   assignmentId: string,
   files: Record<string, string>,
 ) {
-  await setDoc(
-    assignmentRef(classId, assignmentId),
-    { starterFiles: files },
-    { merge: true },
-  )
+  // updateDoc, not setDoc({ merge: true }): setDoc's merge recursively
+  // merges nested maps, so deletions never propagate (the removed key
+  // stays in Firestore). updateDoc replaces the top-level `starterFiles`
+  // field wholesale. createAssignment guarantees the doc exists.
+  await updateDoc(assignmentRef(classId, assignmentId), { starterFiles: files })
 }
 
 export async function deleteAssignment(classId: string, assignmentId: string) {
