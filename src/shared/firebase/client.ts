@@ -51,12 +51,15 @@ function ensure() {
       // iframe that COEP would otherwise block.
       popupRedirectResolver: isLoginRoute() ? browserPopupRedirectResolver : undefined,
     })
-    // experimentalAutoDetectLongPolling: webchannel streaming fetch
-    // intermittently fails under COEP + our CORP-injecting SW (the
-    // streaming body doesn't survive the Response() rewrap reliably in
-    // all browsers). Long polling uses discrete fetches that the SW can
-    // safely re-wrap, so the Listen channel doesn't get stuck.
-    _db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true })
+    // experimentalForceLongPolling: webchannel streaming fetch fails under
+    // COEP + our CORP-injecting SW — the streaming body doesn't survive
+    // the Response() rewrap reliably. Auto-detect would try streaming
+    // first, log "Fetch API cannot load... due to access control checks"
+    // for every retry attempt, and only then fall back — making initial
+    // load wait on the detection retries. Forcing long polling skips that
+    // probe: discrete fetches re-wrap cleanly and the Listen channel
+    // connects on the first try.
+    _db = initializeFirestore(app, { experimentalForceLongPolling: true })
   }
 }
 
