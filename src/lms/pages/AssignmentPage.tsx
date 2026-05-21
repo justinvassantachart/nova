@@ -92,7 +92,6 @@ function TeacherView({
     description: assignment.description ?? '',
     isTeacher: true,
     published: assignment.published,
-    onBack: () => navigate(`/classes/${classId}`),
     onTogglePublish: () => {
       void updateAssignmentMeta(classId, assignmentId, { published: !assignment.published })
     },
@@ -102,11 +101,17 @@ function TeacherView({
     onDescriptionChange: (description) => {
       void updateAssignmentMeta(classId, assignmentId, { description })
     },
-  }), [assignment.title, assignment.description, assignment.published, classId, assignmentId, navigate])
+  }), [assignment.title, assignment.description, assignment.published, classId, assignmentId])
 
   return (
     <div className="h-screen w-screen flex flex-col">
       <header className="border-b px-3 py-1 flex items-center gap-3 h-10">
+        <button
+          onClick={() => navigate(`/classes/${classId}`)}
+          className="text-sm underline text-muted-foreground hover:text-foreground"
+        >
+          ← Back to class
+        </button>
         <div className="ml-auto">
           <UserMenu />
         </div>
@@ -302,13 +307,12 @@ function StudentView({
     description: assignment.description ?? '',
     isTeacher: false,
     submitted,
-    onBack: () => navigate(`/classes/${classId}`),
     onSubmit: submitting ? undefined : handleSubmit,
     onDownload: submission?.files
       ? () => downloadZip(`${assignment.title || 'submission'}.zip`, submission.files)
       : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [assignment.title, assignment.description, submitted, submission?.files, submitting, classId, navigate])
+  }), [assignment.title, assignment.description, submitted, submission?.files, submitting])
 
   if (loading) {
     return (
@@ -321,6 +325,12 @@ function StudentView({
   return (
     <div className="h-screen w-screen flex flex-col">
       <header className="border-b px-3 py-1 flex items-center gap-3 h-10">
+        <button
+          onClick={() => navigate(`/classes/${classId}`)}
+          className="text-sm underline text-muted-foreground hover:text-foreground"
+        >
+          ← Back to class
+        </button>
         <div className="ml-auto">
           <UserMenu />
         </div>

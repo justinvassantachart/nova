@@ -59,7 +59,6 @@ export type AssignmentInfo = {
   // the current mode (e.g. students can't toggle publish).
   onSubmit?: () => void | Promise<void>
   onDownload?: () => void
-  onBack?: () => void
   onTogglePublish?: () => void
   onTitleChange?: (s: string) => void
   onDescriptionChange?: (s: string) => void

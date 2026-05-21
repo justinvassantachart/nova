@@ -36,18 +36,6 @@ export function AssignmentView() {
         <div className="nova-view-assignment">
             <div className="nova-view-titlebar">
                 <span className="nova-view-titlebar-label">Assignment</span>
-                {info.onBack && (
-                    <span className="nova-view-titlebar-actions">
-                        <button
-                            type="button"
-                            className="nova-action-btn"
-                            title="Back to class"
-                            onClick={info.onBack}
-                        >
-                            <Codicon name="arrow-left" />
-                        </button>
-                    </span>
-                )}
             </div>
             <div className="nova-view-body">
                 {info.isTeacher ? <TeacherBody info={info} /> : <StudentBody info={info} />}

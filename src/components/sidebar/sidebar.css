@@ -147,40 +147,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.nova-view-titlebar-actions {
-    display: flex;
-    align-items: center;
-    gap: 0;
-}
-.nova-action-btn {
-    width: 22px;
-    height: 22px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 0;
-    color: var(--sb-fg);
-    cursor: pointer;
-    border-radius: 5px;
-    padding: 0;
-}
-.nova-action-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-}
-.nova-action-btn:active {
-    background: rgba(255, 255, 255, 0.12);
-}
-[data-theme="light"] .nova-action-btn:hover {
-    background: rgba(0, 0, 0, 0.07);
-}
-[data-theme="light"] .nova-action-btn:active {
-    background: rgba(0, 0, 0, 0.12);
-}
-.nova-action-btn .codicon {
-    font-size: 16px;
-}
-
 .nova-view-body {
     flex: 1;
     min-height: 0;

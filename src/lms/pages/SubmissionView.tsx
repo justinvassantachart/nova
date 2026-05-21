@@ -54,9 +54,8 @@ export default function SubmissionView() {
       ].join(' · '),
       isTeacher: true,
       submitted: submission.submittedAt != null,
-      onBack: () => navigate(`/classes/${classId}/assignments/${assignmentId}`),
     }
-  }, [assignment, submission, classId, assignmentId, navigate])
+  }, [assignment, submission])
 
   if (cLoading || aLoading || sLoading) {
     return (
