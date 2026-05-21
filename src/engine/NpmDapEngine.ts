@@ -94,15 +94,22 @@ export class NpmDapEngine implements IIDEEngine {
             return { mappedPath, content };
         });
 
-        // Pick a single .cpp to host the synthetic test main(). The wasm
-        // toolchain shipped by debugger-sh compiles exactly one source file
-        // — the one whose `int main(` it finds — so any "runner.cpp"
-        // alongside the user's code is silently ignored and its main()
-        // never reaches the binary. Preferences, in order: the file the
-        // user has already declared main() in, then the conventional
-        // `main.cpp`, then the first .cpp alphabetically. Static
-        // initialisers in other .cpp files do NOT run, so STUDENT_TEST
-        // blocks must live in the entry file.
+        // debugger-sh's wasm toolchain compiles exactly one TU per run —
+        // it picks one .cpp as the entry, emits /main.o, then links that
+        // single object. Sibling .cpp files are NOT separately compiled
+        // or linked; they only contribute via `#include` from the entry.
+        // Static initialisers in non-included .cpp files therefore never
+        // run.
+        //
+        // To match Stanford SimpleTest's multi-file UX (one .cpp per
+        // module, each with its own STUDENT_TEST blocks), we pick an
+        // entry file and synthesise `#include "<sibling>.cpp"` lines for
+        // every other .cpp in the project. Concatenating into one TU lets
+        // every file's static Registrar instances run at startup, so all
+        // tests register regardless of which file they live in.
+        //
+        // Entry preferences: the file that already declares main(), then
+        // the conventional `main.cpp`, then the first .cpp alphabetically.
         const cppFiles = mapped.filter((f) => f.mappedPath.endsWith('.cpp'));
         const hasMain = (s: string) => /\b(int|void)\s+main\s*\(/.test(s);
         const testEntry = isTest
@@ -110,28 +117,47 @@ export class NpmDapEngine implements IIDEEngine {
                 ?? cppFiles.find((f) => f.mappedPath === 'main.cpp')?.mappedPath
                 ?? [...cppFiles].sort((a, b) => a.mappedPath.localeCompare(b.mappedPath))[0]?.mappedPath)
             : undefined;
+        const siblingCpps = isTest && testEntry
+            ? cppFiles
+                .map((f) => f.mappedPath)
+                .filter((p) => p !== testEntry)
+                .sort((a, b) => a.localeCompare(b))
+            : [];
 
         this.fileMap = {};
         for (const { mappedPath, content } of mapped) {
-            // Rename the user's main() so the appended runner main() wins
-            // the linker fight without a duplicate-symbol error. We do this
-            // as a one-shot text substitution rather than a `#define`
-            // bracket so __LINE__ in EXPECT_EQUALS assertions still matches
-            // the editor's row numbers.
+            // Force-include nova_test.h so STUDENT_TEST/EXPECT_EQUALS
+            // resolve even if the student didn't write the include. The
+            // `#line 1 "<path>"` directive keeps __FILE__/__LINE__ in
+            // assertions aligned with the editor row (the Tests panel
+            // turns those into clickable links).
             //
-            // Force-include nova_test.h so students who write
-            // STUDENT_TEST/EXPECT_EQUALS without remembering the include
-            // still compile. `#line 1 "<path>"` resets the counters so
-            // __FILE__/__LINE__ in user assertions stay aligned with the
-            // editor (Tests panel turns those into clickable links).
+            // The user's main() — only meaningful in the entry — is
+            // renamed via one-shot text substitution so the synthetic
+            // runner main() we append doesn't collide. We use rename
+            // rather than `#define main ...` because `#define` would
+            // also rewrite our appended `int main()`. Other .cpps
+            // shouldn't contain main(), but we leave them untouched
+            // there so a stray include from the entry doesn't get a
+            // surprise rename.
             //
-            // Only the chosen entry file gets the trailing main() so
-            // multi-file projects don't end up with duplicate symbols.
+            // Entry file additionally pulls in every sibling .cpp via
+            // textual #include so their STUDENT_TEST registrars run,
+            // then gets the runner main() appended.
             let final = content;
             if (isTest && mappedPath.endsWith('.cpp')) {
-                final = final.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(');
-                final = `#include "${NOVA_TEST_HEADER_NAME}"\n#line 1 "${mappedPath}"\n${final}`;
-                if (mappedPath === testEntry) {
+                const isEntry = mappedPath === testEntry;
+                if (isEntry) {
+                    final = final.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(');
+                }
+                const siblingIncludes = isEntry
+                    ? siblingCpps.map((p) => `#include "${p}"\n`).join('')
+                    : '';
+                final =
+                    `#include "${NOVA_TEST_HEADER_NAME}"\n` +
+                    siblingIncludes +
+                    `#line 1 "${mappedPath}"\n${final}`;
+                if (isEntry) {
                     final += `\nint main() { ::nova_test::run_all(); return 0; }\n`;
                 }
             }
