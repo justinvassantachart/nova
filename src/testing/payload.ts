@@ -4,9 +4,8 @@
 // in the file explorer).
 
 import NOVA_TEST_HEADER from './nova_test.h?raw'
-import NOVA_TEST_RUNNER from './nova_test_runner.cpp?raw'
 
-export { NOVA_TEST_HEADER, NOVA_TEST_RUNNER }
+export { NOVA_TEST_HEADER }
 
 // Path the header is mounted at in the compiler's in-memory file system.
 // Workspace files are mapped without the `/workspace/` prefix at compile
@@ -17,11 +16,6 @@ export const NOVA_TEST_HEADER_NAME = 'nova_test.h'
 // Path where clangd sees the header. The VFS uses /workspace/-rooted paths,
 // so the same file appears at a different absolute path inside the LSP.
 export const NOVA_TEST_HEADER_CLANGD_PATH = '/workspace/nova_test.h'
-
-// Synthetic runner cpp injected only in test mode. The runner defines the
-// program's main(); the user's main() is rewritten to nova_hidden_main()
-// (see NpmDapEngine.compile) so the two coexist without a link conflict.
-export const NOVA_TEST_RUNNER_NAME = 'nova_test_runner.cpp'
 
 // Stdout sentinel. Anything emitted by the test framework is prefixed with
 // this marker so the engine can split test events out of normal program

@@ -18,8 +18,6 @@ import {
     NOVA_TEST_HEADER,
     NOVA_TEST_HEADER_NAME,
     NOVA_TEST_MARKER,
-    NOVA_TEST_RUNNER,
-    NOVA_TEST_RUNNER_NAME,
 } from '@/testing/payload';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,27 +84,62 @@ export class NpmDapEngine implements IIDEEngine {
             `\x1b[1;34mInitializing ${isTest ? 'test ' : ''}execution environment...\x1b[0m\r\n`,
         );
 
-        this.fileMap = {};
-        for (const [path, content] of Object.entries(files)) {
+        // Normalise paths once so we can both choose a test entry and write
+        // the fileMap from the same loop.
+        const mapped = Object.entries(files).map(([path, content]) => {
             let mappedPath = path;
             if (path.startsWith('/workspace/')) mappedPath = path.replace(/^\/workspace\//, '');
             else if (path.startsWith('/sysroot/')) mappedPath = path.replace(/^\/sysroot\//, '');
             else if (path.startsWith('/')) mappedPath = path.slice(1);
+            return { mappedPath, content };
+        });
 
-            // Rename the user's main() so the synthetic runner's main()
-            // wins the linker fight without a duplicate-symbol error. We
-            // do this as a one-shot text substitution rather than a
-            // `#define`/`#undef` bracket so __LINE__ in EXPECT_EQUALS
-            // assertions still matches the editor's row numbers.
-            const final = isTest && mappedPath.endsWith('.cpp')
-                ? content.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(')
-                : content;
+        // Pick a single .cpp to host the synthetic test main(). The wasm
+        // toolchain shipped by debugger-sh compiles exactly one source file
+        // — the one whose `int main(` it finds — so any "runner.cpp"
+        // alongside the user's code is silently ignored and its main()
+        // never reaches the binary. Preferences, in order: the file the
+        // user has already declared main() in, then the conventional
+        // `main.cpp`, then the first .cpp alphabetically. Static
+        // initialisers in other .cpp files do NOT run, so STUDENT_TEST
+        // blocks must live in the entry file.
+        const cppFiles = mapped.filter((f) => f.mappedPath.endsWith('.cpp'));
+        const hasMain = (s: string) => /\b(int|void)\s+main\s*\(/.test(s);
+        const testEntry = isTest
+            ? (cppFiles.find((f) => hasMain(f.content))?.mappedPath
+                ?? cppFiles.find((f) => f.mappedPath === 'main.cpp')?.mappedPath
+                ?? [...cppFiles].sort((a, b) => a.mappedPath.localeCompare(b.mappedPath))[0]?.mappedPath)
+            : undefined;
+
+        this.fileMap = {};
+        for (const { mappedPath, content } of mapped) {
+            // Rename the user's main() so the appended runner main() wins
+            // the linker fight without a duplicate-symbol error. We do this
+            // as a one-shot text substitution rather than a `#define`
+            // bracket so __LINE__ in EXPECT_EQUALS assertions still matches
+            // the editor's row numbers.
+            //
+            // Force-include nova_test.h so students who write
+            // STUDENT_TEST/EXPECT_EQUALS without remembering the include
+            // still compile. `#line 1 "<path>"` resets the counters so
+            // __FILE__/__LINE__ in user assertions stay aligned with the
+            // editor (Tests panel turns those into clickable links).
+            //
+            // Only the chosen entry file gets the trailing main() so
+            // multi-file projects don't end up with duplicate symbols.
+            let final = content;
+            if (isTest && mappedPath.endsWith('.cpp')) {
+                final = final.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(');
+                final = `#include "${NOVA_TEST_HEADER_NAME}"\n#line 1 "${mappedPath}"\n${final}`;
+                if (mappedPath === testEntry) {
+                    final += `\nint main() { ::nova_test::run_all(); return 0; }\n`;
+                }
+            }
             this.fileMap[mappedPath] = final;
         }
 
         if (isTest) {
             this.fileMap[NOVA_TEST_HEADER_NAME] = NOVA_TEST_HEADER;
-            this.fileMap[NOVA_TEST_RUNNER_NAME] = NOVA_TEST_RUNNER;
         }
 
         this.testMode = isTest;

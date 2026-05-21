@@ -30,6 +30,13 @@ export const WORKSPACE_PATH = '/workspace'
 // Fallback compile flags clangd uses without a compile_commands.json. We
 // don't pass `-x c++` — clangd's driver picks the language from the
 // extension, and forcing C++ would flag valid C inside a .c file.
+//
+// `-include` force-includes the test framework header in every TU so
+// STUDENT_TEST / EXPECT_EQUALS aren't flagged as undeclared in the editor
+// when the student hasn't written `#include "nova_test.h"` themselves.
+// The header has `#pragma once`, so duplicate inclusion is a no-op; the
+// macros are harmless when unused. The matching include is injected by
+// NpmDapEngine.compile at run-time (see fileMap construction there).
 export const COMPILE_FLAGS: readonly string[] = [
     '-std=c++23',
     '-Wall',
@@ -38,6 +45,8 @@ export const COMPILE_FLAGS: readonly string[] = [
     '-isystem/usr/include/wasm32-wasi/c++/v1',
     '-isystem/usr/include',
     '-isystem/usr/include/wasm32-wasi',
+    '-include',
+    '/workspace/nova_test.h',
 ]
 
 export const CPP_EXTENSIONS: readonly string[] = [
