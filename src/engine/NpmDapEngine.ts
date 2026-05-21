@@ -14,6 +14,13 @@ import type {
     StackFrame,
     HeapAllocation,
 } from './IIDEEngine';
+import {
+    NOVA_TEST_HEADER,
+    NOVA_TEST_HEADER_NAME,
+    NOVA_TEST_MARKER,
+    NOVA_TEST_RUNNER,
+    NOVA_TEST_RUNNER_NAME,
+} from '@/testing/payload';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -38,6 +45,7 @@ export class NpmDapEngine implements IIDEEngine {
     public readonly onDebugPaused = new EventEmitter<DebugPauseState>();
     public readonly onDebugResumed = new EventEmitter<void>();
     public readonly onExit = new EventEmitter<number>();
+    public readonly onTestEvent = new EventEmitter<string>();
 
     // One Engine for the lifetime of this NpmDapEngine. Engine.create
     // allocates a Rust DapAdapter on the main thread's WASM heap, which
@@ -62,10 +70,21 @@ export class NpmDapEngine implements IIDEEngine {
     private fileMap: Record<string, string> = {};
     private inputBuf = '';
     private currentIsDebug = false;
+    // True between compile(isTest=true) and the next non-test compile(). While
+    // set, the stdout listener splits ###NOVA_TEST### marker lines out of the
+    // user-visible terminal stream and emits them through `onTestEvent`.
+    private testMode = false;
+    // Holds partial stdout chunks while we wait for a newline. Test markers
+    // are emitted line-by-line on the C++ side, so we can't dispatch one until
+    // we have a complete line — otherwise a chunk boundary in the middle of a
+    // payload would split a single event into two malformed halves.
+    private testBuffer = '';
 
-    async compile(files: Record<string, string>, _isDebug: boolean): Promise<CompileResult> {
+    async compile(files: Record<string, string>, _isDebug: boolean, isTest = false): Promise<CompileResult> {
         this.onClearTerminal.emit();
-        this.onStdout.emit(`\x1b[1;34mInitializing debugger execution environment...\x1b[0m\r\n`);
+        this.onStdout.emit(
+            `\x1b[1;34mInitializing ${isTest ? 'test ' : ''}execution environment...\x1b[0m\r\n`,
+        );
 
         this.fileMap = {};
         for (const [path, content] of Object.entries(files)) {
@@ -73,10 +92,40 @@ export class NpmDapEngine implements IIDEEngine {
             if (path.startsWith('/workspace/')) mappedPath = path.replace(/^\/workspace\//, '');
             else if (path.startsWith('/sysroot/')) mappedPath = path.replace(/^\/sysroot\//, '');
             else if (path.startsWith('/')) mappedPath = path.slice(1);
-            this.fileMap[mappedPath] = content;
+
+            // Rename the user's main() so the synthetic runner's main()
+            // wins the linker fight without a duplicate-symbol error. We
+            // do this as a one-shot text substitution rather than a
+            // `#define`/`#undef` bracket so __LINE__ in EXPECT_EQUALS
+            // assertions still matches the editor's row numbers.
+            const final = isTest && mappedPath.endsWith('.cpp')
+                ? content.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(')
+                : content;
+            this.fileMap[mappedPath] = final;
         }
 
+        if (isTest) {
+            this.fileMap[NOVA_TEST_HEADER_NAME] = NOVA_TEST_HEADER;
+            this.fileMap[NOVA_TEST_RUNNER_NAME] = NOVA_TEST_RUNNER;
+        }
+
+        this.testMode = isTest;
+        this.testBuffer = '';
         return { success: true, errors: [] };
+    }
+
+    // Dispatch one stdout line while testing. Lines containing the sentinel
+    // are stripped of the prefix and forwarded as a test event; anything else
+    // (including any text preceding the sentinel on the same line) lands in
+    // the terminal as usual.
+    private routeTestLine(line: string) {
+        const idx = line.indexOf(NOVA_TEST_MARKER);
+        if (idx === -1) {
+            this.onStdout.emit(line + '\r\n');
+            return;
+        }
+        if (idx > 0) this.onStdout.emit(line.slice(0, idx) + '\r\n');
+        this.onTestEvent.emit(line.slice(idx + NOVA_TEST_MARKER.length));
     }
 
     private dapSend(command: string, args: Record<string, unknown> = {}): DapResponse | null {
@@ -115,7 +164,20 @@ export class NpmDapEngine implements IIDEEngine {
     private attachListeners(engine: EngineType) {
         const decoder = new TextDecoder();
         engine.stdout.on('data', (chunk: Uint8Array) => {
-            this.onStdout.emit(decoder.decode(chunk).replace(/\r?\n/g, '\r\n'));
+            const text = decoder.decode(chunk);
+            if (!this.testMode) {
+                this.onStdout.emit(text.replace(/\r?\n/g, '\r\n'));
+                return;
+            }
+            // Test mode: accumulate until we have full lines, then dispatch
+            // each one (marker → onTestEvent, anything else → terminal).
+            this.testBuffer += text;
+            let idx: number;
+            while ((idx = this.testBuffer.indexOf('\n')) !== -1) {
+                const line = this.testBuffer.slice(0, idx);
+                this.testBuffer = this.testBuffer.slice(idx + 1);
+                this.routeTestLine(line.endsWith('\r') ? line.slice(0, -1) : line);
+            }
         });
         engine.stderr.on('data', (chunk: Uint8Array) => {
             this.onStderr.emit(`\x1b[31m${decoder.decode(chunk).replace(/\r?\n/g, '\r\n')}\x1b[0m`);
@@ -195,6 +257,13 @@ export class NpmDapEngine implements IIDEEngine {
             const msg = e instanceof Error ? e.message : String(e);
             this.onStderr.emit(`\x1b[31mRuntime error: ${msg}\x1b[0m\r\n`);
         } finally {
+            // Flush any trailing partial line so a marker emitted right before
+            // exit (without a closing newline) still reaches the test panel.
+            if (this.testMode && this.testBuffer.length > 0) {
+                const tail = this.testBuffer;
+                this.testBuffer = '';
+                this.routeTestLine(tail);
+            }
             if (this.currentRun === runPromise) this.currentRun = null;
             if (this.running) {
                 this.running = false;

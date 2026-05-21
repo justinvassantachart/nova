@@ -3,6 +3,7 @@ import { CanvasView } from '@/components/canvas/CanvasView'
 import { MemoryVisualizer } from '@/components/debug/MemoryVisualizer'
 import { VariablesPanel } from '@/components/debug/VariablesPanel'
 import { Terminal } from '@/components/terminal/Terminal'
+import { TestsPanel } from '@/testing/TestsPanel'
 import {
     ResizableHandle,
     ResizablePanel,
@@ -13,6 +14,7 @@ const TABS: { id: RightTab; label: string }[] = [
     { id: 'variables', label: 'Variables' },
     { id: 'graph', label: 'Graph' },
     { id: 'canvas', label: 'Canvas' },
+    { id: 'tests', label: 'Tests' },
 ]
 
 export function RightPanel() {
@@ -45,6 +47,7 @@ export function RightPanel() {
                         {activeTab === 'variables' && <VariablesPanel />}
                         {activeTab === 'graph' && <MemoryVisualizer />}
                         {activeTab === 'canvas' && <CanvasView />}
+                        {activeTab === 'tests' && <TestsPanel />}
                     </div>
                 </div>
             </ResizablePanel>

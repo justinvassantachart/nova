@@ -43,8 +43,10 @@ export type DrawCommand =
     | { type: 'RECT'; x: number; y: number; w: number; h: number; color: string };
 
 export interface IIDEEngine {
-    // Lifecycle
-    compile(files: Record<string, string>, isDebug: boolean): Promise<CompileResult>;
+    // Lifecycle. `isTest` swaps in the student-testing payload: a synthetic
+    // runner cpp becomes the program's main(), the user's main() is renamed
+    // via macro, and stdout marker lines are diverted to `onTestEvent`.
+    compile(files: Record<string, string>, isDebug: boolean, isTest?: boolean): Promise<CompileResult>;
     run(isDebug: boolean): Promise<void>;
     stop(): void;
 
@@ -66,4 +68,7 @@ export interface IIDEEngine {
     readonly onDebugPaused: EventEmitter<DebugPauseState>;
     readonly onDebugResumed: EventEmitter<void>;
     readonly onExit: EventEmitter<number>;
+    // One marker payload per emission (the body after the leading
+    // ###NOVA_TEST###|~| sentinel). Only fires while the engine is in test mode.
+    readonly onTestEvent: EventEmitter<string>;
 }

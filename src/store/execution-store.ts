@@ -5,7 +5,7 @@ export type DrawCommand =
     | { type: 'CIRCLE'; x: number; y: number; r: number; color: string }
     | { type: 'RECT'; x: number; y: number; w: number; h: number; color: string }
 
-export type RightTab = 'variables' | 'graph' | 'canvas'
+export type RightTab = 'variables' | 'graph' | 'canvas' | 'tests'
 
 interface ExecutionState {
     isCompiling: boolean

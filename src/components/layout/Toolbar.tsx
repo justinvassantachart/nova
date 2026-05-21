@@ -9,6 +9,7 @@ import { useCompilerStore } from '@/store/compiler-store'
 import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
 import { useEngine } from '@/engine/EngineContext'
+import { useTestStore } from '@/testing/test-store'
 import { DebugControls } from './DebugControls'
 import { SaveStatus } from './SaveStatus'
 import { useIDEHost } from '@/ide-host-context'
@@ -16,7 +17,7 @@ import { useIDEHost } from '@/ide-host-context'
 export function Toolbar() {
     const engine = useEngine()
     const host = useIDEHost()
-    const { isCompiling, isRunning, setIsCompiling, setIsRunning } = useExecutionStore()
+    const { isCompiling, isRunning, setIsCompiling, setIsRunning, setRightTab } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
     const { debugMode, currentLine, currentFile, pushHistoryState, setDebugMode, reset } = useDebugStore()
     const compilerReady = cacheState === 'ready'
@@ -27,20 +28,29 @@ export function Toolbar() {
         const u3 = engine.onExit.subscribe(() => {
             setIsRunning(false)
             if (useDebugStore.getState().debugMode !== 'idle') setDebugMode('idle')
+            // If a test crashed mid-flight the engine never emits SUITE_END, so
+            // promote the unfinished case to a failure rather than leaving the
+            // panel spinning forever.
+            useTestStore.getState().finalize()
         })
-        return () => { u1(); u2(); u3() }
+        const u4 = engine.onTestEvent.subscribe((evt) => useTestStore.getState().processEvent(evt))
+        return () => { u1(); u2(); u3(); u4() }
     }, [engine, pushHistoryState, setDebugMode, setIsRunning])
 
-    const executePipeline = async (debug: boolean) => {
+    const executePipeline = async (debug: boolean, isTest = false) => {
         if (isCompiling || isRunning) return
+        if (isTest) {
+            useTestStore.getState().reset()
+            setRightTab('tests')
+        }
         setIsCompiling(true)
-        host?.onEvent?.(debug ? 'compile_debug' : 'compile', {})
-        const result = await engine.compile(getAllFiles(), debug)
+        host?.onEvent?.(isTest ? 'compile_test' : debug ? 'compile_debug' : 'compile', {})
+        const result = await engine.compile(getAllFiles(), debug, isTest)
         setIsCompiling(false)
         if (result.success) {
             setIsRunning(true)
             setDebugMode(debug ? 'running' : 'idle')
-            host?.onEvent?.('run', { debug })
+            host?.onEvent?.(isTest ? 'run_tests' : 'run', { debug })
             await engine.run(debug)
         } else {
             host?.onEvent?.('compile_error', { debug })
@@ -49,6 +59,7 @@ export function Toolbar() {
 
     const handleRun = () => executePipeline(false)
     const handleDebug = () => executePipeline(true)
+    const handleTest = () => executePipeline(false, true)
     const handleStop = () => { engine.stop(); reset() }
 
     return (
@@ -123,6 +134,16 @@ export function Toolbar() {
                         className="gap-1"
                     >
                         <Codicon name="bug" size={14} className="text-primary" /> Debug
+                    </Button>
+
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleTest}
+                        disabled={!compilerReady || isCompiling}
+                        className="gap-1"
+                    >
+                        <Codicon name="beaker" size={14} className="text-emerald-500" /> Tests
                     </Button>
                 </div>
             ) : isRunning && debugMode !== 'paused' ? (
