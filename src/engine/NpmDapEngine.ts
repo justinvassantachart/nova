@@ -93,21 +93,12 @@ export class NpmDapEngine implements IIDEEngine {
             else if (path.startsWith('/sysroot/')) mappedPath = path.replace(/^\/sysroot\//, '');
             else if (path.startsWith('/')) mappedPath = path.slice(1);
 
-            // In test mode each user .cpp is rewritten in two ways:
-            //
-            //   1. Any `int main(` / `void main(` is renamed to
-            //      `nova_hidden_main(` so the synthetic runner's main()
-            //      below is the only one the linker sees. We use a
-            //      one-shot text substitution rather than `#define main
-            //      ...` because `#define` would also rewrite identifiers
-            //      named `main` inside class bodies or appended code.
-            //
-            //   2. `nova_test.h` is force-included so STUDENT_TEST and
-            //      EXPECT_EQUALS resolve even when the student forgot
-            //      the `#include`. `#line 1 "<path>"` immediately after
-            //      keeps __FILE__/__LINE__ in EXPECT_EQUALS aligned with
-            //      the editor (the Tests panel turns those into
-            //      clickable file:line links).
+            // In test mode every user .cpp gets a one-shot text rename of
+            // `int main(` / `void main(` to `nova_hidden_main(` so the
+            // synthetic runner's main() is the only one the linker sees.
+            // We use a textual rename rather than `#define main ...`
+            // because `#define` would also rewrite identifiers named
+            // `main` inside class bodies or other unintended contexts.
             //
             // Multi-file projects work natively: debugger-sh compiles
             // every .cpp into its own object, then wasm-ld links them
@@ -116,13 +107,19 @@ export class NpmDapEngine implements IIDEEngine {
             let final = content;
             if (isTest && mappedPath.endsWith('.cpp')) {
                 final = final.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(');
-                final = `#include "${NOVA_TEST_HEADER_NAME}"\n#line 1 "${mappedPath}"\n${final}`;
             }
             this.fileMap[mappedPath] = final;
         }
 
+        // nova_test.h is mounted in every compile (not just test mode) so
+        // `#include "nova_test.h"` resolves uniformly across Run, Debug,
+        // and Tests. STUDENT_TEST blocks expand to static `Registrar`
+        // instances either way; in non-test mode they register into the
+        // registry but nothing ever calls run_all(), so they're harmless.
+        // Students opt into the framework by writing the include
+        // themselves, matching Stanford SimpleTest's ergonomics.
+        this.fileMap[NOVA_TEST_HEADER_NAME] = NOVA_TEST_HEADER;
         if (isTest) {
-            this.fileMap[NOVA_TEST_HEADER_NAME] = NOVA_TEST_HEADER;
             this.fileMap[NOVA_TEST_RUNNER_NAME] = NOVA_TEST_RUNNER;
         }
 
