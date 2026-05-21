@@ -18,6 +18,8 @@ import {
     NOVA_TEST_HEADER,
     NOVA_TEST_HEADER_NAME,
     NOVA_TEST_MARKER,
+    NOVA_TEST_RUNNER,
+    NOVA_TEST_RUNNER_NAME,
 } from '@/testing/payload';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -84,88 +86,44 @@ export class NpmDapEngine implements IIDEEngine {
             `\x1b[1;34mInitializing ${isTest ? 'test ' : ''}execution environment...\x1b[0m\r\n`,
         );
 
-        // Normalise paths once so we can both choose a test entry and write
-        // the fileMap from the same loop.
-        const mapped = Object.entries(files).map(([path, content]) => {
+        this.fileMap = {};
+        for (const [path, content] of Object.entries(files)) {
             let mappedPath = path;
             if (path.startsWith('/workspace/')) mappedPath = path.replace(/^\/workspace\//, '');
             else if (path.startsWith('/sysroot/')) mappedPath = path.replace(/^\/sysroot\//, '');
             else if (path.startsWith('/')) mappedPath = path.slice(1);
-            return { mappedPath, content };
-        });
 
-        // debugger-sh's wasm toolchain compiles exactly one TU per run —
-        // it picks one .cpp as the entry, emits /main.o, then links that
-        // single object. Sibling .cpp files are NOT separately compiled
-        // or linked; they only contribute via `#include` from the entry.
-        // Static initialisers in non-included .cpp files therefore never
-        // run.
-        //
-        // To match Stanford SimpleTest's multi-file UX (one .cpp per
-        // module, each with its own STUDENT_TEST blocks), we pick an
-        // entry file and synthesise `#include "<sibling>.cpp"` lines for
-        // every other .cpp in the project. Concatenating into one TU lets
-        // every file's static Registrar instances run at startup, so all
-        // tests register regardless of which file they live in.
-        //
-        // Entry preferences: the file that already declares main(), then
-        // the conventional `main.cpp`, then the first .cpp alphabetically.
-        const cppFiles = mapped.filter((f) => f.mappedPath.endsWith('.cpp'));
-        const hasMain = (s: string) => /\b(int|void)\s+main\s*\(/.test(s);
-        const testEntry = isTest
-            ? (cppFiles.find((f) => hasMain(f.content))?.mappedPath
-                ?? cppFiles.find((f) => f.mappedPath === 'main.cpp')?.mappedPath
-                ?? [...cppFiles].sort((a, b) => a.mappedPath.localeCompare(b.mappedPath))[0]?.mappedPath)
-            : undefined;
-        const siblingCpps = isTest && testEntry
-            ? cppFiles
-                .map((f) => f.mappedPath)
-                .filter((p) => p !== testEntry)
-                .sort((a, b) => a.localeCompare(b))
-            : [];
-
-        this.fileMap = {};
-        for (const { mappedPath, content } of mapped) {
-            // Force-include nova_test.h so STUDENT_TEST/EXPECT_EQUALS
-            // resolve even if the student didn't write the include. The
-            // `#line 1 "<path>"` directive keeps __FILE__/__LINE__ in
-            // assertions aligned with the editor row (the Tests panel
-            // turns those into clickable links).
+            // In test mode each user .cpp is rewritten in two ways:
             //
-            // The user's main() — only meaningful in the entry — is
-            // renamed via one-shot text substitution so the synthetic
-            // runner main() we append doesn't collide. We use rename
-            // rather than `#define main ...` because `#define` would
-            // also rewrite our appended `int main()`. Other .cpps
-            // shouldn't contain main(), but we leave them untouched
-            // there so a stray include from the entry doesn't get a
-            // surprise rename.
+            //   1. Any `int main(` / `void main(` is renamed to
+            //      `nova_hidden_main(` so the synthetic runner's main()
+            //      below is the only one the linker sees. We use a
+            //      one-shot text substitution rather than `#define main
+            //      ...` because `#define` would also rewrite identifiers
+            //      named `main` inside class bodies or appended code.
             //
-            // Entry file additionally pulls in every sibling .cpp via
-            // textual #include so their STUDENT_TEST registrars run,
-            // then gets the runner main() appended.
+            //   2. `nova_test.h` is force-included so STUDENT_TEST and
+            //      EXPECT_EQUALS resolve even when the student forgot
+            //      the `#include`. `#line 1 "<path>"` immediately after
+            //      keeps __FILE__/__LINE__ in EXPECT_EQUALS aligned with
+            //      the editor (the Tests panel turns those into
+            //      clickable file:line links).
+            //
+            // Multi-file projects work natively: debugger-sh compiles
+            // every .cpp into its own object, then wasm-ld links them
+            // together. STUDENT_TEST blocks in any .cpp register via
+            // static initialisers and run_all() iterates them all.
             let final = content;
             if (isTest && mappedPath.endsWith('.cpp')) {
-                const isEntry = mappedPath === testEntry;
-                if (isEntry) {
-                    final = final.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(');
-                }
-                const siblingIncludes = isEntry
-                    ? siblingCpps.map((p) => `#include "${p}"\n`).join('')
-                    : '';
-                final =
-                    `#include "${NOVA_TEST_HEADER_NAME}"\n` +
-                    siblingIncludes +
-                    `#line 1 "${mappedPath}"\n${final}`;
-                if (isEntry) {
-                    final += `\nint main() { ::nova_test::run_all(); return 0; }\n`;
-                }
+                final = final.replace(/\b(int|void)\s+main\s*\(/, '$1 nova_hidden_main(');
+                final = `#include "${NOVA_TEST_HEADER_NAME}"\n#line 1 "${mappedPath}"\n${final}`;
             }
             this.fileMap[mappedPath] = final;
         }
 
         if (isTest) {
             this.fileMap[NOVA_TEST_HEADER_NAME] = NOVA_TEST_HEADER;
+            this.fileMap[NOVA_TEST_RUNNER_NAME] = NOVA_TEST_RUNNER;
         }
 
         this.testMode = isTest;
