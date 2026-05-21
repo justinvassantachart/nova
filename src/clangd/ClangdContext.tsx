@@ -19,6 +19,7 @@ import {
 } from 'react'
 
 import { getAllFiles, subscribeWorkspaceChange } from '@/vfs/volume'
+import { NOVA_TEST_HEADER, NOVA_TEST_HEADER_CLANGD_PATH } from '@/testing/payload'
 import type { IDisposable } from 'monaco-editor'
 
 import { bootClangd } from './bootstrap'
@@ -183,10 +184,15 @@ function collectInitialFiles(): Record<string, string> {
         files = getAllFiles()
     } catch {
         // VFS hasn't initialized yet — watchdog will catch up when it does.
-        return out
+        files = {}
     }
     for (const [path, content] of Object.entries(files)) {
         if (isCppPath(path)) out[path] = content
     }
+    // Inject the test framework header so #include "nova_test.h" resolves and
+    // EXPECT_EQUALS / STUDENT_TEST autocomplete even before the student clicks
+    // "Run Tests". Lives only in clangd's in-memory FS — never written to the
+    // VFS, so it doesn't appear in the file explorer or persist to OPFS.
+    out[NOVA_TEST_HEADER_CLANGD_PATH] = NOVA_TEST_HEADER
     return out
 }
