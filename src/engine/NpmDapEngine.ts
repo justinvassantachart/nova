@@ -21,6 +21,7 @@ import {
     NOVA_TEST_RUNNER,
     NOVA_TEST_RUNNER_NAME,
 } from '@/testing/payload';
+import { PRETTY_PRINTERS } from './formatters';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -381,7 +382,7 @@ export class NpmDapEngine implements IIDEEngine {
                 displayValue = pointsTo && pointsTo > 0 ? `0x${pointsTo.toString(16)}` : '0x0';
             }
 
-            return {
+            let node: VariableNode = {
                 name: v.name ?? '',
                 type: typeStr,
                 value: displayValue,
@@ -394,6 +395,16 @@ export class NpmDapEngine implements IIDEEngine {
                 isStruct: !isPointer && hasChildren,
                 members,
             };
+
+            // Apply DAP-aligned formatters for complex types (std::map, Stanford collections)
+            for (const formatter of PRETTY_PRINTERS) {
+                if (formatter.match(v)) {
+                    node = formatter.format(node, { v, isHeap, processVariable });
+                    break;
+                }
+            }
+
+            return node;
         };
 
         // Phase 1: Walk stack synchronously and gather actual memory footprints
@@ -458,13 +469,22 @@ export class NpmDapEngine implements IIDEEngine {
 
             const members = dapVars.map((child: Any) => processVariable(child, true));
 
-            heapAllocations.set(item.ptr, {
-                ptr: item.ptr,
-                size: 4,
-                typeName: item.typeStr,
-                label: `0x${item.ptr.toString(16).padStart(6, '0')}`,
-                members,
-            });
+            // Hide internal C++ and Stanford library structures (e.g., std::__tree_node, std::vector::data)
+            // so they don't clutter the user's heap visualization.
+            const isInternalLibStruct = item.typeStr.endsWith('::data') ||
+                                        item.typeStr.endsWith('::node') ||
+                                        item.typeStr.includes('tree::node') ||
+                                        item.typeStr.match(/__\w*node/i);
+
+            if (!isInternalLibStruct) {
+                heapAllocations.set(item.ptr, {
+                    ptr: item.ptr,
+                    size: 4,
+                    typeName: item.typeStr,
+                    label: `0x${item.ptr.toString(16).padStart(6, '0')}`,
+                    members,
+                });
+            }
         }
 
         const topFrame = callStack[0];
