@@ -71,4 +71,8 @@ export interface IIDEEngine {
     // One marker payload per emission (the body after the leading
     // ###NOVA_TEST###|~| sentinel). Only fires while the engine is in test mode.
     readonly onTestEvent: EventEmitter<string>;
+    // Fires at most once per run() when the engine's stderr contains a
+    // clang/wasm-ld diagnostic line during the compile phase. Detection is
+    // pattern-based on the diagnostic format (filename:line:col: error: ...).
+    readonly onCompileError: EventEmitter<{ message: string; isDebug: boolean; isTest: boolean }>;
 }

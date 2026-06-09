@@ -1,0 +1,378 @@
+From f4990c1f8e3cfd1a88e6c3d3970368c352540a45 Mon Sep 17 00:00:00 2001
+From: Justin Vassantachart <jwv@stanford.edu>
+Date: Fri, 22 May 2026 11:19:09 -0700
+Subject: [PATCH] feat: format raw C/C++ arrays in the variables view
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds an `ArrayFormatter` that matches `TypeDeclaration::Array` and
+exposes the array elements as indexed children (`[0]`, `[1]`, …) so
+locals like `int arr[5]` no longer render as `<unknown>` with no
+expansion. Without this formatter, no entry in the formatter registry
+matched `TypeDeclaration::Array`, so `Type::formatter()` returned
+`None` and `Variable::display()` fell through to `<unknown>`.
+
+Also fixes two DWARF parsing bugs that prevented the array length from
+ever reaching the formatter or the type display:
+
+1. `array_bound` only accepted `Udata`/`Sdata` gimli forms, but clang
+   emits `DW_AT_count` / `DW_AT_upper_bound` as `DW_FORM_data1..8`,
+   so those bounds parsed as `None` and arrays rendered as `T[]`.
+2. `parse_subrange` stored a `DW_AT_count` value directly in
+   `upper_bound`, off by one from the inclusive-index semantics
+   used by `decl_name`. Now convert count → upper = lower + count - 1
+   before returning, so the rest of the engine can treat the result
+   uniformly regardless of which DWARF form the producer chose.
+
+Adds a regression test that exercises an `int[5]` local: verifies the
+type renders as `int[5]`, `indexedVariables = 5`, and that indexed
+slices (`filter: "indexed"`, paged) return the correct elements.
+
+Verified end-to-end in the Nova IDE — `arr` now shows as `int[5]`
+@0xfffe0 and expands to `[0]=10 .. [4]=50`.
+---
+ src/debug/debug.rs                         |   1 +
+ src/debug/formatters/default/array.rs      | 101 ++++++++++++++++
+ src/debug/formatters/default/mod.rs        |   2 +
+ src/debug/types.rs                         |  30 ++++-
+ tools/dap/tests/formatting/array/dap.jsonc | 131 +++++++++++++++++++++
+ tools/dap/tests/formatting/array/main.cpp  |   4 +
+ 6 files changed, 267 insertions(+), 2 deletions(-)
+ create mode 100644 src/debug/formatters/default/array.rs
+ create mode 100644 tools/dap/tests/formatting/array/dap.jsonc
+ create mode 100644 tools/dap/tests/formatting/array/main.cpp
+
+diff --git a/src/debug/debug.rs b/src/debug/debug.rs
+index 182a9a9..5a8bc4f 100644
+--- a/src/debug/debug.rs
++++ b/src/debug/debug.rs
+@@ -64,6 +64,7 @@ impl Debugger {
+                             Rc::new(formatters::default::ScalarFormatter),
+                             Rc::new(formatters::default::ReferentialFormatter),
+                             Rc::new(formatters::default::StructureFormatter),
++                            Rc::new(formatters::default::ArrayFormatter),
+                         ],
+                     },
+                     FormatterCategory {
+diff --git a/src/debug/formatters/default/array.rs b/src/debug/formatters/default/array.rs
+new file mode 100644
+index 0000000..7bd6bc0
+--- /dev/null
++++ b/src/debug/formatters/default/array.rs
+@@ -0,0 +1,101 @@
++//! Raw C/C++ array formatter (e.g. `int arr[5]`).
++//!
++//! Without this formatter, [TypeDeclaration::Array](crate::debug::TypeDeclaration::Array)
++//! matches no entry in the formatter registry, so arrays render as
++//! `<unknown>` with no expansion.
++//!
++//! Mirrors the [`StdVectorFormatter`](crate::debug::formatters::cpp::StdVectorFormatter)
++//! pattern: bundle the per-call DWARF lookups in a single `data()` helper,
++//! present the array address via `display`, and expose elements as indexed
++//! children sliced by `child_at_offset`.
++
++use std::ops::Range;
++
++use anyhow::{Context, Result, bail};
++
++use crate::debug::formatters::{ChildCounts, VariableFormatter};
++use crate::debug::{Type, TypeDeclaration, Value, Variable};
++
++pub struct ArrayFormatter;
++
++struct ArrayData {
++    count: usize,
++    elem_ty: Type,
++    elem_size: usize,
++}
++
++impl ArrayFormatter {
++    fn data(value: &Variable) -> Result<ArrayData> {
++        let Some(TypeDeclaration::Array {
++            element_type,
++            lower_bound,
++            upper_bound,
++            ..
++        }) = value.ty().resolved()
++        else {
++            bail!("not an array type");
++        };
++
++        // DWARF subranges with no upper_bound describe flexible-array members
++        // (e.g. `int trailing[];`); render them as empty rather than guessing.
++        let count = match (lower_bound, upper_bound) {
++            (Value::Constant(lo), Some(Value::Constant(hi))) => (hi - lo + 1).max(0) as usize,
++            _ => 0,
++        };
++
++        let elem_ty = value.ty().child(*element_type);
++        let elem_size = elem_ty
++            .byte_size()
++            .context("array element size is unavailable")? as usize;
++
++        Ok(ArrayData {
++            count,
++            elem_ty,
++            elem_size,
++        })
++    }
++}
++
++impl VariableFormatter for ArrayFormatter {
++    fn matches(&self, ty: &Type) -> bool {
++        matches!(ty.resolved(), Some(TypeDeclaration::Array { .. }))
++    }
++
++    fn display(&self, value: &Variable) -> Result<String> {
++        match value.ty().resolved() {
++            Some(TypeDeclaration::Array { .. }) => Ok(match value.address() {
++                Some(addr) => format!("@{addr}"),
++                None => String::default(),
++            }),
++            _ => bail!("cannot format non-array value"),
++        }
++    }
++
++    fn num_children(&self, value: &Variable) -> Result<ChildCounts> {
++        Ok(ChildCounts::indexed(Self::data(value)?.count))
++    }
++
++    fn indexed_children(&self, value: &Variable, range: Range<usize>) -> Result<Vec<Variable>> {
++        let data = Self::data(value)?;
++        if data.elem_size == 0 {
++            return Ok(Vec::new());
++        }
++
++        let start = range.start.min(data.count);
++        let end = range.end.min(data.count);
++        let mut result = Vec::with_capacity(end.saturating_sub(start));
++        for i in start..end {
++            result.push(
++                value
++                    .child_at_offset(i * data.elem_size)
++                    .with_name(&format!("[{i}]"))
++                    .with_type(&data.elem_ty),
++            );
++        }
++        Ok(result)
++    }
++
++    fn named_children(&self, _value: &Variable, _range: Range<usize>) -> Result<Vec<Variable>> {
++        Ok(Vec::new())
++    }
++}
+diff --git a/src/debug/formatters/default/mod.rs b/src/debug/formatters/default/mod.rs
+index ff8e615..4017830 100644
+--- a/src/debug/formatters/default/mod.rs
++++ b/src/debug/formatters/default/mod.rs
+@@ -1,7 +1,9 @@
++mod array;
+ mod referential;
+ mod scalar;
+ mod structure;
+ 
++pub use array::ArrayFormatter;
+ pub use referential::ReferentialFormatter;
+ pub use scalar::ScalarFormatter;
+ pub use structure::StructureFormatter;
+diff --git a/src/debug/types.rs b/src/debug/types.rs
+index baad75e..aec2d6b 100644
+--- a/src/debug/types.rs
++++ b/src/debug/types.rs
+@@ -505,17 +505,43 @@ fn parse_subrange(die: &Die<'_>) -> (Value, Option<Value>) {
+         .attr_value(gimli::DW_AT_lower_bound)
+         .and_then(array_bound)
+         .unwrap_or(Value::Constant(0));
+-    let upper = die
++
++    // DW_AT_upper_bound is the inclusive index of the last element, but
++    // DW_AT_count is the element count — they're off by one. Clang emits
++    // DW_AT_count for C arrays, so convert it to upper = lower + count - 1
++    // before returning, so callers can treat the result uniformly.
++    let upper = if let Some(v) = die
+         .attr_value(gimli::DW_AT_upper_bound)
+         .and_then(array_bound)
+-        .or_else(|| die.attr_value(gimli::DW_AT_count).and_then(array_bound));
++    {
++        Some(v)
++    } else if let Some(count) = die
++        .attr_value(gimli::DW_AT_count)
++        .and_then(array_bound)
++    {
++        match (&lower, &count) {
++            (Value::Constant(lo), Value::Constant(c)) => Some(Value::Constant(lo + c - 1)),
++            _ => Some(count),
++        }
++    } else {
++        None
++    };
++
+     (lower, upper)
+ }
+ 
+ fn array_bound(value: gimli::AttributeValue<R>) -> Option<Value> {
+     match value {
++        // Clang emits DW_AT_count / DW_AT_upper_bound for fixed-size arrays
++        // using DW_FORM_data1..8, not DW_FORM_udata, so we need to accept
++        // those raw integer forms too — otherwise array bounds parse as
++        // `None` and arrays render with type `T[]` instead of `T[N]`.
+         gimli::AttributeValue::Udata(u) => Some(Value::Constant(u as i64)),
+         gimli::AttributeValue::Sdata(s) => Some(Value::Constant(s)),
++        gimli::AttributeValue::Data1(u) => Some(Value::Constant(u as i64)),
++        gimli::AttributeValue::Data2(u) => Some(Value::Constant(u as i64)),
++        gimli::AttributeValue::Data4(u) => Some(Value::Constant(u as i64)),
++        gimli::AttributeValue::Data8(u) => Some(Value::Constant(u as i64)),
+         gimli::AttributeValue::Exprloc(e) => Some(Value::Expr(e)),
+         _ => None,
+     }
+diff --git a/tools/dap/tests/formatting/array/dap.jsonc b/tools/dap/tests/formatting/array/dap.jsonc
+new file mode 100644
+index 0000000..43e44a1
+--- /dev/null
++++ b/tools/dap/tests/formatting/array/dap.jsonc
+@@ -0,0 +1,131 @@
++// Raw C array formatter: indexed children sourced from the array's storage.
++{
++  "steps": [
++    {
++      "type": "request",
++      "command": "setBreakpoints",
++      "arguments": {
++        "source": { "path": "main.cpp" },
++        "breakpoints": [{ "line": 3 }]
++      }
++    },
++    {
++      "type": "response",
++      "body": {
++        "breakpoints": {
++          "$array.contains": [{ "line": 3, "verified": true }]
++        }
++      }
++    },
++    {
++      "type": "request",
++      "command": "configurationDone",
++      "arguments": {}
++    },
++    {
++      "type": "event",
++      "event": "stopped",
++      "body": {
++        "reason": "breakpoint",
++        "threadId": "${{thread}}"
++      }
++    },
++    {
++      "type": "request",
++      "command": "stackTrace",
++      "arguments": { "threadId": "{{thread}}" }
++    },
++    {
++      "type": "response",
++      "body": {
++        "stackFrames": {
++          "$array.contains": [{ "name": "main", "id": "${{mainFrame}}" }]
++        }
++      }
++    },
++    {
++      "type": "request",
++      "command": "scopes",
++      "arguments": { "frameId": "{{mainFrame}}" }
++    },
++    {
++      "type": "response",
++      "body": {
++        "scopes": {
++          "$array.contains": [
++            {
++              "name": "Locals",
++              "variablesReference": "${{locals}}"
++            }
++          ]
++        }
++      }
++    },
++    {
++      "type": "request",
++      "command": "variables",
++      "arguments": {
++        "variablesReference": "{{locals}}"
++      }
++    },
++    {
++      "type": "response",
++      "body": {
++        "variables": {
++          "$array.contains": [
++            {
++              "name": "arr",
++              "type": "int[5]",
++              "indexedVariables": 5,
++              "variablesReference": "${{arr}}"
++            }
++          ]
++        }
++      }
++    },
++    {
++      "type": "request",
++      "command": "variables",
++      "arguments": {
++        "variablesReference": "{{arr}}"
++      }
++    },
++    {
++      "type": "response",
++      "body": {
++        "variables": [
++          { "name": "[0]", "value": "10", "variablesReference": 0 },
++          { "name": "[1]", "value": "20", "variablesReference": 0 },
++          { "name": "[2]", "value": "30", "variablesReference": 0 },
++          { "name": "[3]", "value": "40", "variablesReference": 0 },
++          { "name": "[4]", "value": "50", "variablesReference": 0 }
++        ]
++      }
++    },
++    {
++      "type": "request",
++      "command": "variables",
++      "arguments": {
++        "variablesReference": "{{arr}}",
++        "filter": "indexed",
++        "start": 1,
++        "count": 3
++      }
++    },
++    {
++      "type": "response",
++      "body": {
++        "variables": [
++          { "name": "[1]", "value": "20", "variablesReference": 0 },
++          { "name": "[2]", "value": "30", "variablesReference": 0 },
++          { "name": "[3]", "value": "40", "variablesReference": 0 }
++        ]
++      }
++    },
++    {
++      "type": "request",
++      "command": "continue",
++      "arguments": { "threadId": "{{thread}}" }
++    }
++  ]
++}
+diff --git a/tools/dap/tests/formatting/array/main.cpp b/tools/dap/tests/formatting/array/main.cpp
+new file mode 100644
+index 0000000..6607cd9
+--- /dev/null
++++ b/tools/dap/tests/formatting/array/main.cpp
+@@ -0,0 +1,4 @@
++int main() {
++  int arr[5] = {10, 20, 30, 40, 50};
++  return 0;
++}
+-- 
+2.50.1 (Apple Git-155)
+

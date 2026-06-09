@@ -34,8 +34,11 @@ export function Toolbar() {
             useTestStore.getState().finalize()
         })
         const u4 = engine.onTestEvent.subscribe((evt) => useTestStore.getState().processEvent(evt))
-        return () => { u1(); u2(); u3(); u4() }
-    }, [engine, pushHistoryState, setDebugMode, setIsRunning])
+        const u5 = engine.onCompileError.subscribe((e) => {
+            host?.onEvent?.('compile_error', { debug: e.isDebug })
+        })
+        return () => { u1(); u2(); u3(); u4(); u5() }
+    }, [engine, host, pushHistoryState, setDebugMode, setIsRunning])
 
     const executePipeline = async (debug: boolean, isTest = false) => {
         if (isCompiling || isRunning) return
@@ -45,16 +48,15 @@ export function Toolbar() {
         }
         setIsCompiling(true)
         host?.onEvent?.(isTest ? 'compile_test' : debug ? 'compile_debug' : 'compile', {})
-        const result = await engine.compile(getAllFiles(), debug, isTest)
+        // compile() is a no-op file-staging step in NpmDapEngine; actual
+        // compilation happens inside engine.run(). Compile failures surface
+        // asynchronously via engine.onCompileError.
+        await engine.compile(getAllFiles(), debug, isTest)
         setIsCompiling(false)
-        if (result.success) {
-            setIsRunning(true)
-            setDebugMode(debug ? 'running' : 'idle')
-            host?.onEvent?.(isTest ? 'run_tests' : 'run', { debug })
-            await engine.run(debug)
-        } else {
-            host?.onEvent?.('compile_error', { debug })
-        }
+        setIsRunning(true)
+        setDebugMode(debug ? 'running' : 'idle')
+        host?.onEvent?.(isTest ? 'run_tests' : 'run', { debug })
+        await engine.run(debug)
     }
 
     const handleRun = () => executePipeline(false)

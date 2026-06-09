@@ -46,6 +46,7 @@ export class NpmDapEngine implements IIDEEngine {
     public readonly onDebugResumed = new EventEmitter<void>();
     public readonly onExit = new EventEmitter<number>();
     public readonly onTestEvent = new EventEmitter<string>();
+    public readonly onCompileError = new EventEmitter<{ message: string; isDebug: boolean; isTest: boolean }>();
 
     // One Engine for the lifetime of this NpmDapEngine. Engine.create
     // allocates a Rust DapAdapter on the main thread's WASM heap, which
@@ -79,6 +80,13 @@ export class NpmDapEngine implements IIDEEngine {
     // we have a complete line — otherwise a chunk boundary in the middle of a
     // payload would split a single event into two malformed halves.
     private testBuffer = '';
+    // Tracks the window between engine.run() being invoked and the first signal
+    // that user code is executing (DAP `initialized` event, first stdout chunk,
+    // or run resolution). Anything written to engine.stderr in this window is
+    // compiler/linker output, so we scan it for clang/wasm-ld diagnostics.
+    private inCompilePhase = false;
+    private compileErrorEmitted = false;
+    private stderrLineBuf = '';
 
     async compile(files: Record<string, string>, _isDebug: boolean, isTest = false): Promise<CompileResult> {
         this.onClearTerminal.emit();
@@ -142,6 +150,33 @@ export class NpmDapEngine implements IIDEEngine {
         this.onTestEvent.emit(line.slice(idx + NOVA_TEST_MARKER.length));
     }
 
+    // Matches clang frontend diagnostics (`path.cpp:5:10: error:` /
+    // `fatal error:`), wasm-ld linker errors (`wasm-ld: error:`), and the
+    // trailing `N error[s] generated.` summary line. The filename:line:col
+    // anchor avoids false positives from runtime stderr that happens to
+    // contain the substring "error:".
+    private static readonly COMPILE_ERROR_RE =
+        /(^[^\s:]+:\d+:\d+:\s+(?:fatal\s+)?error:|^wasm-ld:\s+error:|^\d+\s+errors?\s+generated\.)/;
+
+    private scanForCompileError(text: string) {
+        if (!this.inCompilePhase || this.compileErrorEmitted) return;
+        this.stderrLineBuf += text;
+        const lines = this.stderrLineBuf.split('\n');
+        this.stderrLineBuf = lines.pop() ?? '';
+        for (const raw of lines) {
+            const line = raw.replace(/\r$/, '');
+            if (NpmDapEngine.COMPILE_ERROR_RE.test(line)) {
+                this.compileErrorEmitted = true;
+                this.onCompileError.emit({
+                    message: line,
+                    isDebug: this.currentIsDebug,
+                    isTest: this.testMode,
+                });
+                return;
+            }
+        }
+    }
+
     private dapSend(command: string, args: Record<string, unknown> = {}): DapResponse | null {
         if (!this.engine) return null;
         try {
@@ -178,6 +213,8 @@ export class NpmDapEngine implements IIDEEngine {
     private attachListeners(engine: EngineType) {
         const decoder = new TextDecoder();
         engine.stdout.on('data', (chunk: Uint8Array) => {
+            // First user-program stdout byte means compile already succeeded.
+            this.inCompilePhase = false;
             const text = decoder.decode(chunk);
             if (!this.testMode) {
                 this.onStdout.emit(text.replace(/\r?\n/g, '\r\n'));
@@ -194,7 +231,9 @@ export class NpmDapEngine implements IIDEEngine {
             }
         });
         engine.stderr.on('data', (chunk: Uint8Array) => {
-            this.onStderr.emit(`\x1b[31m${decoder.decode(chunk).replace(/\r?\n/g, '\r\n')}\x1b[0m`);
+            const text = decoder.decode(chunk);
+            this.scanForCompileError(text);
+            this.onStderr.emit(`\x1b[31m${text.replace(/\r?\n/g, '\r\n')}\x1b[0m`);
         });
         const dbg = engine.debugger as unknown as {
             on(event: 'event', listener: (msg: unknown) => void): void;
@@ -205,6 +244,9 @@ export class NpmDapEngine implements IIDEEngine {
 
             switch (m.event) {
                 case 'initialized':
+                    // The debugger only reaches 'initialized' after a successful
+                    // compile; any subsequent stderr is runtime output.
+                    this.inCompilePhase = false;
                     this.configureDebugger(this.currentIsDebug);
                     break;
                 case 'stopped':
@@ -249,6 +291,9 @@ export class NpmDapEngine implements IIDEEngine {
         this.running = true;
         this.dapSeq = 1;
         this.inputBuf = '';
+        this.inCompilePhase = true;
+        this.compileErrorEmitted = false;
+        this.stderrLineBuf = '';
 
         this.dapSend('initialize', {
             clientID: 'nova-ide',
@@ -278,6 +323,11 @@ export class NpmDapEngine implements IIDEEngine {
                 this.testBuffer = '';
                 this.routeTestLine(tail);
             }
+            // Drain any pending stderr line and close the compile-phase window.
+            if (this.inCompilePhase && this.stderrLineBuf.length > 0) {
+                this.scanForCompileError('\n');
+            }
+            this.inCompilePhase = false;
             if (this.currentRun === runPromise) this.currentRun = null;
             if (this.running) {
                 this.running = false;
