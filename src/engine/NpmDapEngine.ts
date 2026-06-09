@@ -189,8 +189,28 @@ export class NpmDapEngine implements IIDEEngine {
             return res as DapResponse;
         } catch (e) {
             console.error(`[NpmDapEngine] DAP send failed (${command}):`, e);
+            // A throw out of the synchronous Rust adapter means its WASM
+            // state trapped (panic = abort): every subsequent call would
+            // also throw, and a pending resume command will never reach
+            // the worker — which then blocks on Atomics.wait forever and
+            // the session freezes. Tear the session down instead.
+            this.abortDeadSession();
             return null;
         }
+    }
+
+    // Recovery path for a crashed DAP adapter. Settles the in-flight run
+    // (stop() rejects the worker promise, which terminates the worker) and
+    // discards the Engine so the next run builds a fresh adapter. Leaking
+    // one engine here is acceptable — the alternative is a debug session
+    // that hangs until the page is reloaded.
+    private abortDeadSession() {
+        if (!this.engine) return;
+        const engine = this.engine;
+        this.engine = null;
+        this.engineInit = null;
+        this.onStderr.emit('\x1b[31mDebugger crashed — session aborted. Press Debug to start over.\x1b[0m\r\n');
+        try { engine.stop(); } catch { /* ignore */ }
     }
 
     private async ensureEngine(): Promise<EngineType> {
@@ -367,9 +387,32 @@ export class NpmDapEngine implements IIDEEngine {
         return path;
     }
 
+    // Ceiling on children fetched per variables request. Values like vector
+    // sizes and pointer targets are read from raw debuggee memory and can be
+    // garbage (uninitialized/destroyed locals), so an unbounded request can
+    // ask the synchronous Rust adapter for millions of children and stall
+    // the main thread. 100 is plenty for the variables panel.
+    private static readonly MAX_CHILDREN = 100;
+    // Struct-member recursion guard for the same reason: garbage memory can
+    // produce arbitrarily deep member chains.
+    private static readonly MAX_DEPTH = 8;
+
+    private dapVariables(variablesReference: number): Any[] {
+        const res = this.dapSend('variables', {
+            variablesReference,
+            start: 0,
+            count: NpmDapEngine.MAX_CHILDREN,
+        });
+        return res?.body?.variables ?? [];
+    }
+
     private handleStopped(body: Any) {
         const threadId = body?.threadId ?? 1;
         const stackRes = this.dapSend('stackTrace', { threadId });
+        // A null response right after a `stopped` event means the adapter
+        // died mid-pause (abortDeadSession already ran) — don't emit a
+        // bogus pause state on top of the teardown.
+        if (!stackRes) return;
         const frames: Any[] = stackRes?.body?.stackFrames ?? [];
 
         const callStack: StackFrame[] = [];
@@ -381,7 +424,7 @@ export class NpmDapEngine implements IIDEEngine {
 
         const parseAddr = (v: Any) => this.parseHexAddress(v.memoryReference);
 
-        const processVariable = (v: Any, isHeap: boolean): VariableNode => {
+        const processVariable = (v: Any, isHeap: boolean, depth = 0): VariableNode => {
             const addr = parseAddr(v);
             const typeStr: string = v.type ?? '';
             // Match pointer logic including references
@@ -400,8 +443,7 @@ export class NpmDapEngine implements IIDEEngine {
                 if (hasChildren) {
                     // The engine returns the pointer's own storage address in `value`,
                     // not the target. Dereference through children to get the actual target.
-                    const varsRes = this.dapSend('variables', { variablesReference });
-                    const dapVars: Any[] = varsRes?.body?.variables ?? [];
+                    const dapVars = this.dapVariables(variablesReference);
                     if (dapVars.length > 0) {
                         pointsTo = parseAddr(dapVars[0]);
                     }
@@ -416,11 +458,10 @@ export class NpmDapEngine implements IIDEEngine {
                         });
                     }
                 }
-            } else if (hasChildren && !visitedRefs.has(variablesReference)) {
+            } else if (hasChildren && depth < NpmDapEngine.MAX_DEPTH && !visitedRefs.has(variablesReference)) {
                 visitedRefs.add(variablesReference);
-                const varsRes = this.dapSend('variables', { variablesReference });
-                const dapVars: Any[] = varsRes?.body?.variables ?? [];
-                members = dapVars.map((child) => processVariable(child, isHeap));
+                const dapVars = this.dapVariables(variablesReference);
+                members = dapVars.map((child) => processVariable(child, isHeap, depth + 1));
             }
 
             // For pointers `v.value` is the variable's own storage address (debugger-sh
@@ -453,8 +494,7 @@ export class NpmDapEngine implements IIDEEngine {
             const variables: VariableNode[] = [];
 
             for (const scope of scopesRes?.body?.scopes ?? []) {
-                const varsRes = this.dapSend('variables', { variablesReference: scope.variablesReference });
-                for (const v of varsRes?.body?.variables ?? []) {
+                for (const v of this.dapVariables(scope.variablesReference)) {
                     variables.push(processVariable(v, false));
                 }
             }
@@ -491,17 +531,16 @@ export class NpmDapEngine implements IIDEEngine {
 
             heapNodeCount++;
 
-            const varsRes = this.dapSend('variables', { variablesReference: item.variablesReference });
-            let dapVars: Any[] = varsRes?.body?.variables ?? [];
+            let dapVars: Any[] = this.dapVariables(item.variablesReference);
 
             // Some DAP implementations return a single element named "*varname" when requesting variables of a pointer.
             // In this case we unwrap it so the properties are top-level on the heap node.
             if (dapVars.length === 1 && (dapVars[0].name?.startsWith('*') || (item.valueStr && item.valueStr.includes(dapVars[0].value)))) {
                 const derefVar = dapVars[0];
                 if (derefVar.variablesReference > 0) {
-                    const innerRes = this.dapSend('variables', { variablesReference: derefVar.variablesReference });
-                    if (innerRes?.body?.variables) {
-                        dapVars = innerRes.body.variables;
+                    const inner = this.dapVariables(derefVar.variablesReference);
+                    if (inner.length > 0) {
+                        dapVars = inner;
                     }
                 }
             }
