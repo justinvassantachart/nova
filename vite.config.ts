@@ -25,20 +25,30 @@ import path from 'path'
 // headers run late in the pipeline and overwrite per-route overrides.
 const NON_ISOLATED_PATHS = new Set(['/', '/login'])
 function novaSecurityHeaders(): Plugin {
+  const middleware = (
+    req: { url?: string },
+    res: { setHeader(name: string, value: string): void },
+    next: () => void,
+  ) => {
+    const p = req.url ? req.url.split('?')[0] : ''
+    if (NON_ISOLATED_PATHS.has(p)) {
+      res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none')
+      res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none')
+    } else {
+      res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+      res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
+    }
+    next()
+  }
   return {
     name: 'nova-security-headers',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const p = req.url ? req.url.split('?')[0] : ''
-        if (NON_ISOLATED_PATHS.has(p)) {
-          res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none')
-          res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none')
-        } else {
-          res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-          res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
-        }
-        next()
-      })
+      server.middlewares.use(middleware)
+    },
+    // `vite preview` needs the same headers or crossOriginIsolated is false
+    // and every SharedArrayBuffer consumer (debugger, clangd) silently dies.
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware)
     },
   }
 }

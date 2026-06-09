@@ -18,7 +18,9 @@ A browser-based C++ IDE with in-browser compilation, step-through debugging, and
 - **Step-through debugger** with breakpoints, step-in/over/out, and full execution history
 - **Live memory visualizer** - interactive graph of stack frames, heap allocations, and pointer relationships
 ![Memory & heap visualization](./assets/demo_memory-heap.png)
-- **Integrated terminal** for program I/O
+- **Integrated terminal** for program I/O, including line-buffered stdin (`cin`, `scanf`, ^C/^D handling)
+- **Intellisense** - full clangd LSP (completion, hover, diagnostics, go-to-definition) running in a worker
+- **Student testing framework** - `STUDENT_TEST("name") { EXPECT_EQUALS(...); }` blocks with a results panel, modeled on Stanford's SimpleTest
 - **Multiple Files + Classes** - virtual filesystem is auto-saved locally and files can be included in programs like normal.
 ![Classes](./assets/demo_classes.png)
 - **Canvas output** for graphics programs
@@ -26,8 +28,6 @@ A browser-based C++ IDE with in-browser compilation, step-through debugging, and
 
 ## TODO
 
-- [ ] Connect terminal to STDIN
-- [ ] Add intellisense
 - [ ] Flesh out the graphics library
 
 ## Architecture
