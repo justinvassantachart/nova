@@ -87,6 +87,11 @@ export class NpmDapEngine implements IIDEEngine {
     private inCompilePhase = false;
     private compileErrorEmitted = false;
     private stderrLineBuf = '';
+    // Remaining silent re-steps for "just my code" stepping (see
+    // handleStopped). Refilled on every user-initiated step/continue and on
+    // each pause that lands in user code.
+    private static readonly AUTO_STEP_BUDGET = 64;
+    private autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
 
     async compile(files: Record<string, string>, _isDebug: boolean, isTest = false): Promise<CompileResult> {
         this.onClearTerminal.emit();
@@ -406,6 +411,15 @@ export class NpmDapEngine implements IIDEEngine {
         return res?.body?.variables ?? [];
     }
 
+    // True when a stack-frame source path is one of the files the user can
+    // see in the editor. Everything else (libc++ headers, the test runner)
+    // is library code students shouldn't be stepping through.
+    private isUserSource(path: unknown): boolean {
+        if (typeof path !== 'string' || path.length === 0) return false;
+        const p = path.startsWith('/') ? path.slice(1) : path;
+        return p in this.fileMap;
+    }
+
     private handleStopped(body: Any) {
         const threadId = body?.threadId ?? 1;
         const stackRes = this.dapSend('stackTrace', { threadId });
@@ -414,6 +428,22 @@ export class NpmDapEngine implements IIDEEngine {
         // bogus pause state on top of the teardown.
         if (!stackRes) return;
         const frames: Any[] = stackRes?.body?.stackFrames ?? [];
+
+        // "Just my code" stepping: -O0 compiles libc++ template code from
+        // headers straight into the user's object with full debug info, so a
+        // plain step at e.g. `std::cout << x` or the final `return` pauses
+        // inside <ostream> internals. Students should never land there —
+        // keep stepping until execution is back in a workspace file (or the
+        // program exits). The budget bounds the worst case so a genuinely
+        // header-resident pause still surfaces rather than looping forever.
+        if (frames.length > 0 && !this.isUserSource(frames[0]?.source?.path)) {
+            if (this.autoStepBudget > 0) {
+                this.autoStepBudget--;
+                this.dapSend('next', { threadId });
+                return;
+            }
+        }
+        this.autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
 
         const callStack: StackFrame[] = [];
         const heapAllocations = new Map<number, HeapAllocation>();
@@ -598,21 +628,25 @@ export class NpmDapEngine implements IIDEEngine {
     }
 
     async stepInto(): Promise<void> {
+        this.autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
         this.onDebugResumed.emit();
         this.dapSend('stepIn', { threadId: 1 });
     }
 
     async stepOver(): Promise<void> {
+        this.autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
         this.onDebugResumed.emit();
         this.dapSend('next', { threadId: 1 });
     }
 
     async stepOut(): Promise<void> {
+        this.autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
         this.onDebugResumed.emit();
         this.dapSend('stepOut', { threadId: 1 });
     }
 
     async continueExecution(): Promise<void> {
+        this.autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
         this.onDebugResumed.emit();
         this.dapSend('continue', { threadId: 1 });
     }
