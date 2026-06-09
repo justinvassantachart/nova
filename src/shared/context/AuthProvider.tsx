@@ -1,33 +1,18 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { firebaseConfigured, getDb, getFirebaseAuth } from '@/shared/firebase/client'
+import { AuthContext } from './auth-context'
 import type { AppUser } from '@/shared/types'
-
-type AuthState = {
-  user: User | null
-  appUser: AppUser | null
-  loading: boolean
-  configured: boolean
-}
-
-const AuthContext = createContext<AuthState>({
-  user: null,
-  appUser: null,
-  loading: true,
-  configured: false,
-})
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [appUser, setAppUser] = useState<AppUser | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Without Firebase there is nothing to wait for — start settled.
+  const [loading, setLoading] = useState(firebaseConfigured)
 
   useEffect(() => {
-    if (!firebaseConfigured) {
-      setLoading(false)
-      return
-    }
+    if (!firebaseConfigured) return
     const unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
       setUser(u)
       if (!u) {
@@ -69,8 +54,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  return useContext(AuthContext)
 }

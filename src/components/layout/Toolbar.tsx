@@ -8,11 +8,11 @@ import { useExecutionStore } from '@/store/execution-store'
 import { useCompilerStore } from '@/store/compiler-store'
 import { useDebugStore } from '@/store/debug-store'
 import { getAllFiles } from '@/vfs/volume'
-import { useEngine } from '@/engine/EngineContext'
+import { useEngine } from '@/engine/engine-context'
 import { useTestStore } from '@/testing/test-store'
 import { DebugControls } from './DebugControls'
 import { SaveStatus } from './SaveStatus'
-import { useIDEHost } from '@/ide-host-context'
+import { useIDEHost } from '@/use-ide-host'
 
 export function Toolbar() {
     const engine = useEngine()

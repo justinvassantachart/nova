@@ -452,7 +452,7 @@ export class NpmDapEngine implements IIDEEngine {
                         visitedRefs.add(variablesReference);
                         heapQueue.push({
                             ptr: pointsTo,
-                            typeStr: typeStr.replace(/[\*&]\s*$/, '').trim() || 'unknown',
+                            typeStr: typeStr.replace(/[*&]\s*$/, '').trim() || 'unknown',
                             variablesReference,
                             valueStr: v.value ?? ''
                         });
@@ -481,7 +481,7 @@ export class NpmDapEngine implements IIDEEngine {
                 size: 4,
                 isPointer,
                 pointsTo,
-                pointeeType: isPointer ? typeStr.replace(/[\*&]\s*$/, '').trim() : typeStr,
+                pointeeType: isPointer ? typeStr.replace(/[*&]\s*$/, '').trim() : typeStr,
                 isStruct: !isPointer && hasChildren,
                 members,
             };

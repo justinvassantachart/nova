@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useDebugStore } from '@/store/debug-store'
 import type { HeapAllocation, StackFrame, VariableNode } from '@/engine/IIDEEngine'
 import { VariableRow } from './VariableRow'
 
 export function VariablesPanel() {
     const { debugMode, memorySnapshot } = useDebugStore()
-    const frames: StackFrame[] = memorySnapshot?.frames ?? []
-    const heap = memorySnapshot?.heapAllocations ?? []
+    const frames: StackFrame[] = useMemo(
+        () => memorySnapshot?.frames ?? [],
+        [memorySnapshot],
+    )
+    const heap = useMemo(
+        () => memorySnapshot?.heapAllocations ?? [],
+        [memorySnapshot],
+    )
 
     const heapByAddr = useMemo(() => {
         const m = new Map<number, VariableNode[]>()
@@ -16,18 +22,10 @@ export function VariablesPanel() {
 
     const resolvePointer = (addr: number) => heapByAddr.get(addr)
 
+    // The selection only records explicit clicks; the rendered frame is
+    // derived so a new snapshot keeps a still-valid selection and otherwise
+    // falls back to the active frame — no state syncing in effects needed.
     const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null)
-
-    useEffect(() => {
-        if (!memorySnapshot || frames.length === 0) {
-            setSelectedFrameId(null)
-            return
-        }
-        const active = frames.find((f) => f.isActive) ?? frames[0]
-        setSelectedFrameId((prev) =>
-            prev && frames.some((f) => f.id === prev) ? prev : active.id,
-        )
-    }, [memorySnapshot, frames])
 
     if (debugMode === 'idle')
         return (
@@ -38,7 +36,11 @@ export function VariablesPanel() {
     if (debugMode === 'compiling') return <EmptyState>Compiling…</EmptyState>
     if (debugMode === 'running') return <EmptyState>Running…</EmptyState>
 
-    const selectedFrame = frames.find((f) => f.id === selectedFrameId) ?? frames[0] ?? null
+    const selectedFrame =
+        frames.find((f) => f.id === selectedFrameId) ??
+        frames.find((f) => f.isActive) ??
+        frames[0] ??
+        null
 
     return (
         <aside className="flex flex-col h-full min-h-0 bg-background text-foreground">

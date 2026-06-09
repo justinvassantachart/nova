@@ -7,62 +7,50 @@ import {
 } from '@/shared/firebase/classes'
 import type { Class, ClassMember, Membership } from '@/shared/types'
 
+// All hooks here share one shape: subscribe to a Firestore watcher keyed by
+// an id, store the latest snapshot together with the key it was loaded for,
+// and *derive* loading from whether the stored key matches the current one.
+// Deriving (instead of setLoading(true) inside the effect) avoids the
+// setState-in-effect cascade and automatically shows a loading state again
+// when the key changes.
+type Keyed<T> = { key: string; data: T } | null
+
 export function useTeachingClasses(uid: string | undefined) {
-  const [list, setList] = useState<Class[]>([])
-  const [loading, setLoading] = useState(true)
+  const [snap, setSnap] = useState<Keyed<Class[]>>(null)
   useEffect(() => {
     if (!uid) return
-    setLoading(true)
-    return watchTeachingClasses(uid, (l) => {
-      setList(l)
-      setLoading(false)
-    })
+    return watchTeachingClasses(uid, (l) => setSnap({ key: uid, data: l }))
   }, [uid])
-  return { list, loading }
+  const fresh = snap !== null && snap.key === uid
+  return { list: fresh ? snap.data : [], loading: !!uid && !fresh }
 }
 
 export function useMyMemberships(uid: string | undefined) {
-  const [list, setList] = useState<Membership[]>([])
-  const [loading, setLoading] = useState(true)
+  const [snap, setSnap] = useState<Keyed<Membership[]>>(null)
   useEffect(() => {
     if (!uid) return
-    setLoading(true)
-    return watchMyMemberships(uid, (l) => {
-      setList(l)
-      setLoading(false)
-    })
+    return watchMyMemberships(uid, (l) => setSnap({ key: uid, data: l }))
   }, [uid])
-  return { list, loading }
+  const fresh = snap !== null && snap.key === uid
+  return { list: fresh ? snap.data : [], loading: !!uid && !fresh }
 }
 
 export function useClass(classId: string | undefined) {
-  const [klass, setKlass] = useState<Class | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [snap, setSnap] = useState<Keyed<Class | null>>(null)
   useEffect(() => {
-    if (!classId) {
-      setKlass(null)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    return watchClass(classId, (c) => {
-      setKlass(c)
-      setLoading(false)
-    })
+    if (!classId) return
+    return watchClass(classId, (c) => setSnap({ key: classId, data: c }))
   }, [classId])
-  return { klass, loading }
+  const fresh = snap !== null && snap.key === classId
+  return { klass: fresh ? snap.data : null, loading: !!classId && !fresh }
 }
 
 export function useClassMembers(classId: string | undefined) {
-  const [list, setList] = useState<ClassMember[]>([])
-  const [loading, setLoading] = useState(true)
+  const [snap, setSnap] = useState<Keyed<ClassMember[]>>(null)
   useEffect(() => {
     if (!classId) return
-    setLoading(true)
-    return watchClassMembers(classId, (l) => {
-      setList(l)
-      setLoading(false)
-    })
+    return watchClassMembers(classId, (l) => setSnap({ key: classId, data: l }))
   }, [classId])
-  return { list, loading }
+  const fresh = snap !== null && snap.key === classId
+  return { list: fresh ? snap.data : [], loading: !!classId && !fresh }
 }

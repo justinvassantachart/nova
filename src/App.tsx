@@ -17,7 +17,7 @@ import {
 } from '@/vfs/volume'
 import { EngineProvider } from '@/engine/EngineContext'
 import { ClangdProvider } from '@/clangd'
-import { useIDEHost } from '@/ide-host-context'
+import { useIDEHost } from '@/use-ide-host'
 import '@/components/sidebar/sidebar.css'
 
 export default function App() {

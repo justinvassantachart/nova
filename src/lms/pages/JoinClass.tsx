@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { UserMenu } from '@/lms/components/UserMenu'
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 import { getClassByInviteCode, joinClass } from '@/shared/firebase/classes'
 import type { Class } from '@/shared/types'
 

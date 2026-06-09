@@ -1,4 +1,4 @@
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 
 export default function RootRedirect() {
   const { user, loading, configured } = useAuth()

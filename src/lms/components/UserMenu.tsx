@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { resendVerificationEmail, signOut } from '@/shared/firebase/auth'
 import { humanizeAuthError } from '@/shared/firebase/errors'
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 
 type ResendState =
   | { kind: 'idle' }

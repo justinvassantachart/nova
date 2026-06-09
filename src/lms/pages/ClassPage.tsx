@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { UserMenu } from '@/lms/components/UserMenu'
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 import { useClass, useClassMembers } from '@/lms/hooks/useClasses'
 import { useClassAssignments } from '@/lms/hooks/useAssignments'
 import { createAssignment, deleteAssignment } from '@/shared/firebase/assignments'

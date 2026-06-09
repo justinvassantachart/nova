@@ -4,10 +4,9 @@
 // wrap their <App /> mount with [AssignmentInfoProvider]; standalone /ide
 // renders without one, and the view falls back to its empty state.
 
-import { createContext, useContext, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import type { AssignmentInfo } from '@/ide-host'
-
-const Ctx = createContext<AssignmentInfo | undefined>(undefined)
+import { AssignmentInfoContext } from './use-assignment-info'
 
 export function AssignmentInfoProvider({
     info, children,
@@ -15,9 +14,5 @@ export function AssignmentInfoProvider({
     info: AssignmentInfo
     children: ReactNode
 }) {
-    return <Ctx.Provider value={info}>{children}</Ctx.Provider>
-}
-
-export function useAssignmentInfo(): AssignmentInfo | undefined {
-    return useContext(Ctx)
+    return <AssignmentInfoContext.Provider value={info}>{children}</AssignmentInfoContext.Provider>
 }

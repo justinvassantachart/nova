@@ -6,7 +6,7 @@ import {
   signUpWithEmail,
 } from '@/shared/firebase/auth'
 import { humanizeAuthError } from '@/shared/firebase/errors'
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 
 type Mode = 'signin' | 'signup'
 

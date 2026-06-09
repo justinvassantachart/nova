@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import { useEngine } from '@/engine/EngineContext'
+import { useEngine } from '@/engine/engine-context'
 
 export function CanvasView() {
     const ref = useRef<HTMLCanvasElement>(null)

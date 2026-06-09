@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { UserMenu } from '@/lms/components/UserMenu'
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 import { useTeachingClasses, useMyMemberships } from '@/lms/hooks/useClasses'
 
 export default function Dashboard() {

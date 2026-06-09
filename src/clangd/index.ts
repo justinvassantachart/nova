@@ -3,7 +3,8 @@
 
 export { ClangdClient } from './ClangdClient'
 export type { ClangdStatus } from './ClangdClient'
-export { ClangdProvider, useClangd } from './ClangdContext'
+export { ClangdProvider } from './ClangdContext'
+export { useClangd } from './clangd-context'
 export { isClangdEnabled, setClangdEnabled } from './preferences'
 export { bootClangd } from './bootstrap'
 export { purgeOldClangdCaches, requestPersistentStorage } from './cache'

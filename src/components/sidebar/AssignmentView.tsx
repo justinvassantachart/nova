@@ -9,9 +9,9 @@
 // toggle. Student mode shows read-only metadata, a submit button, and a
 // download-zip action.
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Codicon } from '@/components/ui/codicon'
-import { useAssignmentInfo } from './assignment-info-context'
+import { useAssignmentInfo } from './use-assignment-info'
 import type { AssignmentInfo } from '@/ide-host'
 
 export function AssignmentView() {
@@ -94,9 +94,19 @@ function TeacherBody({ info }: { info: AssignmentInfo }) {
     const [desc, setDesc] = useState(info.description)
 
     // Keep local state in sync if Firestore pushes an update we didn't
-    // originate (e.g. another teacher renames the assignment).
-    useEffect(() => { setTitle(info.title) }, [info.title])
-    useEffect(() => { setDesc(info.description) }, [info.description])
+    // originate (e.g. another teacher renames the assignment). Adjust-state-
+    // during-render (guarded by previous-value comparisons) instead of
+    // effects, so remote updates land without an intermediate stale paint.
+    const [prevTitle, setPrevTitle] = useState(info.title)
+    if (info.title !== prevTitle) {
+        setPrevTitle(info.title)
+        setTitle(info.title)
+    }
+    const [prevDesc, setPrevDesc] = useState(info.description)
+    if (info.description !== prevDesc) {
+        setPrevDesc(info.description)
+        setDesc(info.description)
+    }
 
     const commitTitle = () => {
         const trimmed = title.trim()

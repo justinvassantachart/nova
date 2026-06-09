@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Terminal as XTerm, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { useEngine } from '@/engine/EngineContext'
+import { useEngine } from '@/engine/engine-context'
 import { useThemeStore, type Theme } from '@/theme/theme-store'
 import '@xterm/xterm/css/xterm.css'
 

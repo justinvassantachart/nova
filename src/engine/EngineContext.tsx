@@ -1,8 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo } from 'react';
-import type { IIDEEngine } from './IIDEEngine';
+import React, { useEffect, useMemo } from 'react';
+import { EngineContext } from './engine-context';
 import { NpmDapEngine } from './NpmDapEngine';
-
-const EngineContext = createContext<IIDEEngine | null>(null);
 
 export function EngineProvider({ children }: { children: React.ReactNode }) {
     const engine = useMemo(() => new NpmDapEngine(), []);
@@ -13,10 +11,4 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => () => engine.stop(), [engine]);
 
     return <EngineContext.Provider value={engine}>{children}</EngineContext.Provider>;
-}
-
-export function useEngine(): IIDEEngine {
-    const context = useContext(EngineContext);
-    if (!context) throw new Error('useEngine must be used within EngineProvider');
-    return context;
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UserMenu } from '@/lms/components/UserMenu'
-import { useAuth } from '@/shared/context/AuthProvider'
+import { useAuth } from '@/shared/context/auth-context'
 import { createClass } from '@/shared/firebase/classes'
 
 export default function CreateClass() {

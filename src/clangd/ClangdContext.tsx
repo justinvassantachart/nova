@@ -8,9 +8,7 @@
 
 import { useMonaco } from '@monaco-editor/react'
 import {
-    createContext,
     useCallback,
-    useContext,
     useEffect,
     useMemo,
     useRef,
@@ -25,28 +23,13 @@ import type { IDisposable } from 'monaco-editor'
 import { bootClangd } from './bootstrap'
 import { purgeOldClangdCaches, requestPersistentStorage } from './cache'
 import type { ClangdClient, ClangdStatus } from './ClangdClient'
+import { ClangdContext, NOOP_VALUE, type ClangdContextValue } from './clangd-context'
 import { isCppPath } from './config'
 import { isClangdEnabled } from './preferences'
 import { clearClangdMarkers, registerClangdProviders } from './providers'
 
 const IDLE_STATUS: ClangdStatus = { state: 'idle' }
 const DISABLED_STATUS: ClangdStatus = { state: 'disabled' }
-
-interface ClangdContextValue {
-    client: ClangdClient | null
-    status: ClangdStatus
-    /** First call boots; further calls are no-ops. */
-    arm: () => void
-}
-
-const ClangdContext = createContext<ClangdContextValue | null>(null)
-
-// Safe stub for components rendered outside the provider.
-const NOOP_VALUE: ClangdContextValue = {
-    client: null,
-    status: DISABLED_STATUS,
-    arm: () => {},
-}
 
 interface ProviderProps {
     children: ReactNode
@@ -170,11 +153,6 @@ export function ClangdProvider({ children, enabled }: ProviderProps) {
     )
 
     return <ClangdContext.Provider value={value}>{children}</ClangdContext.Provider>
-}
-
-/** Returns NOOP_VALUE if no provider is mounted — `arm()` is always safe. */
-export function useClangd(): ClangdContextValue {
-    return useContext(ClangdContext) ?? NOOP_VALUE
 }
 
 function collectInitialFiles(): Record<string, string> {

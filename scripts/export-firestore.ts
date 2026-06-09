@@ -74,16 +74,6 @@ function normalize(value: unknown): unknown {
   return value
 }
 
-function appendJsonl(path: string, obj: unknown): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const stream = createWriteStream(path, { flags: 'a' })
-    stream.write(JSON.stringify(obj) + '\n', (err) => {
-      if (err) reject(err)
-      stream.end(resolve)
-    })
-  })
-}
-
 // Open a JSONL writer that batches writes.
 function openJsonl(path: string) {
   const stream = createWriteStream(path, { flags: 'w' })

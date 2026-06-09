@@ -11,8 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Separator } from '@/components/ui/separator'
 import { useDebugStore } from '@/store/debug-store'
-import { useEngine } from '@/engine/EngineContext'
-import { useIDEHost } from '@/ide-host-context'
+import { useEngine } from '@/engine/engine-context'
+import { useIDEHost } from '@/use-ide-host'
 
 // ── Types ──────────────────────────────────────────────────────────
 

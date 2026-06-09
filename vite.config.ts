@@ -65,7 +65,13 @@ export default defineConfig({
     plugins: () => [wasm(), topLevelAwait()],
   },
   optimizeDeps: {
-    exclude: ['@yowasp/clang'],
+    // debugger-sh is excluded because the optimizer copies its engine_bg.wasm
+    // to a stable /node_modules/.vite/deps/ URL served with immutable
+    // caching — swapping the package (local tarball bumps) then pairs new JS
+    // glue with the browser's stale cached wasm and every wasm-bindgen
+    // closure call fails. Serving it unoptimized keeps the wasm URL
+    // revalidated like any source file.
+    exclude: ['@yowasp/clang', 'debugger-sh'],
   },
   build: {
     target: 'esnext',

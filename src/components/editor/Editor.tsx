@@ -6,10 +6,10 @@ import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, fileExists, readFile, subscribeWorkspaceChange } from '@/vfs/volume'
 import { Codicon } from '@/components/ui/codicon'
 import { getFileIconUrl } from '@/lib/vscode-icons'
-import { useEngine } from '@/engine/EngineContext'
+import { useEngine } from '@/engine/engine-context'
 import { useClangd } from '@/clangd'
 import { isCppPath, monacoLanguageFor } from '@/clangd/config'
-import { useIDEHost } from '@/ide-host-context'
+import { useIDEHost } from '@/use-ide-host'
 import { useThemeStore } from '@/theme/theme-store'
 
 // Decorations are tracked per file URI so they survive model switching — when

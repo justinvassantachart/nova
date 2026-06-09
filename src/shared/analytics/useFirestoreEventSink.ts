@@ -30,8 +30,13 @@ export function useFirestoreEventSink(opts: {
 }) {
   const sessionIdRef = useRef<string>(crypto.randomUUID())
   const buffer = useRef<Pending[]>([])
+  // Latest-value ref so the stable onEvent/flush closures read current ids
+  // without re-subscribing; updated in an effect because refs must not be
+  // written during render.
   const ctx = useRef(opts)
-  ctx.current = opts
+  useEffect(() => {
+    ctx.current = opts
+  })
 
   const flush = useMemo(() => {
     return async () => {

@@ -1,5 +1,5 @@
 import {
-    useRef, useEffect, useState, useMemo, useCallback,
+    useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback,
     type KeyboardEvent, type ReactNode,
 } from 'react'
 import { useFilesStore, type VFSNode } from '@/store/files-store'
@@ -7,7 +7,7 @@ import { useEditorStore } from '@/store/editor-store'
 import {
     readFile, createFile, createFolder, deleteItem, renameItem, fileExists,
 } from '@/vfs/volume'
-import { useIDEHost } from '@/ide-host-context'
+import { useIDEHost } from '@/use-ide-host'
 import { getFileIconUrl, getFolderIconUrl } from '@/lib/vscode-icons'
 import './explorer.css'
 
@@ -117,13 +117,16 @@ function ContextMenu({
     }, [onClose])
 
     // Clamp to viewport so the menu doesn't bleed off the right/bottom edges.
+    // useLayoutEffect: the menu must be measured after render but repositioned
+    // before paint, or it would flash at the unclamped coordinates.
     const [pos, setPos] = useState({ x, y })
-    useEffect(() => {
+    useLayoutEffect(() => {
         const el = ref.current
         if (!el) return
         const r = el.getBoundingClientRect()
         const nx = x + r.width > window.innerWidth ? window.innerWidth - r.width - 4 : x
         const ny = y + r.height > window.innerHeight ? window.innerHeight - r.height - 4 : y
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- measure-then-position is the documented useLayoutEffect pattern (react.dev "measuring layout"); the size isn't knowable before render.
         setPos({ x: nx, y: ny })
     }, [x, y])
 
@@ -259,10 +262,14 @@ export function FileExplorer() {
         [files, expandedDirs, sectionCollapsed]
     )
 
-    // Selection follows activeFile so opening a file from elsewhere highlights it.
-    useEffect(() => {
+    // Selection follows activeFile so opening a file from elsewhere highlights
+    // it. Adjust-state-during-render (guarded by a previous-value comparison)
+    // instead of an effect, so the highlight lands in the same paint.
+    const [prevActiveFile, setPrevActiveFile] = useState(activeFile)
+    if (activeFile !== prevActiveFile) {
+        setPrevActiveFile(activeFile)
         if (activeFile) setFocusedPath(activeFile)
-    }, [activeFile])
+    }
 
     // ── Row actions ───────────────────────────────────────────────
 

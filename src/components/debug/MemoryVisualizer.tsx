@@ -1,9 +1,9 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState } from 'react'
 import { ReactFlow, Background, type Node, type Edge, type NodeChange, type EdgeChange, Position, Handle, Panel, useViewport, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
-import type { VariableNode as MemoryValue } from '@/engine/IIDEEngine'
+import type { MemorySnapshot, VariableNode as MemoryValue } from '@/engine/IIDEEngine'
 
 // --- Recursive Table Row ---
 function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
@@ -198,15 +198,24 @@ export function MemoryVisualizer() {
     const [edges, setEdges] = useState<Edge[]>([])
     const [separatorX, setSeparatorX] = useState<number | null>(null)
 
-    useEffect(() => {
+    // Rebuild the graph when a new snapshot arrives, using the
+    // adjust-state-during-render pattern (guarded by a previous-value
+    // comparison) instead of an effect — avoids the extra stale-frame
+    // render an effect-based sync would paint first. Node state stays
+    // local because users can drag heap nodes between snapshots.
+    const [syncedSnapshot, setSyncedSnapshot] = useState<MemorySnapshot | null>(null)
+    if (memorySnapshot !== syncedSnapshot) {
+        setSyncedSnapshot(memorySnapshot)
         if (!memorySnapshot) {
             setNodes([])
             setEdges([])
             setSeparatorX(null)
-            return
+        } else {
+            rebuildGraph(memorySnapshot)
         }
+    }
 
-        const snapshot = memorySnapshot
+    function rebuildGraph(snapshot: MemorySnapshot) {
         const rawNodes: Node[] = []
         const rawEdges: Edge[] = []
         const reversedFrames = [...snapshot.frames].reverse()
@@ -294,7 +303,7 @@ export function MemoryVisualizer() {
 
         setEdges(rawEdges)
         setSeparatorX(sepX)
-    }, [memorySnapshot])
+    }
 
     // Only allow position changes for heap nodes - block stack node drags
     const onNodesChange = useCallback((changes: NodeChange[]) => {
