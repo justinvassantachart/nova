@@ -286,7 +286,7 @@ export function Editor() {
                         minimap: { enabled: false },
                         scrollBeyondLastLine: false,
                         padding: { top: 8 },
-                        renderLineHighlight: 'gutter',
+                        renderLineHighlight: 'line',
                         smoothScrolling: true,
                         cursorBlinking: 'smooth',
                         cursorSmoothCaretAnimation: 'on',
