@@ -15,6 +15,8 @@ import ClassPage from '@/lms/pages/ClassPage'
 import JoinClass from '@/lms/pages/JoinClass'
 import AssignmentPage from '@/lms/pages/AssignmentPage'
 import SubmissionView from '@/lms/pages/SubmissionView'
+import LessonsHome from '@/lessons/LessonsHome'
+import LessonRunner from '@/lessons/LessonRunner'
 
 // Sync the React-side theme store with the data-theme already set by the
 // inline boot script in index.html. The inline script runs before the
@@ -158,6 +160,11 @@ void (async () => {
                 </ProtectedRoute>
               }
             />
+            {/* Guided lesson series — no auth required; progress lives in
+                localStorage. Served with COOP/COEP (not in the non-isolated
+                carve-out) so the embedded IDE's SharedArrayBuffer workers run. */}
+            <Route path="/learn" element={<LessonsHome />} />
+            <Route path="/learn/:slug" element={<LessonRunner />} />
             {/* Standalone IDE — no auth, no host context, original behavior. */}
             <Route
               path="/ide"

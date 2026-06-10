@@ -3,6 +3,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toolbar } from '@/components/layout/Toolbar'
 import { StatusBar } from '@/components/layout/StatusBar'
 import { GlobalHotkeys } from '@/components/layout/GlobalHotkeys'
+import { HostEventBridge } from '@/components/layout/HostEventBridge'
 import { ActivityBar } from '@/components/sidebar/ActivityBar'
 import { SidebarPanel } from '@/components/sidebar/SidebarPanel'
 import { useSidebarStore } from '@/components/sidebar/sidebar-store'
@@ -25,6 +26,13 @@ import '@/components/sidebar/sidebar.css'
 export default function App() {
     const host = useIDEHost()
     const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
+
+    // Host-configured chrome (see IDEChrome). Defaults preserve the full IDE;
+    // a host that disables the sidebar overrides the user's persisted
+    // collapse state entirely rather than fighting it.
+    const chromeSidebar = host?.chrome?.sidebar !== false
+    const chromeStatusBar = host?.chrome?.statusBar !== false
+    const sidebarVisible = chromeSidebar && !sidebarCollapsed
 
     // Safety: if we landed here via client-side navigation from a non-isolated
     // route (like /), SharedArrayBuffer will be missing. Force a reload to
@@ -118,18 +126,19 @@ export default function App() {
             <ClangdProvider enabled={clangdEnabled}>
                 <TooltipProvider delayDuration={300}>
                     <GlobalHotkeys />
+                    <HostEventBridge />
                     <div className="flex flex-col h-full w-full overflow-hidden">
                         <Toolbar />
                         <div className="flex-1 min-h-0 flex">
-                            <ActivityBar />
+                            {chromeSidebar && <ActivityBar />}
                             {/* Key changes with collapse state so react-resizable-panels
                                 re-initializes default sizes when the sidebar disappears. */}
                             <ResizablePanelGroup
-                                key={sidebarCollapsed ? 'no-sidebar' : 'with-sidebar'}
+                                key={sidebarVisible ? 'with-sidebar' : 'no-sidebar'}
                                 orientation="horizontal"
                                 className="flex-1 min-h-0"
                             >
-                                {!sidebarCollapsed && (
+                                {sidebarVisible && (
                                     <>
                                         {/* sizes are strings so react-resizable-panels
                                             treats them as % — a bare number is read
@@ -158,7 +167,7 @@ export default function App() {
                                 </ResizablePanel>
                             </ResizablePanelGroup>
                         </div>
-                        <StatusBar />
+                        {chromeStatusBar && <StatusBar />}
                     </div>
                 </TooltipProvider>
             </ClangdProvider>

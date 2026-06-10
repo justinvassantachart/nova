@@ -9,6 +9,10 @@ interface EditorState {
     cursorLine: number
     cursorColumn: number
     setActiveFile: (path: string, content: string) => void
+    // Add a tab WITHOUT changing focus (no-op if already open). For
+    // programmatic tab management by hosts — e.g. a lesson keeping its
+    // files reachable while the explorer is hidden.
+    openFile: (path: string) => void
     setActiveFileContent: (content: string) => void
     // Close one tab. If it was active, focus its right neighbor (else left),
     // matching VS Code's tab-close behavior.
@@ -32,6 +36,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         activeFileContent: content,
         openFiles: s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path],
     })),
+
+    openFile: (path) => set((s) => (
+        s.openFiles.includes(path) ? s : { openFiles: [...s.openFiles, path] }
+    )),
 
     setActiveFileContent: (content) => set({ activeFileContent: content }),
 

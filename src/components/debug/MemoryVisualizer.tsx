@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react'
-import { ReactFlow, Background, type Node, type Edge, type NodeChange, type EdgeChange, Position, Handle, Panel, useViewport, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
+import { useCallback, useRef, useState } from 'react'
+import { ReactFlow, Background, type Node, type Edge, type NodeChange, type EdgeChange, type ReactFlowInstance, Position, Handle, Panel, useViewport, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import dagre from 'dagre'
 import { useDebugStore } from '@/store/debug-store'
 import type { MemorySnapshot, VariableNode as MemoryValue } from '@/engine/IIDEEngine'
+import { placeStackFrames, placeHeapNodes, rowsToHeight, type Point } from './graph-layout'
 
 // --- Recursive Table Row ---
 function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
@@ -92,7 +92,10 @@ function HeapNode({ data }: { data: { id: string; label: string; ptr: number; me
 
 const nodeTypes = { stackFrame: StackFrameNode, heapNode: HeapNode }
 
-// --- Graph Layout Engine ---
+// --- Graph Layout ---
+// Geometry lives in graph-layout.ts (pure + unit-tested). The component's
+// job is only to translate snapshots into node/edge specs and feed the
+// persistent position map through the incremental placer.
 function countRows(vars: MemoryValue[]): number {
     let rows = 0;
     for (const v of vars) {
@@ -100,48 +103,6 @@ function countRows(vars: MemoryValue[]): number {
         if (v.isStruct && v.members) rows += countRows(v.members);
     }
     return rows;
-}
-
-function layoutGraph(nodes: Node[], edges: Edge[]): Node[] {
-    const stackNodes = nodes.filter(n => n.type === 'stackFrame')
-    const heapNodes = nodes.filter(n => n.type === 'heapNode')
-
-    // 1. Manually stack the frames perfectly in a vertical column at X = 0
-    let currentY = 0
-    stackNodes.forEach(node => {
-        const vars = node.data.variables as MemoryValue[];
-        const rows = countRows(vars);
-        const height = Math.max(60, rows * 28 + 40);
-        node.position = { x: 0, y: currentY }
-        currentY += height + 30
-    })
-
-    // 2. Feed only the Heap nodes to dagre so it builds tree-like structures to the right
-    const g = new dagre.graphlib.Graph()
-    g.setDefaultEdgeLabel(() => ({}))
-    g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 120 })
-
-    heapNodes.forEach(node => {
-        const vars = node.data.members as MemoryValue[];
-        const rows = countRows(vars);
-        g.setNode(node.id, { width: 220, height: Math.max(60, rows * 28 + 40) })
-    })
-
-    edges.forEach(edge => {
-        if (edge.source.startsWith('heap-') && edge.target.startsWith('heap-')) {
-            g.setEdge(edge.source, edge.target)
-        }
-    })
-
-    dagre.layout(g)
-
-    // 3. Shift the heap layouts past the 260px stack frame column width + padding
-    heapNodes.forEach((node) => {
-        const pos = g.node(node.id) || { x: 0, y: 0, width: 220, height: 60 }
-        node.position = { x: pos.x + 360, y: pos.y - (pos.height / 2) }
-    })
-
-    return [...stackNodes, ...heapNodes]
 }
 
 /** Find the x-coordinate boundary between the fixed stack column and the start of the heap nodes */
@@ -197,16 +158,29 @@ export function MemoryVisualizer() {
     const [nodes, setNodes] = useState<Node[]>([])
     const [edges, setEdges] = useState<Edge[]>([])
     const [separatorX, setSeparatorX] = useState<number | null>(null)
+    const flowRef = useRef<ReactFlowInstance | null>(null)
+
+    // Positions persist across snapshots for the whole debug session — this
+    // is what makes stepping incremental: a node that was on screen at the
+    // last pause stays exactly where it was (including where the user
+    // dragged it), and entries survive nodes that temporarily leave the
+    // snapshot so replay (step back / forward) restores the same picture.
+    // Cleared when the session ends (snapshot becomes null). Held in state
+    // (not a ref) because it's read during render by rebuildGraph.
+    const [positions, setPositions] = useState<ReadonlyMap<string, Point>>(new Map())
 
     // Rebuild the graph when a new snapshot arrives, using the
     // adjust-state-during-render pattern (guarded by a previous-value
     // comparison) instead of an effect — avoids the extra stale-frame
     // render an effect-based sync would paint first. Node state stays
     // local because users can drag heap nodes between snapshots.
+    // rebuildGraph is idempotent (same snapshot + same position map →
+    // same placement), so StrictMode's double render is safe.
     const [syncedSnapshot, setSyncedSnapshot] = useState<MemorySnapshot | null>(null)
     if (memorySnapshot !== syncedSnapshot) {
         setSyncedSnapshot(memorySnapshot)
         if (!memorySnapshot) {
+            setPositions(new Map())
             setNodes([])
             setEdges([])
             setSeparatorX(null)
@@ -287,34 +261,69 @@ export function MemoryVisualizer() {
             extractEdges(alloc.members, nodeId, nodeId, false, 'oklch(0.6 0 0)');
         })
 
-        const laidOut = layoutGraph(rawNodes, rawEdges)
-        const sepX = findSeparatorX(laidOut)
+        // Incremental placement: stack frames re-stack deterministically in
+        // their fixed column (their DAP ids change every pause anyway); heap
+        // nodes flow through the persistent position map so existing ones
+        // never move and new ones are placed collision-free around them.
+        const stackSpecs = rawNodes
+            .filter(n => n.type === 'stackFrame')
+            .map(n => ({ id: n.id, height: rowsToHeight(countRows(n.data.variables as MemoryValue[])) }))
+        const stackPositions = placeStackFrames(stackSpecs)
 
-        setNodes(prev => {
-            return laidOut.map(newNode => {
-                const existing = prev.find(p => p.id === newNode.id)
-                // Preserve positions of existing heap nodes so they stay where user dragged them
-                if (existing && existing.type === 'heapNode') {
-                    return { ...newNode, position: existing.position }
-                }
-                return newNode
-            })
+        const heapSpecs = rawNodes
+            .filter(n => n.type === 'heapNode')
+            .map(n => ({ id: n.id, height: rowsToHeight(countRows(n.data.members as MemoryValue[])) }))
+        const heapIds = new Set(heapSpecs.map(s => s.id))
+        const heapEdges = rawEdges
+            .filter(e => heapIds.has(e.source) && heapIds.has(e.target))
+            .map(e => ({ source: e.source, target: e.target }))
+        // Rank-0 roots: heap nodes pointed to straight from stack variables.
+        const roots = rawEdges
+            .filter(e => !heapIds.has(e.source) && heapIds.has(e.target))
+            .map(e => e.target)
+        const heapPositions = placeHeapNodes({
+            nodes: heapSpecs,
+            edges: heapEdges,
+            roots,
+            previous: positions,
         })
 
+        // Merge (not replace): absent nodes keep their remembered spot so
+        // replaying forward puts them back where they were.
+        const merged = new Map(positions)
+        for (const [id, pos] of heapPositions) merged.set(id, pos)
+        setPositions(merged)
+
+        setNodes(rawNodes.map(n => ({
+            ...n,
+            position: (n.type === 'stackFrame' ? stackPositions.get(n.id) : heapPositions.get(n.id))
+                ?? { x: 0, y: 0 },
+        })))
         setEdges(rawEdges)
-        setSeparatorX(sepX)
+        setSeparatorX(findSeparatorX(rawNodes))
     }
 
-    // Only allow position changes for heap nodes - block stack node drags
+    // Only allow position changes for heap nodes - block stack node drags.
+    // Dragged positions also go into the persistent map so the node stays
+    // where the user put it on every subsequent snapshot.
     const onNodesChange = useCallback((changes: NodeChange[]) => {
         setNodes(nds => {
+            const dragged = new Map<string, Point>()
             const filtered = changes.filter(change => {
                 if (change.type === 'position') {
                     const node = nds.find(n => n.id === change.id)
                     if (node?.type === 'stackFrame') return false
+                    if (change.position) dragged.set(change.id, change.position)
                 }
                 return true
             })
+            if (dragged.size > 0) {
+                setPositions(prev => {
+                    const next = new Map(prev)
+                    for (const [id, pos] of dragged) next.set(id, pos)
+                    return next
+                })
+            }
             return applyNodeChanges(filtered, nds)
         })
     }, [])
@@ -323,9 +332,14 @@ export function MemoryVisualizer() {
         setEdges(eds => applyEdgeChanges(changes, eds))
     }, [])
 
+    // The graph stays MOUNTED while the program runs between pauses
+    // (step-over emits resumed→running→paused). Unmounting ReactFlow there
+    // would throw away the viewport — every step would reset the user's
+    // zoom/pan and re-fit the whole picture. Placeholders only show when
+    // there is genuinely nothing to look at.
     if (debugMode === 'idle')
         return <div className="flex h-full items-center justify-center text-muted-foreground font-mono text-xs bg-background">Click <span className="text-primary mx-1">Debug</span> to inspect memory</div>
-    if (debugMode === 'compiling' || debugMode === 'running')
+    if (debugMode === 'compiling' || (debugMode === 'running' && nodes.length === 0))
         return <div className="flex h-full items-center justify-center text-muted-foreground font-mono text-xs bg-background">{debugMode === 'compiling' ? 'Compiling…' : 'Running…'}</div>
 
     return (
@@ -336,6 +350,7 @@ export function MemoryVisualizer() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 nodeTypes={nodeTypes}
+                onInit={(instance) => { flowRef.current = instance }}
                 fitView
                 minZoom={0.2}
                 maxZoom={2}
@@ -348,6 +363,21 @@ export function MemoryVisualizer() {
                             Frames (Stack)
                         </span>
                     </div>
+                </Panel>
+                <Panel position="top-right" className="!m-1 flex items-center gap-2">
+                    {debugMode === 'running' && (
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground px-2 py-1">
+                            Running…
+                        </span>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => flowRef.current?.fitView({ padding: 0.2, duration: 200 })}
+                        title="Fit graph to view"
+                        className="px-2 py-1 rounded border border-border bg-card text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground hover:border-primary transition-colors"
+                    >
+                        Fit
+                    </button>
                 </Panel>
                 {separatorX !== null && <SeparatorOverlay separatorX={separatorX} />}
             </ReactFlow>

@@ -248,9 +248,16 @@ export default function Login() {
           Continue with Google
         </button>
 
-        <a className="text-xs underline text-muted-foreground text-center" href="/ide">
-          or use the standalone IDE
-        </a>
+        <div className="flex flex-col gap-1 text-center">
+          {/* Hard navigations: these routes need the COOP/COEP-isolated
+              headers that /login deliberately strips. */}
+          <a className="text-xs underline text-muted-foreground" href="/learn">
+            Just exploring? Try the interactive debugging lessons — no account needed
+          </a>
+          <a className="text-xs underline text-muted-foreground" href="/ide">
+            or use the standalone IDE
+          </a>
+        </div>
       </div>
     </div>
   )

@@ -51,9 +51,11 @@ export function Toolbar() {
 
     return (
         <div className="flex items-center h-10 px-3 gap-2 border-b border-border bg-[var(--color-chrome)]">
-            <span className="font-bold text-sm tracking-[0.18em] text-foreground select-none">
-                NOVA<span className="text-primary">·</span>IDE
-            </span>
+            {host?.chrome?.brand !== false && (
+                <span className="font-bold text-sm tracking-[0.18em] text-foreground select-none">
+                    NOVA<span className="text-primary">·</span>IDE
+                </span>
+            )}
 
             <SaveStatus />
 

@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { getDb } from '@/shared/firebase/client'
-import type { EventType } from '@/ide-host'
 
+// The sink is a passthrough: `type` is whatever vocabulary the caller uses.
+// IDE hosts forward the IDEHost EventType strings; hosts may also log their
+// own domain events into the same trace (e.g. the lesson runner's
+// 'lesson_step_complete'), keyed to the same sessionId.
 type Pending = {
   uid: string
   sessionId: string
   assignmentId?: string
   submissionId?: string
-  type: EventType
+  type: string
   payload: Record<string, unknown>
   ts: number
 }
@@ -87,7 +90,7 @@ export function useFirestoreEventSink(opts: {
   }, [flush])
 
   const onEvent = useMemo(() => {
-    return (type: EventType, payload: Record<string, unknown>) => {
+    return (type: string, payload: Record<string, unknown>) => {
       const { uid, assignmentId, submissionId } = ctx.current
       if (!uid) return
       buffer.current.push({
