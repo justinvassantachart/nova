@@ -23,7 +23,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
-    "debugger-sh": "file:debugger-sh-0.3.11-nova.2.tgz",
+    "debugger-sh": "^0.3.10",
     "fflate": "^0.8.2",
     "firebase": "^12.13.0",
     "lucide-react": "^0.575.0",
