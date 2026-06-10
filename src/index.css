@@ -324,6 +324,14 @@ body,
   background: color-mix(in srgb, var(--color-foreground) 14%, transparent);
 }
 
+/* xterm v6 pins .xterm-viewport to black in its stock stylesheet and
+   ignores theme.background for that element — make it transparent so the
+   theme-reactive container behind it paints the terminal background
+   (Terminal.tsx flips that container with the IDE theme). */
+.xterm-viewport {
+  background-color: transparent !important;
+}
+
 /* ── Status bar (VS Code style) ─────────────────────────────────── */
 .nova-status-bar {
   height: 22px;
