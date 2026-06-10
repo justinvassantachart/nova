@@ -32,3 +32,6 @@ secrets/
 
 # Firestore data exports (contain student data) — never commit
 exports/
+
+# Analytics scripts (contain project ID refs) — local use only
+scripts/
