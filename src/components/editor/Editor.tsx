@@ -5,7 +5,7 @@ import { useDebugStore } from '@/store/debug-store'
 import { useCallback, useRef, useEffect, useState } from 'react'
 import { writeFile, fileExists, readFile, subscribeWorkspaceChange } from '@/vfs/volume'
 import { Codicon } from '@/components/ui/codicon'
-import { getFileIconUrl } from '@/lib/vscode-icons'
+import { EditorTabs } from './EditorTabs'
 import { useEngine } from '@/engine/engine-context'
 import { useClangd } from '@/clangd'
 import { isCppPath, monacoLanguageFor } from '@/clangd/config'
@@ -70,6 +70,8 @@ export function Editor() {
                 decoIdsByPath.current.delete(path)
                 delete lastEditEmit.current[path]
             }
+            // Tabs for deleted/renamed files close with their models.
+            useEditorStore.getState().pruneTabs(fileExists, readFile)
         }
         return subscribeWorkspaceChange(sweep)
     }, [monaco])
@@ -261,12 +263,7 @@ export function Editor() {
 
     return (
         <div className="h-full overflow-hidden bg-background flex flex-col">
-            <div className="h-9 flex items-center px-3 gap-2 border-b border-border bg-[var(--color-chrome)] shrink-0">
-                <img src={getFileIconUrl(activeFile.split('/').pop() ?? activeFile)} className="h-3.5 w-3.5" alt="" draggable={false} />
-                <span className="text-[12px] font-mono text-foreground">
-                    {activeFile.replace('/workspace/', '')}
-                </span>
-            </div>
+            <EditorTabs />
             {/* `path` makes Monaco keep one ITextModel per file (undo history,
                 scroll, cursor survive file switches via setModel). We pass
                 `defaultValue` for first-time model creation but deliberately

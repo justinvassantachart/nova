@@ -223,10 +223,12 @@ export function deleteItem(path: string) {
         void import('./opfs-sync').then(({ deleteFromOPFS }) => deleteFromOPFS(projectId, path))
     }
 
-    const { activeFile } = useEditorStore.getState()
-    if (activeFile === path) {
-        useEditorStore.getState().setActiveFile('', '')
-    }
+    // Close the tab(s) for the deleted path. closeFile hands focus to the
+    // neighboring tab; deleting a folder relies on the editor's workspace
+    // sweep to prune any open descendants.
+    useEditorStore.getState().closeFile(path, (p) => {
+        try { return vol.readFileSync(p, { encoding: 'utf8' }) as string } catch { return null }
+    })
     refreshFileTree()
     if (path.startsWith('/workspace/')) notifyWorkspaceChange()
 }

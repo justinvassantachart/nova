@@ -288,6 +288,7 @@ export function FileExplorer() {
         if (newPath !== node.path && !fileExists(newPath)) {
             renameItem(node.path, newPath)
             host?.onEvent?.('file_rename', { from: node.path, to: newPath })
+            useEditorStore.getState().renameOpenFile(node.path, newPath)
             if (activeFile === node.path) setActiveFile(newPath, readFile(newPath))
         }
         setRenamingPath(null)
@@ -295,9 +296,10 @@ export function FileExplorer() {
 
     const handleDelete = useCallback((node: VFSNode) => {
         host?.onEvent?.('file_delete', { path: node.path })
+        // deleteItem closes the file's tab (volume.ts owns that hand-off);
+        // tabs under a deleted folder are pruned by the editor's sweep.
         deleteItem(node.path)
-        if (activeFile === node.path) setActiveFile('', '')
-    }, [host, activeFile, setActiveFile])
+    }, [host])
 
     const handleCreate = useCallback((parent: string, kind: 'file' | 'folder', name: string) => {
         const base = parent || ROOT

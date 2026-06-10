@@ -260,6 +260,70 @@ body,
   cursor: default;
 }
 
+/* ── Editor tab strip (VS Code style) ───────────────────────────── */
+.nova-tab-strip {
+  display: flex;
+  align-items: stretch;
+  height: 35px;
+  background: var(--color-chrome);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.nova-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.nova-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 10px;
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+  background: color-mix(in srgb, var(--color-chrome) 70%, var(--color-background));
+  border-right: 1px solid var(--color-border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  position: relative;
+}
+.nova-tab.active {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+/* Dark Modern's tab.activeBorderTop accent */
+.nova-tab.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: var(--color-primary);
+}
+.nova-tab-label {
+  font-family: var(--font-sans);
+}
+.nova-tab-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+}
+.nova-tab:hover .nova-tab-close,
+.nova-tab.active .nova-tab-close {
+  opacity: 0.8;
+}
+.nova-tab-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-foreground) 14%, transparent);
+}
+
 /* ── Status bar (VS Code style) ─────────────────────────────────── */
 .nova-status-bar {
   height: 22px;
