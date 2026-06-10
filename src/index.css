@@ -171,54 +171,50 @@ body,
   text-transform: uppercase;
 }
 
-/* Monaco Debugger Highlight */
+/* ── Monaco debug decorations — match VS Code dark+ ──────────────
+   VS Code reference values:
+   - breakpoint dot:           debugIcon.breakpointForeground  #E51400
+   - paused (top stack frame): editor.stackFrameHighlightBackground #ffff0033
+   - paused glyph:             yellow arrow  #ffcc00                       */
 .debug-line-highlight {
-  background-color: oklch(0.75 0.12 230 / 0.25) !important;
-  border-left: 4px solid oklch(0.75 0.12 230) !important;
+  background-color: rgba(255, 255, 0, 0.2) !important;
 }
 
-/* ── Breakpoint dots ───────────────────────────────── */
+/* Breakpoint dot — plain filled circle, centered in the glyph margin.
+   VS Code does not animate or glow these; familiarity beats flair. */
 .breakpoint-dot {
-  width: 8px !important;
-  height: 8px !important;
-  margin-left: 7px;
-  margin-top: 7px;
+  width: 9px !important;
+  height: 9px !important;
+  margin-left: 6px;
+  margin-top: 6.5px;
   border-radius: 50%;
-  background: var(--color-destructive);
+  background: #e51400;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.breakpoint-dot:hover {
-  transform: scale(1.35);
-  box-shadow: 0 0 8px oklch(0.55 0.2 27 / 0.6);
-}
-
-/* Ghost breakpoint (faded dot on gutter hover) */
+/* Ghost breakpoint (faded dot while hovering the glyph margin) */
 .breakpoint-ghost {
-  width: 8px !important;
-  height: 8px !important;
-  margin-left: 7px;
-  margin-top: 7px;
+  width: 9px !important;
+  height: 9px !important;
+  margin-left: 6px;
+  margin-top: 6.5px;
   border-radius: 50%;
-  background: var(--color-destructive);
-  opacity: 0.35;
+  background: #e51400;
+  opacity: 0.32;
   cursor: pointer;
-  transition: opacity 0.12s ease;
 }
 
-.breakpoint-ghost:hover {
-  opacity: 0.55;
-}
-
-/* Debug paused indicator (purple glow) */
-.debug-paused-dot {
-  width: 8px !important;
-  height: 8px !important;
-  margin-left: 7px;
-  margin-top: 7px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  box-shadow: 0 0 8px oklch(0.75 0.12 230 / 0.8);
+/* Paused-line glyph — VS Code's yellow stack-frame arrow */
+.debug-paused-glyph {
+  width: 0 !important;
+  height: 0 !important;
+  margin-left: 5px;
+  margin-top: 5.5px;
+  border-top: 5.5px solid transparent;
+  border-bottom: 5.5px solid transparent;
+  border-left: 9px solid #ffcc00;
   z-index: 10;
 }
+
+/* When paused ON a breakpoint line, VS Code layers the arrow over the
+   red dot; our glyph wins via z-index above. */

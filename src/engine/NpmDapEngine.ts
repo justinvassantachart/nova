@@ -47,6 +47,7 @@ export class NpmDapEngine implements IIDEEngine {
     public readonly onExit = new EventEmitter<number>();
     public readonly onTestEvent = new EventEmitter<string>();
     public readonly onCompileError = new EventEmitter<{ message: string; isDebug: boolean; isTest: boolean }>();
+    public readonly onBreakpointsValidated = new EventEmitter<{ file: string; lines: number[] }>();
 
     // One Engine for the lifetime of this NpmDapEngine. Engine.create
     // allocates a Rust DapAdapter on the main thread's WASM heap, which
@@ -368,12 +369,7 @@ export class NpmDapEngine implements IIDEEngine {
             );
             if (filesWithBps.length > 0) {
                 for (const file of filesWithBps) {
-                    const lines = this.activeBreakpoints[file];
-                    const path = this.toRuntimePath(file);
-                    this.dapSend('setBreakpoints', {
-                        source: { path },
-                        breakpoints: lines.map((l) => ({ line: l })),
-                    });
+                    this.sendBreakpoints(file, this.activeBreakpoints[file]);
                 }
             } else {
                 this.dapSend('setBreakpoints', { source: { path: '/main.cpp' }, breakpoints: [] });
@@ -383,6 +379,26 @@ export class NpmDapEngine implements IIDEEngine {
         }
         this.dapSend('setExceptionBreakpoints', { filters: [] });
         this.dapSend('configurationDone', {});
+    }
+
+    // Sends one file's breakpoints and reports back where the engine
+    // actually bound them. The debugger snaps a request on a blank or
+    // comment line to the next executable line — mirroring VS Code, the
+    // UI dot should move there too, so students see the true stop site.
+    // Unverified requests keep their original line (the dot stays put,
+    // like VS Code's pending breakpoints) rather than vanishing.
+    private sendBreakpoints(file: string, lines: number[]) {
+        const res = this.dapSend('setBreakpoints', {
+            source: { path: this.toRuntimePath(file) },
+            breakpoints: lines.map((l) => ({ line: l })),
+        });
+        const results: Any[] = res?.body?.breakpoints ?? [];
+        if (results.length !== lines.length) return;
+        const bound = lines.map((requested, i) => {
+            const r = results[i];
+            return r?.verified && typeof r.line === 'number' ? (r.line as number) : requested;
+        });
+        this.onBreakpointsValidated.emit({ file, lines: [...new Set(bound)] });
     }
 
     private toRuntimePath(file: string): string {
@@ -620,10 +636,7 @@ export class NpmDapEngine implements IIDEEngine {
     async setBreakpoints(file: string, lines: number[]): Promise<void> {
         this.activeBreakpoints[file] = lines;
         if (this.engine && this.running) {
-            this.dapSend('setBreakpoints', {
-                source: { path: this.toRuntimePath(file) },
-                breakpoints: lines.map((l) => ({ line: l })),
-            });
+            this.sendBreakpoints(file, lines);
         }
     }
 

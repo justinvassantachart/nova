@@ -37,7 +37,12 @@ export function Toolbar() {
         const u5 = engine.onCompileError.subscribe((e) => {
             host?.onEvent?.('compile_error', { debug: e.isDebug })
         })
-        return () => { u1(); u2(); u3(); u4(); u5() }
+        // Mirror VS Code: when the debugger snaps a breakpoint to the next
+        // executable line, move the gutter dot to where it actually bound.
+        const u6 = engine.onBreakpointsValidated.subscribe(({ file, lines }) => {
+            useDebugStore.getState().setFileBreakpoints(file, lines)
+        })
+        return () => { u1(); u2(); u3(); u4(); u5(); u6() }
     }, [engine, host, pushHistoryState, setDebugMode, setIsRunning])
 
     const executePipeline = async (debug: boolean, isTest = false) => {

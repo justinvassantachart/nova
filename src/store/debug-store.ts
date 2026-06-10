@@ -20,6 +20,8 @@ export interface DebugState {
     
     setDebugMode: (mode: DebugMode) => void
     toggleBreakpoint: (file: string, line: number) => void
+    // Replace one file's breakpoints with the engine-verified set (no-op if equal).
+    setFileBreakpoints: (file: string, lines: number[]) => void
     pushHistoryState: (state: DebugPauseState) => void
     stepBack: () => void
     stepForward: () => void
@@ -44,6 +46,16 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         const nextBps = fileBps.includes(line) ? fileBps.filter(l => l !== line) : [...fileBps, line]
         return { breakpoints: { ...s.breakpoints, [file]: nextBps } }
     }),
+
+    setFileBreakpoints: (file, lines) => {
+        const current = [...(get().breakpoints[file] ?? [])].sort((a, b) => a - b)
+        const next = [...new Set(lines)].sort((a, b) => a - b)
+        // No-op on equal sets — the engine echoes validated lines back on
+        // every sync, and an unconditional write here would re-trigger the
+        // editor's breakpoint effect in a loop.
+        if (current.length === next.length && current.every((v, i) => v === next[i])) return
+        set((s) => ({ breakpoints: { ...s.breakpoints, [file]: next } }))
+    },
     
     pushHistoryState: (state) => {
         const s = get()
@@ -81,3 +93,14 @@ export const useDebugStore = create<DebugState>((set, get) => ({
     
     reset: () => set({ debugMode: 'idle', currentLine: null, currentFunc: null, currentFile: null, callStack: [], memorySnapshot: null, stepHistory: [], stepIndex: -1 }),
 }))
+
+if (import.meta.env.DEV) {
+    // Console access for manual debugging / browser-driven tests in dev.
+    // Importing '/src/store/debug-store.ts' from the console resolves to a
+    // SECOND module instance (different from the app's aliased import), so
+    // tests must use this handle instead of importing the module themselves.
+    // ??= so a console-triggered duplicate evaluation can't clobber the
+    // app's instance.
+    const w = window as unknown as { __debugStore?: unknown }
+    w.__debugStore ??= useDebugStore
+}

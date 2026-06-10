@@ -108,12 +108,14 @@ export function Editor() {
         editorInstance.onDidFocusEditorWidget(armIfCpp)
         editorInstance.onKeyDown(armIfCpp)
 
+        // Breakpoints toggle on the glyph margin ONLY — in VS Code, clicking
+        // a line number selects the line, and mixing the two makes mis-clicks
+        // set surprise breakpoints.
         editorInstance.onMouseDown((e: editor.IEditorMouseEvent) => {
             if (!e.target || !e.target.position) return
-            const targetType = e.target.type
             const MouseTargetType = monacoInstance.editor.MouseTargetType
 
-            if (targetType === MouseTargetType.GUTTER_GLYPH_MARGIN || targetType === MouseTargetType.GUTTER_LINE_NUMBERS) {
+            if (e.target.type === MouseTargetType.GUTTER_GLYPH_MARGIN) {
                 const line = e.target.position.lineNumber
                 const file = useEditorStore.getState().activeFile
                 if (line && file) {
@@ -127,9 +129,8 @@ export function Editor() {
             if (!e.target || !e.target.position) return
             const model = editorInstance.getModel()
             if (!model) return
-            const targetType = e.target.type
             const MouseTargetType = monacoInstance.editor.MouseTargetType
-            const isGutter = targetType === MouseTargetType.GUTTER_GLYPH_MARGIN || targetType === MouseTargetType.GUTTER_LINE_NUMBERS
+            const isGutter = e.target.type === MouseTargetType.GUTTER_GLYPH_MARGIN
 
             if (isGutter) {
                 const line = e.target.position.lineNumber
@@ -183,8 +184,11 @@ export function Editor() {
     useEffect(() => {
         if (!monaco || !editorReady) return
 
+        // Clear stale paused-line decorations everywhere — including
+        // currentFile itself when the session is no longer paused, so the
+        // yellow arrow doesn't linger after the program exits mid-pause.
         for (const [path, ids] of decoIdsByPath.current.entries()) {
-            if (path === currentFile) continue
+            if (path === currentFile && debugMode === 'paused') continue
             if (ids.step.length === 0) continue
             const model = monaco.editor.getModel(monaco.Uri.parse(path))
             if (model) ids.step = model.deltaDecorations(ids.step, [])
@@ -200,7 +204,7 @@ export function Editor() {
                     options: {
                         isWholeLine: true,
                         className: 'debug-line-highlight',
-                        glyphMarginClassName: 'debug-paused-dot',
+                        glyphMarginClassName: 'debug-paused-glyph',
                     },
                 }])
                 if (currentFile === activeFile) {

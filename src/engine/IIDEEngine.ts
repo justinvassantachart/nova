@@ -75,4 +75,9 @@ export interface IIDEEngine {
     // clang/wasm-ld diagnostic line during the compile phase. Detection is
     // pattern-based on the diagnostic format (filename:line:col: error: ...).
     readonly onCompileError: EventEmitter<{ message: string; isDebug: boolean; isTest: boolean }>;
+    // Fires after the debugger binds a file's breakpoints, reporting the
+    // lines they actually landed on (requests on blank/comment lines snap
+    // to the next executable line). The UI mirrors VS Code by moving its
+    // gutter dots to these verified positions.
+    readonly onBreakpointsValidated: EventEmitter<{ file: string; lines: number[] }>;
 }
