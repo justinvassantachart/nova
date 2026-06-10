@@ -3,23 +3,22 @@ import { Codicon } from '@/components/ui/codicon'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Badge } from '@/components/ui/badge'
 import { useExecutionStore } from '@/store/execution-store'
 import { useCompilerStore } from '@/store/compiler-store'
 import { useDebugStore } from '@/store/debug-store'
-import { getAllFiles } from '@/vfs/volume'
 import { useEngine } from '@/engine/engine-context'
 import { useTestStore } from '@/testing/test-store'
-import { DebugControls } from './DebugControls'
 import { SaveStatus } from './SaveStatus'
 import { useIDEHost } from '@/use-ide-host'
+import { useRunPipeline } from './use-run-pipeline'
 
 export function Toolbar() {
     const engine = useEngine()
     const host = useIDEHost()
-    const { isCompiling, isRunning, setIsCompiling, setIsRunning, setRightTab } = useExecutionStore()
+    const { isCompiling, isRunning, setIsRunning } = useExecutionStore()
     const { cacheState, downloadProgress } = useCompilerStore()
-    const { debugMode, currentLine, currentFile, pushHistoryState, setDebugMode, reset } = useDebugStore()
+    const { debugMode, pushHistoryState, setDebugMode } = useDebugStore()
+    const { run, stop } = useRunPipeline()
     const compilerReady = cacheState === 'ready'
 
     useEffect(() => {
@@ -45,29 +44,10 @@ export function Toolbar() {
         return () => { u1(); u2(); u3(); u4(); u5(); u6() }
     }, [engine, host, pushHistoryState, setDebugMode, setIsRunning])
 
-    const executePipeline = async (debug: boolean, isTest = false) => {
-        if (isCompiling || isRunning) return
-        if (isTest) {
-            useTestStore.getState().reset()
-            setRightTab('tests')
-        }
-        setIsCompiling(true)
-        host?.onEvent?.(isTest ? 'compile_test' : debug ? 'compile_debug' : 'compile', {})
-        // compile() is a no-op file-staging step in NpmDapEngine; actual
-        // compilation happens inside engine.run(). Compile failures surface
-        // asynchronously via engine.onCompileError.
-        await engine.compile(getAllFiles(), debug, isTest)
-        setIsCompiling(false)
-        setIsRunning(true)
-        setDebugMode(debug ? 'running' : 'idle')
-        host?.onEvent?.(isTest ? 'run_tests' : 'run', { debug })
-        await engine.run(debug)
-    }
-
-    const handleRun = () => executePipeline(false)
-    const handleDebug = () => executePipeline(true)
-    const handleTest = () => executePipeline(false, true)
-    const handleStop = () => { engine.stop(); reset() }
+    const handleRun = () => void run(false)
+    const handleDebug = () => void run(true)
+    const handleTest = () => void run(false, true)
+    const handleStop = () => stop()
 
     return (
         <div className="flex items-center h-10 px-3 gap-2 border-b border-border bg-[var(--color-chrome)]">
@@ -88,29 +68,9 @@ export function Toolbar() {
                 </div>
             )}
 
-            {/* Debug status — when paused, the line indicator carries the state
-                and the redundant Running/Ready badge would just add noise. */}
-            {debugMode === 'paused' ? (
-                <Badge variant="outline" className="text-xs border-yellow-500/60 text-yellow-400 bg-yellow-500/5 font-mono">
-                    <span className="text-muted-foreground mr-1">paused at</span>
-                    {currentFile ? currentFile.split('/').pop() : 'unknown'}:{currentLine}
-                </Badge>
-            ) : (
-                <Badge variant="outline" className="text-xs font-mono">
-                    {isCompiling ? (
-                        <span className="text-primary">compiling</span>
-                    ) : isRunning ? (
-                        <span className="text-primary">running</span>
-                    ) : (
-                        <span className="text-muted-foreground">ready</span>
-                    )}
-                </Badge>
-            )}
-
-            {/* Debug controls when paused */}
-            {debugMode === 'paused' && <DebugControls />}
-
-            {/* Run / Debug / Stop */}
+            {/* Run / Debug / Stop — execution state lives in the status bar
+                (StatusBar.tsx) and step controls in the floating debug
+                toolbar over the editor (DebugToolbar.tsx), like VS Code. */}
             {!isRunning && debugMode !== 'paused' ? (
                 <div className="flex gap-1.5">
                     <Tooltip>

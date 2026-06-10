@@ -11,6 +11,7 @@ import { useClangd } from '@/clangd'
 import { isCppPath, monacoLanguageFor } from '@/clangd/config'
 import { useIDEHost } from '@/use-ide-host'
 import { useThemeStore } from '@/theme/theme-store'
+import { DebugToolbar } from '@/components/layout/DebugToolbar'
 
 // Decorations are tracked per file URI so they survive model switching — when
 // the user flips between files we leave each model's gutter/line state intact
@@ -154,6 +155,21 @@ export function Editor() {
             if (model) ghostIdsRef.current = model.deltaDecorations(ghostIdsRef.current, [])
         })
 
+        // F9 toggles a breakpoint on the cursor's line, like VS Code.
+        editorInstance.addCommand(monacoInstance.KeyCode.F9, () => {
+            const line = editorInstance.getPosition()?.lineNumber
+            const file = useEditorStore.getState().activeFile
+            if (line && file) {
+                useDebugStore.getState().toggleBreakpoint(file, line)
+                host?.onEvent?.('breakpoint_toggle', { file, line })
+            }
+        })
+
+        // Mirror the caret into the store for the status bar's Ln/Col.
+        editorInstance.onDidChangeCursorPosition((e) => {
+            useEditorStore.getState().setCursor(e.position.lineNumber, e.position.column)
+        })
+
         setEditorReady(true)
     }
 
@@ -256,7 +272,8 @@ export function Editor() {
                 `defaultValue` for first-time model creation but deliberately
                 omit `value` — passing it would re-fire executeEdits on every
                 store update and wipe undo. The model is the source of truth. */}
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
+                <DebugToolbar />
                 <MonacoEditor
                     height="100%"
                     path={activeFile}

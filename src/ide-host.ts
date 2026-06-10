@@ -18,6 +18,7 @@ export type EventType =
   | 'debug_step_over'
   | 'debug_step_out'
   | 'debug_continue'
+  | 'debug_restart'
   | 'debug_step_back'
   | 'debug_step_forward'
   | 'file_create'

@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toolbar } from '@/components/layout/Toolbar'
+import { StatusBar } from '@/components/layout/StatusBar'
+import { GlobalHotkeys } from '@/components/layout/GlobalHotkeys'
 import { ActivityBar } from '@/components/sidebar/ActivityBar'
 import { SidebarPanel } from '@/components/sidebar/SidebarPanel'
 import { useSidebarStore } from '@/components/sidebar/sidebar-store'
@@ -115,6 +117,7 @@ export default function App() {
         <EngineProvider>
             <ClangdProvider enabled={clangdEnabled}>
                 <TooltipProvider delayDuration={300}>
+                    <GlobalHotkeys />
                     <div className="flex flex-col h-full w-full overflow-hidden">
                         <Toolbar />
                         <div className="flex-1 min-h-0 flex">
@@ -155,6 +158,7 @@ export default function App() {
                                 </ResizablePanel>
                             </ResizablePanelGroup>
                         </div>
+                        <StatusBar />
                     </div>
                 </TooltipProvider>
             </ClangdProvider>

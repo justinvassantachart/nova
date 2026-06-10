@@ -218,3 +218,72 @@ body,
 
 /* When paused ON a breakpoint line, VS Code layers the arrow over the
    red dot; our glyph wins via z-index above. */
+
+/* ── Floating debug toolbar (VS Code style) ─────────────────────── */
+.nova-debug-toolbar {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  background: var(--color-chrome);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.nova-debug-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.nova-debug-toolbar-group + .nova-debug-toolbar-group {
+  border-left: 1px solid var(--color-border);
+  margin-left: 4px;
+  padding-left: 4px;
+}
+.nova-debug-toolbar-btn {
+  width: 28px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.nova-debug-toolbar-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-foreground) 12%, transparent);
+}
+.nova-debug-toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ── Status bar (VS Code style) ─────────────────────────────────── */
+.nova-status-bar {
+  height: 22px;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  background: #007acc;
+  color: #ffffff;
+  font-size: 12px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.nova-status-bar.debugging {
+  background: #cc6633; /* VS Code statusBar.debuggingBackground */
+}
+.nova-status-group {
+  display: flex;
+  align-items: stretch;
+}
+.nova-status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
