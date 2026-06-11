@@ -9,6 +9,8 @@ import { useAuth } from '@/shared/context/auth-context'
 import { useClass } from '@/lms/hooks/useClasses'
 import { useAssignment } from '@/lms/hooks/useAssignments'
 import { useStudentSubmission } from '@/lms/hooks/useSubmission'
+import { downloadFilesZip } from '@/lms/zip'
+import { editedAfterSubmit, fmtDateTime, isLate } from '@/lms/format'
 
 // Teacher-only read-only view of a single student's submission. Renders the
 // IDE with no onWorkspaceChange so any local edits are throw-away.
@@ -112,10 +114,28 @@ export default function SubmissionView() {
             {submission.studentDisplayName || submission.studentEmail || submission.studentUid}
           </div>
           <div className="text-xs text-muted-foreground truncate">
-            {assignment.title} · {submitted ? 'Submitted' : 'In progress'}
+            {assignment.title} ·{' '}
+            {submitted ? `Submitted ${fmtDateTime(submission.submittedAt)}` : 'In progress'}
+            {isLate(submission.submittedAt, assignment.dueDate) && (
+              <span className="text-amber-500"> · late</span>
+            )}
+            {editedAfterSubmit(submission.updatedAt, submission.submittedAt) && (
+              <span className="text-amber-500"> · edited after submitting</span>
+            )}
           </div>
         </div>
         <div className="flex-1" />
+        <button
+          onClick={() =>
+            downloadFilesZip(
+              `${(submission.studentDisplayName || submission.studentUid).replace(/[^a-zA-Z0-9._-]+/g, '_')}.zip`,
+              submission.files ?? {},
+            )
+          }
+          className="px-3 py-1 rounded-md border text-xs hover:bg-accent"
+        >
+          Download .zip
+        </button>
         <span className="text-xs text-muted-foreground">View-only</span>
         <UserMenu />
       </header>

@@ -8,6 +8,7 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
   writeBatch,
   type Unsubscribe,
@@ -44,6 +45,46 @@ export async function createClass(opts: {
     })
     .commit()
   return ref.id
+}
+
+export async function updateClassMeta(
+  classId: string,
+  patch: Partial<Pick<Class, 'name' | 'description'>>,
+): Promise<void> {
+  await updateDoc(doc(getDb(), 'classes', classId), patch)
+}
+
+// Invalidates a leaked invite code by minting a fresh one. Already-enrolled
+// students are unaffected — the code only gates joining.
+export async function regenerateInviteCode(classId: string): Promise<string> {
+  const code = generateInviteCode()
+  await updateDoc(doc(getDb(), 'classes', classId), { inviteCode: code })
+  return code
+}
+
+// Best-effort cascade: assignments (with their submissions), the roster,
+// then the class doc itself. Firestore has no server-side recursive delete
+// for clients, so this enumerates what the teacher can see. Event-log docs
+// in /events are intentionally retained (append-only research data).
+export async function deleteClassCascade(classId: string): Promise<void> {
+  const db = getDb()
+  const assignments = await getDocs(collection(db, 'classes', classId, 'assignments'))
+  for (const a of assignments.docs) {
+    const subs = await getDocs(collection(a.ref, 'submissions'))
+    const refs = [...subs.docs.map((d) => d.ref), a.ref]
+    for (let i = 0; i < refs.length; i += 400) {
+      const batch = writeBatch(db)
+      for (const ref of refs.slice(i, i + 400)) batch.delete(ref)
+      await batch.commit()
+    }
+  }
+  const members = await getDocs(collection(db, 'classes', classId, 'members'))
+  for (let i = 0; i < members.docs.length; i += 400) {
+    const batch = writeBatch(db)
+    for (const d of members.docs.slice(i, i + 400)) batch.delete(d.ref)
+    await batch.commit()
+  }
+  await deleteDoc(doc(db, 'classes', classId))
 }
 
 export async function getClass(classId: string): Promise<Class | null> {

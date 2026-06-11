@@ -1,11 +1,16 @@
 import {
   collection,
   doc,
+  getCountFromServer,
   getDoc,
+  getDocs,
   onSnapshot,
+  query,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
+  where,
   type Unsubscribe,
 } from 'firebase/firestore'
 import { getDb } from './client'
@@ -93,6 +98,50 @@ export async function saveSubmissionFiles(
     submissionRef(classId, assignmentId, studentUid),
     { files, updatedAt: serverTimestamp() },
   )
+}
+
+// Cheap status summary for the class assignment list. Aggregate count
+// queries return numbers without downloading submission payloads (each of
+// which carries the student's full file map).
+export async function countSubmissions(
+  classId: string,
+  assignmentId: string,
+): Promise<{ started: number; submitted: number }> {
+  const col = submissionsCol(classId, assignmentId)
+  const [startedSnap, submittedSnap] = await Promise.all([
+    getCountFromServer(col),
+    // Range filter matches only docs where the field exists — i.e. submitted.
+    getCountFromServer(query(col, where('submittedAt', '>', Timestamp.fromMillis(0)))),
+  ])
+  return { started: startedSnap.data().count, submitted: submittedSnap.data().count }
+}
+
+// One-time full fetch, used by the teacher's "download all" export.
+export async function getAllSubmissions(
+  classId: string,
+  assignmentId: string,
+): Promise<Submission[]> {
+  const snap = await getDocs(submissionsCol(classId, assignmentId))
+  return snap.docs.map((d) => d.data() as Submission)
+}
+
+// The student's own submission status across many assignments, one read
+// each (students may not run collection queries over other students' docs,
+// so this is per-doc by design).
+export async function getMySubmissionStatuses(
+  classId: string,
+  assignmentIds: string[],
+  studentUid: string,
+): Promise<Record<string, Pick<Submission, 'submittedAt' | 'updatedAt'>>> {
+  const entries = await Promise.all(
+    assignmentIds.map(async (aid) => {
+      const snap = await getDoc(submissionRef(classId, aid, studentUid))
+      if (!snap.exists()) return null
+      const s = snap.data() as Submission
+      return [aid, { submittedAt: s.submittedAt ?? null, updatedAt: s.updatedAt ?? null }] as const
+    }),
+  )
+  return Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => e !== null))
 }
 
 export async function markSubmitted(

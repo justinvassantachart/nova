@@ -134,7 +134,10 @@ service cloud.firestore {
             && request.resource.data.assignmentId == resource.data.assignmentId
             && request.resource.data.classId == resource.data.classId;
 
-          allow delete: if false;
+          // Students never delete their work; the teacher may, as part of
+          // assignment/class deletion cascades (client-side recursive
+          // delete — Firestore doesn't cascade subcollections itself).
+          allow delete: if isClassTeacher(classId);
         }
       }
     }

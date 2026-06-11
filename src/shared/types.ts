@@ -46,6 +46,9 @@ export type Assignment = {
   published: boolean
   createdAt: Timestamp | null
   dueDate?: Timestamp | null
+  // Manual syllabus position (0-based). Docs created before this field
+  // existed fall back to createdAt millis — see assignment-order.ts.
+  order?: number
 }
 
 export type Submission = {
