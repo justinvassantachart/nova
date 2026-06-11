@@ -1,8 +1,11 @@
 # Guided lessons (`/learn`)
 
-A self-contained interactive lesson series that teaches debugging — including
-debugging AI-generated code — inside the Nova IDE. Live at `/learn`, no
-account required; progress persists in `localStorage`.
+A self-contained interactive course that takes a student from CS1 Python to
+C++ and linked lists inside the Nova IDE. Ten lessons, each teaching new
+language ground (types, functions/copies, vectors, pointers, the heap,
+structs, then the linked-list arc) with an embedded "AI bug hunt": plausible
+AI-generated code whose bug is flushed out with unit tests and the debugger.
+Live at `/learn`, no account required; progress persists in `localStorage`.
 
 ## Architecture: the lesson system is a *host*, not a fork
 
@@ -40,7 +43,7 @@ just the pattern.
 | File | Role |
 |---|---|
 | `types.ts` | `Lesson` / `LessonStep` / `CheckSpec` — plain, JSON-serializable data |
-| `content/` | The six lessons; `content/index.ts` is the registry |
+| `content/` | The ten lessons; `content/index.ts` is the registry |
 | `checks.ts` | Pure evaluator: `CheckSpec` × IDE-state snapshot → pass/fail per part |
 | `runtime.ts` | Accumulates host events (per-run stdout, exit code, action counts) |
 | `use-step-check.ts` | React hook: re-evaluates the active step's check on state change |

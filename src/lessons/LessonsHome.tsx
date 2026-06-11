@@ -42,12 +42,13 @@ export default function LessonsHome() {
 
             {/* Hero */}
             <div className="max-w-5xl mx-auto px-6 pt-12 pb-8">
-                <h1 className="text-3xl font-bold tracking-tight">Learn to debug — for real</h1>
+                <h1 className="text-3xl font-bold tracking-tight">From Python to C++ — for real</h1>
                 <p className="mt-3 text-[15px] text-muted-foreground max-w-2xl leading-relaxed">
-                    Six hands-on lessons inside a real C++ debugger that runs entirely in your
-                    browser. Set breakpoints, step through live programs, watch the heap draw
-                    itself — and practice the skill this decade demands:{' '}
-                    <span className="text-foreground font-medium">debugging code an AI wrote for you</span>.
+                    Ten hands-on lessons that take you from CS1 Python to C++ and linked lists,
+                    inside a real debugger that runs entirely in your browser. Every lesson teaches
+                    new language ground, then puts it to work on the skill this decade demands:{' '}
+                    <span className="text-foreground font-medium">debugging code an AI wrote for you</span> —
+                    with unit tests, breakpoints, and a live picture of memory.
                 </p>
                 <p className="mt-2 text-[13px] text-muted-foreground">
                     No install, no account. Each step checks itself off as you do the real thing.

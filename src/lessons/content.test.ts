@@ -25,8 +25,8 @@ function lessonFile(lesson: Lesson, file?: string): string | undefined {
 }
 
 describe('lesson registry', () => {
-    it('contains exactly six lessons', () => {
-        expect(LESSONS).toHaveLength(6)
+    it('contains exactly ten lessons', () => {
+        expect(LESSONS).toHaveLength(10)
     })
 
     it('has unique, URL-safe ids and slugs', () => {
@@ -37,9 +37,12 @@ describe('lesson registry', () => {
         for (const slug of slugs) expect(slug).toMatch(/^[a-z0-9-]+$/)
     })
 
-    it('includes at least one AI-debugging lesson and a linked-list lesson', () => {
-        expect(LESSONS.filter((l) => l.tags.includes('AI-generated code')).length).toBeGreaterThanOrEqual(3)
-        expect(LESSONS.some((l) => l.tags.includes('linked lists'))).toBe(true)
+    it('embeds an AI bug hunt in every lesson and ends in linked lists', () => {
+        // The curriculum's promise: each lesson carries an AI-generated-code
+        // debugging assignment, and the back third is the linked-list arc.
+        expect(LESSONS.every((l) => l.tags.includes('AI-generated code'))).toBe(true)
+        expect(LESSONS.filter((l) => l.tags.includes('linked lists')).length).toBeGreaterThanOrEqual(3)
+        expect(LESSONS.some((l) => l.tags.includes('testing'))).toBe(true)
     })
 })
 
