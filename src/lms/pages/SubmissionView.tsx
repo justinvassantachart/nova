@@ -127,6 +127,16 @@ export default function SubmissionView() {
         <div className="flex-1" />
         <button
           onClick={() =>
+            navigate(
+              `/classes/${classId}/assignments/${assignmentId}/submissions/${studentUid}/replay`,
+            )
+          }
+          className="px-3 py-1 rounded-md border text-xs hover:bg-accent"
+        >
+          Replay activity
+        </button>
+        <button
+          onClick={() =>
             downloadFilesZip(
               `${(submission.studentDisplayName || submission.studentUid).replace(/[^a-zA-Z0-9._-]+/g, '_')}.zip`,
               submission.files ?? {},

@@ -135,19 +135,28 @@ export async function saveStarterFiles(
   await updateDoc(assignmentRef(classId, assignmentId), { starterFiles: files })
 }
 
-// Deletes the assignment AND its submissions subcollection. Deleting only
-// the parent doc would orphan student work as unreachable-but-billed docs
-// (Firestore subcollections survive parent deletion).
+// Batches cap at 500 writes; chunk to stay clear of the limit.
+async function deleteRefsChunked(refs: { path: string }[]) {
+  const db = getDb()
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = writeBatch(db)
+    for (const ref of refs.slice(i, i + 400)) batch.delete(doc(db, ref.path))
+    await batch.commit()
+  }
+}
+
+// Deletes the assignment AND everything under it: each submission's
+// recorded event trace, the submission docs, then the assignment doc.
+// Firestore subcollections survive parent deletion, so skipping any layer
+// would orphan unreachable-but-billed documents.
 export async function deleteAssignment(classId: string, assignmentId: string) {
   const subs = await getDocs(
     collection(getDb(), 'classes', classId, 'assignments', assignmentId, 'submissions'),
   )
-  // Batches cap at 500 writes; chunk to stay clear of the limit.
-  const refs = subs.docs.map((d) => d.ref)
-  for (let i = 0; i < refs.length; i += 400) {
-    const batch = writeBatch(getDb())
-    for (const ref of refs.slice(i, i + 400)) batch.delete(ref)
-    await batch.commit()
+  for (const sub of subs.docs) {
+    const events = await getDocs(collection(sub.ref, 'events'))
+    await deleteRefsChunked(events.docs.map((d) => d.ref))
   }
+  await deleteRefsChunked(subs.docs.map((d) => d.ref))
   await deleteDoc(assignmentRef(classId, assignmentId))
 }

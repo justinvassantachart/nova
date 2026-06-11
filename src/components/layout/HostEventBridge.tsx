@@ -18,8 +18,15 @@ export function HostEventBridge() {
         if (!host?.wantsRuntimeEvents || !host.onEvent) return
         const onEvent = host.onEvent
         const u1 = engine.onStdout.subscribe((text) => onEvent('terminal_stdout', { text }))
-        const u2 = engine.onExit.subscribe((code) => onEvent('program_exit', { code }))
-        return () => { u1(); u2() }
+        // stderr (compiler diagnostics, runtime traps) shares the terminal
+        // event type so replay reconstructs the terminal exactly; the
+        // `stream` tag lets consumers that care about stdout alone (lesson
+        // checks) filter it back out.
+        const u2 = engine.onStderr.subscribe((text) => onEvent('terminal_stdout', { text, stream: 'stderr' }))
+        const u3 = engine.onExit.subscribe((code) => onEvent('program_exit', { code }))
+        const u4 = engine.onDebugPaused.subscribe((s) =>
+            onEvent('debug_paused', { file: s.file, line: s.line, func: s.func }))
+        return () => { u1(); u2(); u3(); u4() }
     }, [engine, host])
 
     return null

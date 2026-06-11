@@ -15,6 +15,8 @@ import ClassPage from '@/lms/pages/ClassPage'
 import JoinClass from '@/lms/pages/JoinClass'
 import AssignmentPage from '@/lms/pages/AssignmentPage'
 import SubmissionView from '@/lms/pages/SubmissionView'
+import ReplayPage from '@/lms/pages/ReplayPage'
+import ReplayDemo from '@/replay/ReplayDemo'
 import LessonsHome from '@/lessons/LessonsHome'
 import LessonRunner from '@/lessons/LessonRunner'
 
@@ -160,6 +162,16 @@ void (async () => {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/classes/:classId/assignments/:assignmentId/submissions/:studentUid/replay"
+              element={
+                <ProtectedRoute>
+                  <ReplayPage />
+                </ProtectedRoute>
+              }
+            />
+            {/* Replay viewer against synthetic data — dev builds only. */}
+            {import.meta.env.DEV && <Route path="/replay-demo" element={<ReplayDemo />} />}
             {/* Guided lesson series — no auth required; progress lives in
                 localStorage. Served with COOP/COEP (not in the non-isolated
                 carve-out) so the embedded IDE's SharedArrayBuffer workers run. */}

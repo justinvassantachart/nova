@@ -14,6 +14,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { getDb } from './client'
+import { deleteAssignment } from './assignments'
 import type { Class, ClassMember, Membership } from '@/shared/types'
 
 // 6-char alphanumeric invite code with ambiguous chars removed (no 0/O, 1/I/L).
@@ -62,21 +63,17 @@ export async function regenerateInviteCode(classId: string): Promise<string> {
   return code
 }
 
-// Best-effort cascade: assignments (with their submissions), the roster,
+// Best-effort cascade: every assignment (which itself cascades submissions
+// and their recorded event traces — see deleteAssignment), the roster,
 // then the class doc itself. Firestore has no server-side recursive delete
-// for clients, so this enumerates what the teacher can see. Event-log docs
-// in /events are intentionally retained (append-only research data).
+// for clients, so this enumerates what the teacher can see. Top-level
+// /events docs (lesson + teacher-edit traces) are intentionally retained
+// as append-only research data.
 export async function deleteClassCascade(classId: string): Promise<void> {
   const db = getDb()
   const assignments = await getDocs(collection(db, 'classes', classId, 'assignments'))
   for (const a of assignments.docs) {
-    const subs = await getDocs(collection(a.ref, 'submissions'))
-    const refs = [...subs.docs.map((d) => d.ref), a.ref]
-    for (let i = 0; i < refs.length; i += 400) {
-      const batch = writeBatch(db)
-      for (const ref of refs.slice(i, i + 400)) batch.delete(ref)
-      await batch.commit()
-    }
+    await deleteAssignment(classId, a.id)
   }
   const members = await getDocs(collection(db, 'classes', classId, 'members'))
   for (let i = 0; i < members.docs.length; i += 400) {

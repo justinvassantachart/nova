@@ -20,7 +20,11 @@ export class LessonRuntime {
             this.stdoutBuf = ''
             this.exitCode = null
         }
-        if (type === 'terminal_stdout') this.stdoutBuf += String(payload.text ?? '')
+        // stderr chunks share the terminal event type (tagged via `stream`)
+        // for replay fidelity; lesson stdout checks stay stdout-only.
+        if (type === 'terminal_stdout' && payload.stream !== 'stderr') {
+            this.stdoutBuf += String(payload.text ?? '')
+        }
         if (type === 'program_exit') this.exitCode = Number(payload.code ?? 0)
         this.snapshot++
         this.listeners.forEach((fn) => fn())

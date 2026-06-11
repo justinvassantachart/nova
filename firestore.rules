@@ -138,6 +138,24 @@ service cloud.firestore {
           // assignment/class deletion cascades (client-side recursive
           // delete — Firestore doesn't cascade subcollections itself).
           allow delete: if isClassTeacher(classId);
+
+          // ── session events (replayable trace) ───────────────────
+          // Append-only log of the student's IDE actions for THIS
+          // submission (edits with content, runs, terminal output,
+          // breakpoints, debug pauses…). Living under the submission
+          // gives the teacher read access and a plain orderBy query.
+          // The top-level /events collection still receives lesson and
+          // teacher-edit traces; collectionGroup('events') spans both.
+          match /events/{eventId} {
+            allow read: if isUser(studentUid) || isClassTeacher(classId);
+            allow create: if isUser(studentUid)
+              && isClassMember(classId)
+              && request.resource.data.uid == request.auth.uid;
+            allow update: if false;
+            // Teacher deletes happen only as part of the submission/
+            // assignment/class cascade.
+            allow delete: if isClassTeacher(classId);
+          }
         }
       }
     }

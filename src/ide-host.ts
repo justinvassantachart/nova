@@ -6,6 +6,14 @@
 // under src/lms or src/shared. Dependency direction is LMS -> IDE.
 
 export type EventType =
+  // Emitted by the HOST (not the IDE) when it mounts a workspace, with
+  // { mode, files } — the seed snapshot that makes an event trace
+  // replayable from t=0. The IDE never emits it; it's listed here so the
+  // whole session vocabulary lives in one union.
+  | 'session_start'
+  // { file, length, content } — content is the post-edit file text
+  // (truncated past EDIT_CONTENT_CAP chars), throttled with a trailing
+  // emit so the final state of a typing burst is always captured.
   | 'edit'
   | 'compile'
   | 'compile_debug'
@@ -13,7 +21,11 @@ export type EventType =
   | 'compile_error'
   | 'run'
   | 'run_tests'
+  // { file, line, on } — `on` is the post-toggle state of that line.
   | 'breakpoint_toggle'
+  // { file, lines } — the debugger snapped/verified a file's breakpoints;
+  // `lines` is the authoritative post-bind set for that file.
+  | 'breakpoints_validated'
   | 'debug_step_into'
   | 'debug_step_over'
   | 'debug_step_out'
@@ -21,11 +33,19 @@ export type EventType =
   | 'debug_restart'
   | 'debug_step_back'
   | 'debug_step_forward'
+  // { file, line, func } — where execution paused. Gated (with the other
+  // runtime events) on wantsRuntimeEvents.
+  | 'debug_paused'
   | 'file_create'
   | 'file_rename'
   | 'file_delete'
   | 'terminal_stdout'
   | 'program_exit'
+
+// Edit events snapshot the whole file so traces replay without a diff
+// engine; this cap keeps a pathological paste from blowing up an event
+// document (Firestore caps docs at 1 MiB).
+export const EDIT_CONTENT_CAP = 60_000
 
 export type IDEMode =
   | 'standalone'

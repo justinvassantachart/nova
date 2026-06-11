@@ -37,9 +37,11 @@ export function Toolbar() {
             host?.onEvent?.('compile_error', { debug: e.isDebug })
         })
         // Mirror VS Code: when the debugger snaps a breakpoint to the next
-        // executable line, move the gutter dot to where it actually bound.
+        // executable line, move the gutter dot to where it actually bound —
+        // and tell the host, so recorded traces carry the authoritative set.
         const u6 = engine.onBreakpointsValidated.subscribe(({ file, lines }) => {
             useDebugStore.getState().setFileBreakpoints(file, lines)
+            host?.onEvent?.('breakpoints_validated', { file, lines })
         })
         return () => { u1(); u2(); u3(); u4(); u5(); u6() }
     }, [engine, host, pushHistoryState, setDebugMode, setIsRunning])

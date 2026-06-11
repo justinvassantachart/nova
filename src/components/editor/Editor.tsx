@@ -10,6 +10,7 @@ import { useEngine } from '@/engine/engine-context'
 import { useClangd } from '@/clangd'
 import { isCppPath, monacoLanguageFor } from '@/clangd/config'
 import { useIDEHost } from '@/use-ide-host'
+import { EDIT_CONTENT_CAP } from '@/ide-host'
 import { useThemeStore } from '@/theme/theme-store'
 import { DebugToolbar } from '@/components/layout/DebugToolbar'
 
@@ -27,6 +28,7 @@ export function Editor() {
     const host = useIDEHost()
     const clangd = useClangd()
     const lastEditEmit = useRef<Record<string, number>>({})
+    const editTrailing = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
     const decoIdsByPath = useRef<Map<string, DecoIds>>(new Map())
@@ -123,7 +125,8 @@ export function Editor() {
                 const file = useEditorStore.getState().activeFile
                 if (line && file) {
                     toggleBreakpoint(file, line)
-                    host?.onEvent?.('breakpoint_toggle', { file, line })
+                    const on = (useDebugStore.getState().breakpoints[file] ?? []).includes(line)
+                    host?.onEvent?.('breakpoint_toggle', { file, line, on })
                 }
             }
         })
@@ -163,7 +166,8 @@ export function Editor() {
             const file = useEditorStore.getState().activeFile
             if (line && file) {
                 useDebugStore.getState().toggleBreakpoint(file, line)
-                host?.onEvent?.('breakpoint_toggle', { file, line })
+                const on = (useDebugStore.getState().breakpoints[file] ?? []).includes(line)
+                host?.onEvent?.('breakpoint_toggle', { file, line, on })
             }
         })
 
@@ -240,13 +244,42 @@ export function Editor() {
         // caller; nothing here touches OPFS directly.
         writeFile(activeFile, value)
 
+        // Leading + trailing throttle (1s window). The leading emit gives
+        // hosts periodic snapshots during a long typing burst; the trailing
+        // emit guarantees the burst's FINAL content is captured — without
+        // it, a recorded session would end on a stale mid-burst snapshot.
+        const emitEdit = (file: string, content: string) => {
+            lastEditEmit.current[file] = Date.now()
+            host?.onEvent?.('edit', {
+                file,
+                length: content.length,
+                content: content.length > EDIT_CONTENT_CAP
+                    ? content.slice(0, EDIT_CONTENT_CAP)
+                    : content,
+                truncated: content.length > EDIT_CONTENT_CAP || undefined,
+            })
+        }
         const now = Date.now()
         const last = lastEditEmit.current[activeFile] ?? 0
+        clearTimeout(editTrailing.current[activeFile])
         if (now - last >= 1000) {
-            lastEditEmit.current[activeFile] = now
-            host?.onEvent?.('edit', { file: activeFile, length: value.length })
+            emitEdit(activeFile, value)
+        } else {
+            // Rescheduled on every keystroke, so the timer that finally
+            // fires always carries the burst's newest content.
+            editTrailing.current[activeFile] = setTimeout(
+                () => emitEdit(activeFile, value),
+                1000 - (now - last),
+            )
         }
     }, [activeFile, setActiveFileContent, host])
+
+    // Pending trailing edit-emits must not outlive the editor (the host
+    // callback would fire against an unmounted surface).
+    useEffect(() => {
+        const timers = editTrailing.current
+        return () => { for (const t of Object.values(timers)) clearTimeout(t) }
+    }, [])
 
     if (!activeFile) {
         return (

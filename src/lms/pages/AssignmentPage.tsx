@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import App from '@/App'
 import { IDEHostProvider } from '@/ide-host-context'
@@ -366,18 +366,31 @@ function SubmissionsList({
                 <div className="flex items-center gap-2 shrink-0">
                   <StatusChip row={row} assignment={assignment} />
                   {s && (
-                    <button
-                      onClick={() =>
-                        downloadFilesZip(
-                          `${row.name.replace(/[^a-zA-Z0-9._-]+/g, '_')}.zip`,
-                          s.files ?? {},
-                        )
-                      }
-                      title="Download this student's files"
-                      className="text-xs underline text-muted-foreground hover:text-foreground"
-                    >
-                      Download
-                    </button>
+                    <>
+                      <button
+                        onClick={() =>
+                          navigate(
+                            `/classes/${classId}/assignments/${assignmentId}/submissions/${row.uid}/replay`,
+                          )
+                        }
+                        title="Replay this student's recorded sessions"
+                        className="text-xs underline text-muted-foreground hover:text-foreground"
+                      >
+                        Replay
+                      </button>
+                      <button
+                        onClick={() =>
+                          downloadFilesZip(
+                            `${row.name.replace(/[^a-zA-Z0-9._-]+/g, '_')}.zip`,
+                            s.files ?? {},
+                          )
+                        }
+                        title="Download this student's files"
+                        className="text-xs underline text-muted-foreground hover:text-foreground"
+                      >
+                        Download
+                      </button>
+                    </>
                   )}
                 </div>
               </li>
@@ -413,6 +426,7 @@ function StudentView({
 
   const onEvent = useFirestoreEventSink({
     uid: user?.uid,
+    classId,
     assignmentId,
     submissionId: user?.uid,
   })
@@ -428,6 +442,9 @@ function StudentView({
       assignmentId,
       submissionId: user.uid,
       initialFiles: submission.files,
+      // Recorded sessions need the full runtime trace (terminal output,
+      // exits, pause locations) — that's what makes replay faithful.
+      wantsRuntimeEvents: true,
       onWorkspaceChange: (files) =>
         saveSubmissionFiles(classId, assignmentId, user.uid, files).catch((e) =>
           console.warn('[AssignmentPage] save submission failed', e),
@@ -436,6 +453,14 @@ function StudentView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId, assignmentId, user?.uid, submission?.assignmentId])
+
+  // Open every recorded trace with the workspace seed: replay reconstructs
+  // file state from this snapshot plus the edit stream that follows.
+  useEffect(() => {
+    if (!host) return
+    onEvent('session_start', { mode: host.mode, files: host.initialFiles ?? {} })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host])
 
   const handleSubmit = async () => {
     if (!user) return
