@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
     clampPosition,
-    defaultPosition,
     parseStoredPosition,
     positionFromDrag,
     serializePosition,
@@ -9,15 +8,6 @@ import {
 
 const toolbar = { width: 300, height: 32 }
 const container = { width: 1000, height: 600 }
-
-describe('defaultPosition', () => {
-    it('centers horizontally near the top', () => {
-        expect(defaultPosition(toolbar, container)).toEqual({ x: 350, y: 6 })
-    })
-    it('pins to the left edge when the container is narrower than the toolbar', () => {
-        expect(defaultPosition(toolbar, { width: 200, height: 600 }).x).toBe(0)
-    })
-})
 
 describe('clampPosition', () => {
     it('passes through positions fully inside the container', () => {

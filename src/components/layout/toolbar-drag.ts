@@ -8,15 +8,8 @@ export type Size = { width: number; height: number }
 
 export const TOOLBAR_POSITION_KEY = 'nova.debug-toolbar.pos.v1'
 
-// VS Code's default: a small pill floating near the top, centered.
-const DEFAULT_TOP_GAP = 6
-
-export function defaultPosition(toolbar: Size, container: Size): Pos {
-  return {
-    x: Math.max(0, Math.round((container.width - toolbar.width) / 2)),
-    y: DEFAULT_TOP_GAP,
-  }
-}
+// (The DEFAULT position — top-center, 6px gap — lives in the stylesheet:
+// a null stored position simply means "don't override the CSS".)
 
 // Keep the toolbar fully inside the container. When the container is
 // smaller than the toolbar (tiny editor pane), pin to the top-left rather

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Codicon } from '@/components/ui/codicon'
 import { UserMenu } from '@/lms/components/UserMenu'
 import { AssignmentEditDialog } from '@/lms/components/AssignmentEditDialog'
+import { SubmissionStatusChip } from '@/lms/components/SubmissionStatusChip'
 import { ClassSettingsDialog } from '@/lms/components/ClassSettingsDialog'
 import { useAuth } from '@/shared/context/auth-context'
 import { useClass, useClassMembers } from '@/lms/hooks/useClasses'
@@ -74,6 +75,17 @@ export default function ClassPage() {
   )
 }
 
+// Click-handler failures surface through a native alert — consistent with
+// this page's confirm() prompts, and infinitely better than silence when
+// Firestore rejects (offline, revoked permissions).
+async function runOrAlert(label: string, fn: () => Promise<unknown>) {
+  try {
+    await fn()
+  } catch (e) {
+    alert(`${label} failed: ${e instanceof Error ? e.message : 'unknown error'}`)
+  }
+}
+
 // Small icon-only action button used across the assignment rows.
 function IconButton({
   icon,
@@ -137,27 +149,29 @@ function TeacherView({ classId, klass }: { classId: string; klass: Class }) {
 
   async function handleNew() {
     if (!user) return
-    const id = await createAssignment({
-      classId,
-      teacherUid: user.uid,
-      order: nextOrder(assignments),
+    await runOrAlert('Creating the assignment', async () => {
+      const id = await createAssignment({
+        classId,
+        teacherUid: user.uid,
+        order: nextOrder(assignments),
+      })
+      navigate(`/classes/${classId}/assignments/${id}`)
     })
-    navigate(`/classes/${classId}/assignments/${id}`)
   }
 
   async function handleMove(index: number, direction: 'up' | 'down') {
     const ids = movedIds(assignments, index, direction)
-    if (ids) await reorderAssignments(classId, ids)
+    if (ids) await runOrAlert('Reordering', () => reorderAssignments(classId, ids))
   }
 
   async function handleDuplicate(a: Assignment) {
     if (!user) return
-    await duplicateAssignment({
+    await runOrAlert('Duplicating', () => duplicateAssignment({
       classId,
       teacherUid: user.uid,
       source: a,
       order: nextOrder(assignments),
-    })
+    }))
   }
 
   async function handleDeleteAssignment(a: Assignment) {
@@ -166,12 +180,12 @@ function TeacherView({ classId, klass }: { classId: string; klass: Class }) {
       ? ` This also deletes work from ${started} student${started === 1 ? '' : 's'}.`
       : ''
     if (!confirm(`Delete "${a.title || 'Untitled'}"?${warning} This cannot be undone.`)) return
-    await deleteAssignment(classId, a.id)
+    await runOrAlert('Deleting', () => deleteAssignment(classId, a.id))
   }
 
   async function handleRemoveMember(uid: string, name: string) {
     if (!confirm(`Remove ${name} from class? Their submitted work is kept.`)) return
-    await removeMember(classId, uid)
+    await runOrAlert('Removing the student', () => removeMember(classId, uid))
   }
 
   async function copyInvite() {
@@ -260,7 +274,10 @@ function TeacherView({ classId, klass }: { classId: string; klass: Class }) {
                 <PublishChip
                   published={a.published}
                   onToggle={() =>
-                    void updateAssignmentMeta(classId, a.id, { published: !a.published })
+                    void runOrAlert(
+                      a.published ? 'Unpublishing' : 'Publishing',
+                      () => updateAssignmentMeta(classId, a.id, { published: !a.published }),
+                    )
                   }
                 />
                 <div className="flex items-center shrink-0">
@@ -348,8 +365,10 @@ function StudentView({ classId, userUid }: { classId: string; userUid: string | 
   async function handleLeave() {
     if (!userUid) return
     if (!confirm('Leave this class? You can rejoin with the invite code.')) return
-    await leaveClass(classId, userUid)
-    navigate('/dashboard', { replace: true })
+    await runOrAlert('Leaving the class', async () => {
+      await leaveClass(classId, userUid)
+      navigate('/dashboard', { replace: true })
+    })
   }
 
   return (
@@ -391,18 +410,7 @@ function StudentView({ classId, userUid }: { classId: string; userUid: string | 
                       )}
                     </div>
                   </div>
-                  <span
-                    className={
-                      'text-[11px] px-2 py-0.5 rounded-full border shrink-0 ' +
-                      (submitted
-                        ? 'bg-green-600/15 text-green-500 border-green-700/50'
-                        : st
-                          ? 'text-foreground border-border'
-                          : 'text-muted-foreground border-border')
-                    }
-                  >
-                    {submitted ? 'Submitted' : st ? 'In progress' : 'Not started'}
-                  </span>
+                  <SubmissionStatusChip submitted={submitted} started={!!st} />
                 </button>
               </li>
             )

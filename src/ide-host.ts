@@ -11,14 +11,17 @@ export type EventType =
   // replayable from t=0. The IDE never emits it; it's listed here so the
   // whole session vocabulary lives in one union.
   | 'session_start'
-  // { file, length, content } — content is the post-edit file text
-  // (truncated past EDIT_CONTENT_CAP chars), throttled with a trailing
-  // emit so the final state of a typing burst is always captured.
+  // { file, length, content, truncated? } — content is the post-edit file
+  // text (sliced to EDIT_CONTENT_CAP chars, with truncated:true when it
+  // was), throttled with a trailing emit so the final state of a typing
+  // burst is always captured.
   | 'edit'
   | 'compile'
   | 'compile_debug'
   | 'compile_test'
+  // { debug } — whether the failed build was for a debug session.
   | 'compile_error'
+  // { debug } — true when the session runs under the debugger.
   | 'run'
   | 'run_tests'
   // { file, line, on } — `on` is the post-toggle state of that line.
@@ -84,11 +87,12 @@ export type IDEHost = {
   onWorkspaceChange?: (files: Record<string, string>) => void | Promise<void>
   // Fires for each instrumented user action. Host owns buffering/flushing.
   onEvent?: (type: EventType, payload: Record<string, unknown>) => void
-  // Opt-in to high-volume runtime events ('terminal_stdout' { text },
-  // 'program_exit' { code }) on onEvent. Off by default so hosts that
-  // persist events (e.g. the LMS Firestore sink) don't pay for every
-  // chunk of program output; hosts that *react* to program behavior
-  // (e.g. guided lessons) set this.
+  // Opt-in to high-volume / engine runtime events on onEvent:
+  // 'terminal_stdout' { text }, 'program_exit' { code }, and 'debug_paused'
+  // { file, line, func }. Off by default so hosts that persist events
+  // (e.g. the LMS Firestore sink) don't pay for every chunk of program
+  // output; hosts that *react* to program behavior (guided lessons) or
+  // *record* it for replay (the LMS student host) set this.
   wantsRuntimeEvents?: boolean
 }
 

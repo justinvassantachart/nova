@@ -32,11 +32,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let firstSnap = true
     const unsub = onSnapshot(ref, async (snap) => {
       if (!snap.exists()) {
-        await setDoc(ref, {
-          email: user.email ?? '',
-          displayName: user.displayName ?? '',
-          createdAt: serverTimestamp(),
-        })
+        // If this create fails (offline, rules), don't leave the app on the
+        // loading spinner forever — settle with auth-only identity; the doc
+        // sync retries on the next snapshot/sign-in.
+        try {
+          await setDoc(ref, {
+            email: user.email ?? '',
+            displayName: user.displayName ?? '',
+            createdAt: serverTimestamp(),
+          })
+        } catch (e) {
+          console.warn('[auth] user doc create failed', e)
+          setAppUser({
+            uid: user.uid,
+            email: user.email ?? '',
+            displayName: user.displayName ?? '',
+            createdAt: null,
+          })
+          if (firstSnap) {
+            firstSnap = false
+            setLoading(false)
+          }
+        }
         return
       }
       const data = snap.data() as Omit<AppUser, 'uid'>

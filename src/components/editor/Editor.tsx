@@ -71,6 +71,11 @@ export function Editor() {
                 model.dispose()
                 decoIdsByPath.current.delete(path)
                 delete lastEditEmit.current[path]
+                // A pending trailing edit-emit for a deleted file would fire
+                // AFTER the host's 'file_delete' event — in a recorded trace
+                // that phantom edit resurrects the file. Kill it with the model.
+                clearTimeout(editTrailing.current[path])
+                delete editTrailing.current[path]
             }
             // Tabs for deleted/renamed files close with their models.
             useEditorStore.getState().pruneTabs(fileExists, readFile)

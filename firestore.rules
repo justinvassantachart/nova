@@ -61,7 +61,12 @@ service cloud.firestore {
         allow read: if isUser(uid);
         allow create, update: if isUser(uid)
           && request.resource.data.classId == classId;
-        allow delete: if isUser(uid);
+        // The owner removes their own mirror (leaveClass); the class
+        // teacher removes it while deleting the whole class so former
+        // students don't keep dead dashboard links. The teacher check
+        // reads the class doc, so class deletion must order mirror
+        // deletes before the class doc delete (deleteClassCascade does).
+        allow delete: if isUser(uid) || isClassTeacher(classId);
       }
     }
 

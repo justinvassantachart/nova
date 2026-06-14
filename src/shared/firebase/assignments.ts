@@ -3,7 +3,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
   query,
@@ -67,15 +66,6 @@ export async function duplicateAssignment(opts: {
     createdAt: serverTimestamp(),
   })
   return ref.id
-}
-
-export async function getAssignment(
-  classId: string,
-  assignmentId: string,
-): Promise<Assignment | null> {
-  const snap = await getDoc(assignmentRef(classId, assignmentId))
-  if (!snap.exists()) return null
-  return { id: snap.id, ...(snap.data() as Omit<Assignment, 'id'>) }
 }
 
 export function watchAssignment(

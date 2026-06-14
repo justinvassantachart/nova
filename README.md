@@ -25,6 +25,9 @@ A browser-based C++ IDE with in-browser compilation, step-through debugging, and
 ![Classes](./assets/demo_classes.png)
 - **Canvas output** for graphics programs
 ![Canvas output](./assets/demo_canvas.png)
+- **Guided lessons** (`/learn`) - a ten-lesson course taking a student from CS1 Python to C++ and linked lists, each lesson embedding an "AI bug hunt" debugged with unit tests and the debugger; no account required ([src/lessons/](src/lessons/README.md))
+- **Simple LMS** - classes with invite codes, ordered assignments with due dates and publishing, auto-saved student submissions, and a Gradescope-style roster with late flags and zip exports ([src/lms/](src/lms/))
+- **Session replay** - every student work session is recorded through the IDE's host-event stream and replayable by the teacher: scrubber, playback, reconstructed files/terminal/breakpoints, and an activity feed ([src/replay/](src/replay/README.md))
 
 ## TODO
 
@@ -127,7 +130,7 @@ npm install
 npm run dev
 ```
 
-Visit <http://localhost:5173>. You should see the sign-in page. Sign in with Google, pick "Teacher" the first time, and you're in.
+Visit <http://localhost:5173>. You should see the sign-in page. Sign in with Google — anyone can create classes (which makes them the teacher of those classes) or join one with an invite code; there is no global role to pick.
 
 ### 7. Deploy (optional)
 
@@ -135,9 +138,9 @@ Any static host works — the repo includes a `netlify.toml` for Netlify with th
 
 ### Notes for instructors
 
-- **Roles are permanent** from the user's side. If a student picks "Teacher" by mistake, edit their `role` field directly in the Firestore console.
+- **Roles are per-class and derived from data**: whoever creates a class is its teacher; users who join with the invite code are its students. The same account can teach one class and be enrolled in another — there is no global role field.
 - **Submission size**: a single assignment + submission is limited to ~1 MB by Firestore. Plenty for typical CS-class assignments; unsuitable for large media.
-- **Analytics**: every compile / run / edit / step is logged to the `events` collection with the student's UID, the assignment ID, and a session ID. Export to BigQuery via the Firebase Extensions marketplace if you want to analyze it offline.
+- **Session recording**: while a student works on an assignment, every edit (with file content), run, breakpoint, terminal chunk, and debugger pause is appended under their submission (`classes/…/submissions/{uid}/events`) and replayable from the submission page. Lesson and teacher traces log to the top-level `events` collection; a `collectionGroup('events')` query spans both for research export (e.g. to BigQuery via Firebase Extensions).
 
 ## Two engine flavors
 

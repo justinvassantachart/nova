@@ -213,11 +213,17 @@ export function reduceEvent(state: SessionState, ev: ReplayEvent): SessionState 
       return { ...state, paused: null }
 
     // Step actions un-pause momentarily; the following debug_paused event
-    // re-establishes the location. History navigation (step_back/forward)
-    // doesn't change live program state at all.
+    // re-establishes the location. Clearing `paused` here matters for
+    // scrubbing: landing exactly between a step and its pause should not
+    // show the PREVIOUS line as the current paused line.
     case 'debug_step_into':
     case 'debug_step_over':
     case 'debug_step_out':
+      return state.paused ? { ...state, paused: null } : state
+
+    // History navigation (step_back/forward) is pure replay UI in the live
+    // IDE — it doesn't change program execution state, so reconstruction
+    // leaves the session state untouched.
     case 'debug_step_back':
     case 'debug_step_forward':
     default:

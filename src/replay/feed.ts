@@ -120,12 +120,14 @@ export function buildFeed(events: ReplayEvent[]): FeedItem[] {
       case 'breakpoint_toggle': {
         const file = typeof p.file === 'string' ? basename(p.file) : '?'
         const line = typeof p.line === 'number' ? p.line : '?'
-        const on = p.on !== false
+        // `on` is the post-toggle state. Legacy recordings omit it — say
+        // "toggled" rather than guess a direction we can't know.
+        const verb = typeof p.on === 'boolean' ? (p.on ? 'set' : 'removed') : 'toggled'
         items.push({
           index: i,
           ts: ev.clientTs,
           kind: 'breakpoint',
-          label: `Breakpoint ${on ? 'set' : 'removed'} — ${file}:${line}`,
+          label: `Breakpoint ${verb} — ${file}:${line}`,
         })
         i++
         break

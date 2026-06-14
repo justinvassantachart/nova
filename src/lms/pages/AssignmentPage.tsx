@@ -6,6 +6,7 @@ import { AssignmentInfoProvider } from '@/components/sidebar/assignment-info-con
 import type { IDEHost, AssignmentInfo } from '@/ide-host'
 import { UserMenu } from '@/lms/components/UserMenu'
 import { AssignmentEditDialog } from '@/lms/components/AssignmentEditDialog'
+import { SubmissionStatusChip } from '@/lms/components/SubmissionStatusChip'
 import { useAuth } from '@/shared/context/auth-context'
 import { useClass, useClassMembers } from '@/lms/hooks/useClasses'
 import { useAssignment } from '@/lms/hooks/useAssignments'
@@ -198,6 +199,16 @@ function TabButton({
   )
 }
 
+// Failures from one-shot click actions surface as native alerts, matching
+// the LMS's confirm()-based dialogs.
+async function runOrAlert(label: string, fn: () => Promise<unknown>) {
+  try {
+    await fn()
+  } catch (e) {
+    alert(`${label} failed: ${e instanceof Error ? e.message : 'unknown error'}`)
+  }
+}
+
 type RosterRow = {
   uid: string
   name: string
@@ -239,37 +250,6 @@ function buildRoster(members: ClassMember[], submissions: Submission[]): RosterR
   })
 }
 
-function StatusChip({ row, assignment }: { row: RosterRow; assignment: Assignment }) {
-  const s = row.submission
-  if (s?.submittedAt) {
-    const late = isLate(s.submittedAt, assignment.dueDate)
-    return (
-      <span className="flex items-center gap-1.5 shrink-0">
-        <span className="text-xs px-2 py-1 rounded bg-green-600/20 text-green-400 border border-green-700">
-          Submitted
-        </span>
-        {late && (
-          <span className="text-xs px-2 py-1 rounded bg-amber-600/20 text-amber-400 border border-amber-700">
-            Late
-          </span>
-        )}
-      </span>
-    )
-  }
-  if (s) {
-    return (
-      <span className="text-xs px-2 py-1 rounded border text-muted-foreground shrink-0">
-        In progress
-      </span>
-    )
-  }
-  return (
-    <span className="text-xs px-2 py-1 rounded border border-dashed text-muted-foreground shrink-0">
-      Not started
-    </span>
-  )
-}
-
 function SubmissionsList({
   classId,
   assignmentId,
@@ -291,8 +271,10 @@ function SubmissionsList({
   async function handleDownloadAll() {
     setExporting(true)
     try {
-      const all = await getAllSubmissions(classId, assignmentId)
-      downloadSubmissionsZip(`${assignment.title || 'assignment'}-submissions.zip`, all)
+      await runOrAlert('Export', async () => {
+        const all = await getAllSubmissions(classId, assignmentId)
+        downloadSubmissionsZip(`${assignment.title || 'assignment'}-submissions.zip`, all)
+      })
     } finally {
       setExporting(false)
     }
@@ -364,7 +346,11 @@ function SubmissionsList({
                   </div>
                 </button>
                 <div className="flex items-center gap-2 shrink-0">
-                  <StatusChip row={row} assignment={assignment} />
+                  <SubmissionStatusChip
+                    submitted={!!s?.submittedAt}
+                    started={!!s}
+                    late={isLate(s?.submittedAt, assignment.dueDate)}
+                  />
                   {s && (
                     <>
                       <button
@@ -466,7 +452,7 @@ function StudentView({
     if (!user) return
     setSubmitting(true)
     try {
-      await markSubmitted(classId, assignmentId, user.uid)
+      await runOrAlert('Submitting', () => markSubmitted(classId, assignmentId, user.uid))
     } finally {
       setSubmitting(false)
     }

@@ -149,9 +149,12 @@ export async function markSubmitted(
   assignmentId: string,
   studentUid: string,
 ) {
-  await setDoc(
+  // updateDoc, not setDoc+merge: the submission doc always pre-exists
+  // (getOrCreateSubmission runs before the IDE mounts). If that invariant
+  // ever breaks, updateDoc fails with a clear not-found instead of a
+  // confusing rules denial from a create carrying only { submittedAt }.
+  await updateDoc(
     submissionRef(classId, assignmentId, studentUid),
     { submittedAt: serverTimestamp() },
-    { merge: true },
   )
 }

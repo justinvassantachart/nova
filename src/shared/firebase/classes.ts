@@ -2,7 +2,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -76,18 +75,20 @@ export async function deleteClassCascade(classId: string): Promise<void> {
     await deleteAssignment(classId, a.id)
   }
   const members = await getDocs(collection(db, 'classes', classId, 'members'))
-  for (let i = 0; i < members.docs.length; i += 400) {
+  // Each member's dashboard mirror (users/{uid}/memberships/{classId})
+  // goes too — otherwise every former student keeps a dead class link.
+  // Mirrors must die BEFORE the class doc: the rules authorize the teacher
+  // via the class doc's teacherUid. Halve the chunk size since each member
+  // costs two deletes.
+  for (let i = 0; i < members.docs.length; i += 200) {
     const batch = writeBatch(db)
-    for (const d of members.docs.slice(i, i + 400)) batch.delete(d.ref)
+    for (const d of members.docs.slice(i, i + 200)) {
+      batch.delete(d.ref)
+      batch.delete(doc(db, 'users', d.id, 'memberships', classId))
+    }
     await batch.commit()
   }
   await deleteDoc(doc(db, 'classes', classId))
-}
-
-export async function getClass(classId: string): Promise<Class | null> {
-  const snap = await getDoc(doc(getDb(), 'classes', classId))
-  if (!snap.exists()) return null
-  return { id: snap.id, ...(snap.data() as Omit<Class, 'id'>) }
 }
 
 export function watchClass(classId: string, cb: (c: Class | null) => void): Unsubscribe {

@@ -71,11 +71,11 @@ export function useFirestoreEventSink(opts: {
     return async () => {
       const pending = buffer.current
       if (pending.length === 0) return
-      const uid = ctx.current.uid
-      if (!uid) {
-        buffer.current = []
-        return
-      }
+      // Each buffered event was stamped with the uid that was signed in
+      // when it happened (onEvent guards on uid), so flushing doesn't
+      // depend on the CURRENT auth state — a sign-out between buffer and
+      // flush must not silently drop an authenticated trace. If auth has
+      // truly lapsed, the rules reject the batch and we warn below.
       // Drain in chunks of BATCH_CAP.
       buffer.current = []
       try {
@@ -106,6 +106,10 @@ export function useFirestoreEventSink(opts: {
 
   useEffect(() => {
     const interval = setInterval(flush, FLUSH_MS)
+    // Best-effort: beforeunload won't wait for Firestore's async commits,
+    // so up to the final FLUSH_MS window of events can be lost on tab
+    // close. Acceptable for telemetry; a sendBeacon path would need a
+    // server endpoint, which this Firebase-only deployment avoids.
     const onUnload = () => { void flush() }
     window.addEventListener('beforeunload', onUnload)
     return () => {

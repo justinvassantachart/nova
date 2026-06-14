@@ -148,8 +148,12 @@ describe('reduceEvent — runs, terminal, debugging', () => {
         expect(s.activeFile).toBe('/workspace/main.cpp')
         expect(s.debugging).toBe(true)
 
+        // A step clears the stale pause location; the next debug_paused
+        // re-establishes it. (Scrubbing between the two should not show the
+        // previous line as current.)
         const stepped = reduceEvent(s, ev('debug_step_over', {}))
-        expect(stepped.paused).toEqual(s.paused) // step keeps last location until next pause
+        expect(stepped.paused).toBeNull()
+        expect(stepped.debugging).toBe(true)
         const continued = reduceEvent(s, ev('debug_continue', {}))
         expect(continued.paused).toBeNull()
     })

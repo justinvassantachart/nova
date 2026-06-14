@@ -129,6 +129,11 @@ export function LessonPanel({ lesson, runtime, report }: {
                                 onClick={() => reachable && goTo(i)}
                                 disabled={!reachable}
                                 title={s.title}
+                                // Completed steps render only a check glyph, so
+                                // give the button a real accessible name (title
+                                // alone is unreliable on buttons for AT).
+                                aria-label={`Step ${i + 1}: ${s.title}${done ? ' (done)' : ''}`}
+                                aria-current={current ? 'step' : undefined}
                                 className={[
                                     'w-5 h-5 rounded-full text-[10px] font-medium flex items-center justify-center transition-colors',
                                     current ? 'ring-2 ring-primary/80 ring-offset-2 ring-offset-[var(--color-chrome)]' : '',

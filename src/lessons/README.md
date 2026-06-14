@@ -27,10 +27,10 @@ way any third-party platform would:
 ```
 
 Lessons run the IDE with reduced chrome (`IDEChrome` in `ide-host.ts`): no
-activity bar or file explorer — lesson workspaces are 1–2 files, all opened
-as editor tabs by the runner — and no IDE wordmark, since the lesson panel
-provides the page identity. Run/Debug/Tests, the debug panels, terminal and
-status bar remain.
+activity bar or file explorer — lesson workspaces are a small set of files
+(typically 1–3), all opened as editor tabs by the runner — and no IDE
+wordmark, since the lesson panel provides the page identity. Run/Debug/Tests,
+the debug panels, terminal and status bar remain.
 
 No IDE internals were modified to support lessons. Step completion is
 detected by observing the IDE's public state stores (`debug-store`,
