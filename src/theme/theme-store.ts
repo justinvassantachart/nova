@@ -9,12 +9,12 @@ const STORAGE_KEY = 'nova.theme'
 export type Theme = 'dark' | 'light'
 
 function readStored(): Theme {
-    if (typeof window === 'undefined') return 'dark'
+    if (typeof window === 'undefined') return 'light'
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY)
         if (raw === 'dark' || raw === 'light') return raw
     } catch { /* private mode — fall through */ }
-    return 'dark'
+    return 'light'
 }
 
 function writeAttr(theme: Theme): void {

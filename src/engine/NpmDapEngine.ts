@@ -17,6 +17,8 @@ import type {
 import {
     NOVA_TEST_HEADER,
     NOVA_TEST_HEADER_NAME,
+    NOVA_TEST_IMPL,
+    NOVA_TEST_IMPL_NAME,
     NOVA_TEST_MARKER,
     NOVA_TEST_RUNNER,
     NOVA_TEST_RUNNER_NAME,
@@ -125,14 +127,15 @@ export class NpmDapEngine implements IIDEEngine {
             this.fileMap[mappedPath] = final;
         }
 
-        // nova_test.h is mounted in every compile (not just test mode) so
+        // nova_test.h + nova_test.cpp are mounted in every compile so
         // `#include "nova_test.h"` resolves uniformly across Run, Debug,
-        // and Tests. STUDENT_TEST blocks expand to static `Registrar`
-        // instances either way; in non-test mode they register into the
-        // registry but nothing ever calls run_all(), so they're harmless.
-        // Students opt into the framework by writing the include
-        // themselves, matching Stanford SimpleTest's ergonomics.
+        // and Tests. nova_test.cpp provides the single-TU definitions of
+        // registry() and current_failed() — without it those functions
+        // would be COMDAT inline copies in every user TU, producing
+        // duplicate static locals that corrupt wasm-ld's DWARF tables and
+        // cause the DAP adapter to trap when debugging multi-file programs.
         this.fileMap[NOVA_TEST_HEADER_NAME] = NOVA_TEST_HEADER;
+        this.fileMap[NOVA_TEST_IMPL_NAME] = NOVA_TEST_IMPL;
         if (isTest) {
             this.fileMap[NOVA_TEST_RUNNER_NAME] = NOVA_TEST_RUNNER;
         }
@@ -453,13 +456,15 @@ export class NpmDapEngine implements IIDEEngine {
         // program exits). The budget bounds the worst case so a genuinely
         // header-resident pause still surfaces rather than looping forever.
         if (frames.length > 0 && !this.isUserSource(frames[0]?.source?.path)) {
-            if (this.autoStepBudget > 0) {
-                this.autoStepBudget--;
-                this.dapSend('next', { threadId });
-                return;
-            }
+            // Use continue rather than next to skip non-user frames. `next` does
+            // per-line DWARF lookups, which panics the Rust DAP adapter on the
+            // overlapping address ranges that wasm-ld produces when COMDAT inline
+            // functions (STL templates, nova_test.h helpers) are deduplicated
+            // across multiple TUs. `continue` just resumes the WASM worker — no
+            // DWARF walking — and runs to the next user breakpoint or program exit.
+            this.dapSend('continue', { threadId });
+            return;
         }
-        this.autoStepBudget = NpmDapEngine.AUTO_STEP_BUDGET;
 
         const callStack: StackFrame[] = [];
         const heapAllocations = new Map<number, HeapAllocation>();

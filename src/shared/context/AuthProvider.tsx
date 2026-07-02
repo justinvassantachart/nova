@@ -30,6 +30,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const db = getDb()
     const ref = doc(db, 'users', user.uid)
     let firstSnap = true
+    const fallback = () => {
+      console.warn('[auth] user doc snapshot failed — falling back to auth-only identity')
+      setAppUser({
+        uid: user.uid,
+        email: user.email ?? '',
+        displayName: user.displayName ?? '',
+        createdAt: null,
+      })
+      if (firstSnap) {
+        firstSnap = false
+        setLoading(false)
+      }
+    }
     const unsub = onSnapshot(ref, async (snap) => {
       if (!snap.exists()) {
         // If this create fails (offline, rules), don't leave the app on the
@@ -43,16 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           })
         } catch (e) {
           console.warn('[auth] user doc create failed', e)
-          setAppUser({
-            uid: user.uid,
-            email: user.email ?? '',
-            displayName: user.displayName ?? '',
-            createdAt: null,
-          })
-          if (firstSnap) {
-            firstSnap = false
-            setLoading(false)
-          }
+          fallback()
         }
         return
       }
@@ -62,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         firstSnap = false
         setLoading(false)
       }
-    })
+    }, fallback)
     return unsub
   }, [user])
 

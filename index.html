@@ -16,9 +16,9 @@
       // dark palette flash on light-mode users.
       try {
         var t = localStorage.getItem('nova.theme')
-        document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark')
+        document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light')
       } catch (_) {
-        document.documentElement.setAttribute('data-theme', 'dark')
+        document.documentElement.setAttribute('data-theme', 'light')
       }
     </script>
     <style>

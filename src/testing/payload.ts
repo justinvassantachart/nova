@@ -4,9 +4,10 @@
 // in the file explorer).
 
 import NOVA_TEST_HEADER from './nova_test.h?raw'
+import NOVA_TEST_IMPL from './nova_test.cpp?raw'
 import NOVA_TEST_RUNNER from './nova_test_runner.cpp?raw'
 
-export { NOVA_TEST_HEADER, NOVA_TEST_RUNNER }
+export { NOVA_TEST_HEADER, NOVA_TEST_IMPL, NOVA_TEST_RUNNER }
 
 // Path the header is mounted at in the compiler's in-memory file system.
 // Workspace files are mapped without the `/workspace/` prefix at compile
@@ -21,6 +22,11 @@ export const NOVA_TEST_HEADER_CLANGD_PATH = '/workspace/nova_test.h'
 // Synthetic runner cpp mounted next to user files in test mode. Provides
 // the program's `int main()`; the user's own main (if any) is rewritten
 // to `nova_hidden_main` so the two coexist without a link conflict.
+// Path the framework implementation is mounted at. nova_test.cpp is always
+// compiled alongside user files so registry() and current_failed() have a
+// single-TU definition — no COMDAT duplicates, no DWARF corruption.
+export const NOVA_TEST_IMPL_NAME = 'nova_test.cpp'
+
 export const NOVA_TEST_RUNNER_NAME = 'nova_test_runner.cpp'
 
 // Stdout sentinel. Anything emitted by the test framework is prefixed with

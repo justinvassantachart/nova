@@ -17,19 +17,14 @@ struct Entry {
     void (*func)();
 };
 
-inline std::vector<Entry>& registry() {
-    static std::vector<Entry> r;
-    return r;
-}
+// Defined in nova_test.cpp (single-TU) to avoid duplicate COMDAT static
+// locals across multi-file builds, which corrupt wasm-ld's DWARF tables.
+std::vector<Entry>& registry();
+bool& current_failed();
 
 struct Registrar {
     Registrar(const char* name, void (*func)()) { registry().push_back({name, func}); }
 };
-
-inline bool& current_failed() {
-    static bool f = false;
-    return f;
-}
 
 template <typename T>
 inline std::string to_str(const T& v) {

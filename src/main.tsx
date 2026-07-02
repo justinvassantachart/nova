@@ -19,6 +19,7 @@ import ReplayPage from '@/lms/pages/ReplayPage'
 import ReplayDemo from '@/replay/ReplayDemo'
 import LessonsHome from '@/lessons/LessonsHome'
 import LessonRunner from '@/lessons/LessonRunner'
+import LandingPage from '@/LandingPage'
 
 // Sync the React-side theme store with the data-theme already set by the
 // inline boot script in index.html. The inline script runs before the
@@ -104,7 +105,7 @@ void (async () => {
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<RootRedirect />} />
+            <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<Login />} />
             <Route
               path="/dashboard"

@@ -20,7 +20,7 @@ export default function LessonsHome() {
     const resume = LESSONS.find((l) => !byLesson[l.id]?.completedAt) ?? LESSONS[0]
 
     return (
-        <div className="min-h-screen bg-background text-foreground overflow-y-auto">
+        <div className="h-full bg-background text-foreground overflow-y-auto">
             {/* Top bar */}
             <header className="border-b border-border bg-[var(--color-chrome)]">
                 <div className="max-w-5xl mx-auto px-6 h-12 flex items-center gap-3">
