@@ -1,0 +1,7 @@
+node_modules/
+dist/
+examples/basic/dist/
+*.tgz
+*.tsbuildinfo
+*.log
+.DS_Store

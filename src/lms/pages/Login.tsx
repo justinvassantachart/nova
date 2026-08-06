@@ -125,7 +125,7 @@ export default function Login() {
   return (
     <div className="h-screen w-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold text-center">Nova</h1>
+        <h1 className="text-2xl font-semibold text-center">Web IDE</h1>
 
         <div role="tablist" aria-label="Authentication method" className="flex gap-1 p-1 bg-muted/50 rounded-md">
           <button
@@ -271,4 +271,3 @@ function errorCode(err: unknown): string | undefined {
 function isPopupBlocked(err: unknown): boolean {
   return errorCode(err) === 'auth/popup-blocked'
 }
-

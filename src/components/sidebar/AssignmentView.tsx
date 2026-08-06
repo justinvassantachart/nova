@@ -13,6 +13,7 @@ import { useState } from 'react'
 import { Codicon } from '@/components/ui/codicon'
 import { useAssignmentInfo } from './use-assignment-info'
 import type { AssignmentInfo } from '@/ide-host'
+import './sidebar.css'
 
 export function AssignmentView() {
     const info = useAssignmentInfo()

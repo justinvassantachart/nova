@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { evaluateCheck, resolveAnchorLine, type CheckContext } from './checks'
 import type { CheckSpec } from './types'
-import type { StackFrame, VariableNode } from '@/engine/IIDEEngine'
+import type { StackFrame, VariableNode } from 'web-ide'
 
 const FILE = '/workspace/main.cpp'
 const SOURCE = [

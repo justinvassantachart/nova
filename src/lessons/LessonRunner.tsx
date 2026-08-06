@@ -3,14 +3,12 @@
 // embed it: via <IDEHostProvider> and the public IDEHost contract. No IDE
 // internals are modified for lessons to work — that's the point.
 
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
+import type { WebIDEInstanceHandle } from 'web-ide'
 import App from '@/App'
 import { IDEHostProvider } from '@/ide-host-context'
 import type { IDEHost } from '@/ide-host'
-import { useEditorStore } from '@/store/editor-store'
-import { useFilesStore } from '@/store/files-store'
-import { fileExists, readFile } from '@/vfs/volume'
 import {
     ResizableHandle,
     ResizablePanel,
@@ -37,6 +35,8 @@ export default function LessonRunner() {
 function Runner({ lesson }: { lesson: Lesson }) {
     const { user } = useAuth()
     const runtime = useMemo(() => new LessonRuntime(), [])
+    const ideRef = useRef<WebIDEInstanceHandle>(null)
+    const getIDEInstance = useCallback(() => ideRef.current, [])
 
     // Bumped by "reset lesson": a new nonce yields a fresh OPFS namespace,
     // so the workspace re-seeds from the lesson's starter files without
@@ -71,18 +71,21 @@ function Runner({ lesson }: { lesson: Lesson }) {
             Object.entries(lesson.files).map(([path, content]) => [workspacePath(path), content]),
         )
         return {
-            mode: 'lesson',
-            assignmentId: `lesson:${lesson.id}:r${resetNonce}`,
-            initialFiles,
+            workspace: {
+                id: `lesson:${lesson.id}:r${resetNonce}`,
+                initialFiles,
+            },
             // Lessons run a stripped-down IDE: no activity bar / file
             // explorer (workspaces are 1–2 files, switched via editor tabs)
             // and no IDE wordmark (the lesson panel is the page identity).
             // Run/Debug/Tests, the debug panels and the status bar stay.
             chrome: { sidebar: false, brand: false },
-            wantsRuntimeEvents: true,
-            onEvent: (type, payload) => {
-                runtime.record(type, payload)
-                report(type, payload)
+            events: {
+                includeRuntime: true,
+                emit: (type, payload) => {
+                    runtime.record(type, payload)
+                    report(type, payload)
+                },
             },
         }
     }, [lesson, resetNonce, runtime, report])
@@ -92,18 +95,15 @@ function Runner({ lesson }: { lesson: Lesson }) {
     // store updates at the end of every initVFS, for both the fresh-seed and
     // OPFS-rehydration paths). Primary file opens last so it's focused.
     useEffect(() => {
+        const instance = ideRef.current
+        if (!instance) return
+        const paths = Object.keys(lesson.files).map(workspacePath)
+        const primary = workspacePath(lesson.primaryFile)
         const openAll = (): boolean => {
-            const paths = Object.keys(lesson.files).map(workspacePath)
-            if (!paths.every(fileExists)) return false
-            const primary = workspacePath(lesson.primaryFile)
-            const ordered = [...paths.filter((p) => p !== primary).sort(), primary]
-            for (const p of ordered) {
-                useEditorStore.getState().setActiveFile(p, readFile(p))
-            }
-            return true
+            return instance.ensureFilesOpen(paths, primary)
         }
         if (openAll()) return
-        const unsub = useFilesStore.subscribe(() => {
+        const unsub = instance.subscribe(() => {
             if (openAll()) unsub()
         })
         return unsub
@@ -115,18 +115,14 @@ function Runner({ lesson }: { lesson: Lesson }) {
     // if the learner closes the LAST tab, the primary file takes focus so
     // the editor is never empty.
     useEffect(() => {
+        const instance = ideRef.current
+        if (!instance) return
         const paths = Object.keys(lesson.files).map(workspacePath)
+        const primary = workspacePath(lesson.primaryFile)
         const ensureOpen = () => {
-            const editor = useEditorStore.getState()
-            const missing = paths.filter((p) => !editor.openFiles.includes(p) && fileExists(p))
-            if (missing.length === 0) return
-            if (editor.activeFile === null) {
-                const primary = workspacePath(lesson.primaryFile)
-                useEditorStore.getState().setActiveFile(primary, readFile(primary))
-            }
-            for (const p of missing) useEditorStore.getState().openFile(p)
+            instance.ensureFilesOpen(paths, primary)
         }
-        return useEditorStore.subscribe(ensureOpen)
+        return instance.subscribe(ensureOpen)
     }, [lesson])
 
     return (
@@ -136,13 +132,18 @@ function Runner({ lesson }: { lesson: Lesson }) {
                     {/* The panel lives outside <App/>, so it needs its own
                         Radix tooltip provider. */}
                     <TooltipProvider delayDuration={300}>
-                        <LessonPanel lesson={lesson} runtime={runtime} report={report} />
+                        <LessonPanel
+                            lesson={lesson}
+                            runtime={runtime}
+                            report={report}
+                            getIDEInstance={getIDEInstance}
+                        />
                     </TooltipProvider>
                 </ResizablePanel>
                 <ResizableHandle withHandle />
                 <ResizablePanel id="ide" defaultSize="74" minSize="40">
                     <IDEHostProvider host={host}>
-                        <App />
+                        <App ref={ideRef} />
                     </IDEHostProvider>
                 </ResizablePanel>
             </ResizablePanelGroup>

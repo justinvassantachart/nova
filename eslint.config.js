@@ -32,4 +32,42 @@ export default defineConfig([
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    files: ['src/web-ide/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@/lms/**',
+                '@/lessons/**',
+                '@/replay/**',
+                '@/shared/**',
+                '@/nova/**',
+                '@/firebase/**',
+                '@/auth/**',
+                '@/ide-host',
+                '@/ide-host-context',
+                '@/use-ide-host',
+                '**/lms/**',
+                '**/lessons/**',
+                '**/replay/**',
+                '**/shared/**',
+                '**/nova/**',
+                '**/firebase/**',
+                '**/auth/**',
+                '**/ide-host',
+                '**/ide-host-context',
+                '**/use-ide-host',
+              ],
+              message:
+                'Reusable Web IDE code may not depend on Nova host, LMS, replay, lesson, Firebase, or compatibility-layer modules.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ])

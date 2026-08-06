@@ -69,6 +69,9 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    // Local Web IDE development uses a linked package. Dedupe its React peers
+    // so tests and the browser share the host application's renderer instance.
+    dedupe: ['react', 'react-dom'],
   },
   worker: {
     format: 'es',
@@ -81,7 +84,7 @@ export default defineConfig({
     // glue with the browser's stale cached wasm and every wasm-bindgen
     // closure call fails. Serving it unoptimized keeps the wasm URL
     // revalidated like any source file.
-    exclude: ['@yowasp/clang', 'debugger-sh'],
+    exclude: ['debugger-sh'],
   },
   build: {
     target: 'esnext',

@@ -1,99 +1,169 @@
-# Nova
+# Web IDE
 
-A browser-based C++ IDE with in-browser compilation, step-through debugging, and live memory visualization — no installs required.
+Web IDE is a browser-based C++ workspace with editing, compilation,
+step-through debugging, tests, a terminal, and memory visualization. The live
+site is [webide.org](https://webide.org).
 
-## Demo
+This repository contains both the deployed site and the reusable workbench it
+embeds. The two layers are kept separate so the workbench can later be released
+as its own package without moving the site's Firebase, course, or replay code
+with it.
 
-<!-- Add a screen recording / GIF of the full workflow here -->
-<!-- ![Demo video](./assets/demo.mp4) -->
-- Video Demo
-[![Video Thumbnail](./assets/video_thumbnail.png)](https://www.youtube.com/watch?v=HFhQspCLCtA)
-- Live Demo [https://nova-ide.netlify.app](https://nova-ide.netlify.app)
+## What is included
 
+- Monaco editing with C/C++ syntax support and optional clangd completion,
+  hover, diagnostics, and navigation
+- in-browser C++ compilation and execution
+- breakpoints, step controls, call stacks, variables, and memory graphs
+- a virtual multi-file workspace that persists in the browser
+- terminal input and output
+- `STUDENT_TEST`/`EXPECT_EQUALS` support with a generic Tests panel
+- an optional Canvas panel for runtimes or plugins that emit graphics events
+- guided C++ lessons at `/learn`
+- Firebase-backed classes, assignments, submissions, and teacher review
+- recorded student-session replay
 
-## Features
+The reusable workbench is not tied to the teaching application. Runtime,
+testing, language-tooling, panel, command, and activity integrations are
+registered through public contracts.
 
-- **Monaco code editor** with C++ syntax highlighting and autocomplete
-- **In-browser compilation** via Clang compiled to WebAssembly (YoWasp)
-- **Step-through debugger** with breakpoints, step-in/over/out, and full execution history
-- **Live memory visualizer** - interactive graph of stack frames, heap allocations, and pointer relationships
-![Memory & heap visualization](./assets/demo_memory-heap.png)
-- **Integrated terminal** for program I/O, including line-buffered stdin (`cin`, `scanf`, ^C/^D handling)
-- **Intellisense** - full clangd LSP (completion, hover, diagnostics, go-to-definition) running in a worker
-- **Student testing framework** - `STUDENT_TEST("name") { EXPECT_EQUALS(...); }` blocks with a results panel, modeled on Stanford's SimpleTest
-- **Multiple Files + Classes** - virtual filesystem is auto-saved locally and files can be included in programs like normal.
-![Classes](./assets/demo_classes.png)
-- **Canvas output** for graphics programs
-![Canvas output](./assets/demo_canvas.png)
-- **Guided lessons** (`/learn`) - a ten-lesson course taking a student from CS1 Python to C++ and linked lists, each lesson embedding an "AI bug hunt" debugged with unit tests and the debugger; no account required ([src/lessons/](src/lessons/README.md))
-- **Simple LMS** - classes with invite codes, ordered assignments with due dates and publishing, auto-saved student submissions, and a Gradescope-style roster with late flags and zip exports ([src/lms/](src/lms/))
-- **Session replay** - every student work session is recorded through the IDE's host-event stream and replayable by the teacher: scrubber, playback, reconstructed files/terminal/breakpoints, and an activity feed ([src/replay/](src/replay/README.md))
+## Site routes
 
-## TODO
+| Route | Purpose | Sign-in |
+| --- | --- | --- |
+| `/` | Product landing page | No |
+| `/ide` | Standalone Web IDE workspace | No |
+| `/learn` | Guided lesson catalog and lesson runner | No |
+| `/login` | Account sign-in | No |
+| `/dashboard`, `/classes/...` | Classes, assignments, submissions, and replay | Yes |
 
-- [ ] Flesh out the graphics library
+## Repository structure
 
-## Architecture
-
+```text
+src/                       deployed site host
+  lms/                     Firebase-backed teaching workflows
+  lessons/                 guided course and lesson host
+  replay/                  session reconstruction and playback
+  nova/                    legacy internal path for site composition
+packages/web-ide/          reusable Web IDE workspace package
+docs/architecture/         extraction and release-readiness notes
 ```
-Source code → Clang (WASM) → Assembly → Instrumentation → WASM binary
-                                                            ↓
-                                          SharedArrayBuffer debugger
-                                                            ↓
-                                           DWARF line maps + variable info
-                                                            ↓
-                                              Memory snapshots → Visualizer
-```
 
-## Getting Started
+The root application owns routing, authentication, Firebase persistence, LMS
+screens, lessons, replay, and deployment behavior. `packages/web-ide` owns the
+editor workbench, VFS, terminal, debugger surfaces, typed contracts, and
+optional providers. Root application code imports only the package's public
+exports (`web-ide`, `web-ide/host`, `web-ide/plugins`, `web-ide/runtimes`,
+`web-ide/testing`, and `web-ide/language-tools`).
 
-```bash
+See [the extraction architecture](docs/architecture/web-ide-extraction.md) for
+the complete boundary.
+
+## Local development
+
+Node.js 20.19 or newer is required.
+
+```sh
 npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173).
+Open <http://localhost:5173>. The development command builds the Web IDE
+workspace package first and then starts the complete site. Changes to the site
+are handled by Vite; after changing package source, restart the root development
+command or run the package watcher in a second terminal:
 
-The IDE is available at `/ide` standalone, with **no sign-in required**. To use the built-in LMS (teacher dashboards, student assignments, submission auto-save, research analytics), follow the self-hosting setup below.
+```sh
+npm --workspace web-ide run dev
+```
 
-## Self-hosting setup (built-in LMS)
+Useful checks:
 
-Nova ships with a small in-repo LMS so a teacher can create assignments with starter files, students can open them in the IDE, and their work auto-saves to a database. All of this runs on free-tier **Firebase** — you don't need a server.
+```sh
+npm run validate                 # package + site lint, tests, types, and build
+npm run test                     # package and site tests
+npm run typecheck                # package and site TypeScript checks
+npm run build                    # production package and site build
+npm run build:web-ide            # package build only
+npm --workspace web-ide run validate
+```
 
-You only need to do this once per deployment.
+## Embedding the workbench
 
-### 1. Create a Firebase project
+The site composes Web IDE using the same public API available to another host:
 
-1. Go to <https://console.firebase.google.com> and click **Add project**.
-2. Give it any name (e.g. `nova-lms`). You can skip Google Analytics.
-3. Once the project is created, you'll land on its dashboard.
+```tsx
+import { WebIDE, type WebIDEConfiguration } from 'web-ide'
+import { cppLanguageToolingPlugin } from 'web-ide/language-tools'
+import { canvasPlugin, coreWorkbenchPlugin } from 'web-ide/plugins'
+import { cppRuntimePlugin } from 'web-ide/runtimes'
+import { cppTestingPlugin, testingPlugin } from 'web-ide/testing'
+import 'web-ide/styles.css'
 
-### 2. Enable Google sign-in
+const configuration: WebIDEConfiguration = {
+  brand: 'WEB IDE',
+  runtimeProvider: 'web-ide.runtime.cpp',
+  testProvider: 'web-ide.testing.cpp',
+  languageToolingProvider: 'web-ide.language-tooling.cpp',
+  plugins: [
+    cppRuntimePlugin,
+    cppTestingPlugin,
+    cppLanguageToolingPlugin,
+    coreWorkbenchPlugin,
+    canvasPlugin,
+    testingPlugin,
+  ],
+}
 
-1. In the left sidebar, click **Build → Authentication → Get started**.
-2. Open the **Sign-in method** tab.
-3. Click **Google**, toggle it on, set a support email, and **Save**.
-4. (Optional — recommended) Under **Settings → Authorized domains**, add the domain you'll deploy to (e.g. `your-app.netlify.app`). `localhost` is already there for local testing.
+export function Workspace() {
+  return <WebIDE configuration={configuration} />
+}
+```
 
-### 3. Create a Firestore database
+An application that needs controlled workspace identity, seed files,
+persistence, read-only behavior, or event recording wraps the component with
+`WebIDEHostProvider` from `web-ide/host`. The package README at
+[packages/web-ide/README.md](packages/web-ide/README.md) documents the host,
+runtime, testing, language-tooling, and plugin contracts in detail.
 
-1. In the left sidebar, click **Build → Firestore Database → Create database**.
-2. Choose **Start in production mode** (you'll paste rules in step 5).
-3. Pick a location close to your users (e.g. `nam5` for North America). This can't be changed later.
+### Extension boundaries
 
-### 4. Register a web app and copy its config
+| Extension | Responsibility |
+| --- | --- |
+| Runtime provider | Prepare a copied execution plan; start, stop, and optionally debug one backend session; emit typed runtime events |
+| Test provider | Supply framework files and transforms, prepare a test runner, and parse its output into generic test events |
+| Language-tooling provider | Own an optional editor language service and all worker/Monaco cleanup |
+| Plugin | Contribute panels, activities, commands, resources, or providers through public facades |
+| Host application | Choose the composition and own routing, identity, persistence, and product-specific workflows |
 
-1. On the project dashboard, click the **`</>` (Web)** icon next to "Get started by adding your first app".
-2. Give it a nickname (e.g. `nova-web`). You **don't** need Firebase Hosting.
-3. Firebase will show you a `firebaseConfig` block. Copy the six string values.
-4. In this repo, copy `.env.example` to `.env.local`:
-   ```bash
+The packaged C++ runtime uses a browser execution dependency internally, but
+the public API is backend-neutral. Tests are not a special runtime: the C++
+test provider prepares an ordinary execution plan, the selected runtime runs
+it, and the generic Tests panel renders structured results.
+
+Karel is deliberately not bundled in this repository or in Web IDE. A Karel
+integration belongs in a separate companion package that consumes the open
+plugin API and is composed by its host with a compatible Python runtime. Web
+IDE does not contain a closed plugin catalog.
+
+## Firebase setup for the teaching features
+
+The standalone IDE and anonymous lessons run without Firebase configuration.
+Classes, assignments, submissions, authenticated lesson telemetry, and replay
+require a Firebase project.
+
+1. Create a Firebase project and register a Web application.
+2. Enable Google sign-in under **Authentication → Sign-in method**.
+3. Create a Firestore database in production mode.
+4. Copy `.env.example` to `.env.local` and fill in the six values from the
+   Firebase web-app configuration:
+
+   ```sh
    cp .env.example .env.local
    ```
-5. Paste the values into `.env.local`. The mapping is:
 
-   | Firebase console field | `.env.local` key |
-   |---|---|
+   | Firebase field | Environment variable |
+   | --- | --- |
    | `apiKey` | `VITE_FIREBASE_API_KEY` |
    | `authDomain` | `VITE_FIREBASE_AUTH_DOMAIN` |
    | `projectId` | `VITE_FIREBASE_PROJECT_ID` |
@@ -101,98 +171,45 @@ You only need to do this once per deployment.
    | `messagingSenderId` | `VITE_FIREBASE_MESSAGING_SENDER_ID` |
    | `appId` | `VITE_FIREBASE_APP_ID` |
 
-### 5. Install the security rules
+5. Publish the repository's `firestore.rules` in the Firebase console, or use
+   the Firebase CLI:
 
-The repo includes a `firestore.rules` file enforcing: students can only read/write their own submission docs, teachers can only edit their own assignments, the `events` analytics collection is append-only, etc. You **must** install these — without them anyone could read everyone's data.
+   ```sh
+   firebase deploy --only firestore:rules
+   ```
 
-Two options:
+The rules are required: they enforce per-class teacher access and per-student
+submission access. Do not deploy the LMS against an unrestricted database.
 
-**Option A — Paste into the console (easiest, no extra tools):**
+## Deployment notes
 
-1. Open **Firestore Database → Rules** in the Firebase console.
-2. Open `firestore.rules` in this repo and copy its entire contents.
-3. Paste, overwriting whatever is there.
-4. Click **Publish**.
+`npm run build` produces the static site in `dist/`. The included
+`netlify.toml` supplies SPA routing, cache policy, and the cross-origin headers
+required by the browser runtime and clangd workers. A different host must
+reproduce those policies, including the non-isolated landing/sign-in routes
+and the isolated IDE routes. Set the same `VITE_FIREBASE_*` variables in the
+hosting environment when deploying the teaching features.
 
-**Option B — Firebase CLI (recommended if you'll iterate on rules):**
+The in-repo package is currently mirrored from the separate local Web IDE
+review candidate at `/Users/justinvassantachart/Projects/web-ide`. The deployed
+site depends only on the relative workspace package at `packages/web-ide`; it
+does not depend on that machine-specific path. Publication, a package registry,
+or a separate remote has not yet been authorized.
 
-```bash
-npm install -g firebase-tools
-firebase login
-firebase use --add   # pick the project you created
-firebase deploy --only firestore:rules
-```
+## Current limitations
 
-### 6. Run it
+- One mounted Web IDE workbench per JavaScript realm is supported; some legacy
+  workbench state and VFS services are still module-scoped.
+- C++ run/debug is the production path. Python run exists as an optional
+  provider, but Python debugging is not supported; Rust is not implemented.
+- The Canvas contribution is generic, but working end-to-end graphics output
+  still requires a runtime or companion plugin that emits graphics events.
+- Browser runtime and clangd assets require network access and correct
+  cross-origin isolation headers.
+- Authenticated Firebase/LMS browser checks require a configured non-production
+  test project and account.
+- The reusable package remains `private: true` and `UNLICENSED` until ownership,
+  licensing, third-party redistribution, and publication decisions are made.
 
-```bash
-npm install
-npm run dev
-```
-
-Visit <http://localhost:5173>. You should see the sign-in page. Sign in with Google — anyone can create classes (which makes them the teacher of those classes) or join one with an invite code; there is no global role to pick.
-
-### 7. Deploy (optional)
-
-Any static host works — the repo includes a `netlify.toml` for Netlify with the SPA redirect and the COOP/COEP headers Nova needs for its in-browser debugger. Push to a Git host and connect it to Netlify (or your platform of choice). Remember to set the same `VITE_FIREBASE_*` environment variables in the host's dashboard.
-
-### Notes for instructors
-
-- **Roles are per-class and derived from data**: whoever creates a class is its teacher; users who join with the invite code are its students. The same account can teach one class and be enrolled in another — there is no global role field.
-- **Submission size**: a single assignment + submission is limited to ~1 MB by Firestore. Plenty for typical CS-class assignments; unsuitable for large media.
-- **Session recording**: while a student works on an assignment, every edit (with file content), run, breakpoint, terminal chunk, and debugger pause is appended under their submission (`classes/…/submissions/{uid}/events`) and replayable from the submission page. Lesson and teacher traces log to the top-level `events` collection; a `collectionGroup('events')` query spans both for research export (e.g. to BigQuery via Firebase Extensions).
-
-## Two engine flavors
-
-Nova has two debug engines in active development. Both ship the same LMS, the same UI, and the same student experience — only the underlying compile/debug stack differs. Pick one when you check out the repo:
-
-| Branch | Engine | What it uses |
-|---|---|---|
-| `feat/lms-firebase-analytics` (tag `lms-legacy-stable`) | **Legacy** | In-house ASM instrumentation + SharedArrayBuffer stepping. Stable, ships the Stanford library, currently in production at [nova-ide.netlify.app](https://nova-ide.netlify.app). |
-| `feat/lms-on-dap` | **DAP** | New `NpmDapEngine` adapter against the standard Debug Adapter Protocol. Cleaner architecture, swappable backends, ongoing work. |
-
-To switch:
-
-```bash
-git checkout feat/lms-firebase-analytics    # legacy + LMS
-# …or…
-git checkout feat/lms-on-dap                # DAP + LMS
-
-npm install      # branch-specific deps (Firebase + router are present in both)
-npm run dev
-```
-
-The LMS layer (everything in [src/lms/](src/lms/), [src/shared/](src/shared/), [public/auth.html](public/auth.html), [firestore.rules](firestore.rules)) is **identical on both branches** — it consumes the IDE via the host-context interface defined in [src/ide-host.ts](src/ide-host.ts) and never touches engine internals. That's why the same backend, the same assignments, and the same student submissions work against either engine.
-
-If you're new and just want it working, use the **legacy** branch. The DAP branch is the future direction once it reaches feature parity.
-
-## Stanford library integration (design note)
-
-The Stanford library (CS106-style headers under [stanford-lib/](stanford-lib/)) currently lives on the legacy branch as a sysroot extension — its headers are written into `/sysroot/include/` at boot so student code can `#include "console.h"` etc.
-
-For the LMS, each assignment will declare which libraries it depends on. Sketch:
-
-```ts
-// shared/types.ts (planned)
-type Assignment = {
-  // …existing fields…
-  libraries?: ('stdlib' | 'stanford' | 'graphics')[]
-}
-```
-
-On assignment open, the IDE bootstraps `/sysroot/` from a manifest of registered library bundles based on `assignment.libraries`. Each bundle is a `Record<path, content>` shipped as a JSON or zipped asset under [public/sysroot/](public/sysroot/) (or fetched from a CDN). The IDE host-context already supports arbitrary `initialFiles` — the same mechanism extends naturally to sysroot files by namespacing on `/sysroot/` instead of `/workspace/`.
-
-Concretely on the DAP branch where `/sysroot/` was removed: re-introduce a `bootstrapSysroot(files)` helper alongside [bootstrapWorkspace](src/vfs/volume.ts) and have the engine adapter consume sysroot files at compile time. That's the right v2 step.
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| UI | React, Tailwind CSS, Radix UI |
-| Editor | Monaco Editor |
-| Compiler | YoWasp Clang (WebAssembly) |
-| Debugger | Custom ASM instrumentation + SharedArrayBuffer |
-| Visualizer | React Flow (xyflow) + dagre layout |
-| State | Zustand |
-| Terminal | xterm.js |
-
+More detail is available in [standalone repository readiness](docs/architecture/standalone-repository-readiness.md),
+[guided lessons](src/lessons/README.md), and [session replay](src/replay/README.md).

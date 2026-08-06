@@ -2,10 +2,40 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Nova — Browser-based C++ IDE with WASM compilation, graphics engine, and live memory visualization." />
-    <title>Nova IDE</title>
+    <meta
+      name="description"
+      content="Web IDE is a browser-based C++ development environment with an editor, terminal, debugger, tests, and live program visualization."
+    />
+    <meta name="application-name" content="Web IDE" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Web IDE" />
+    <meta property="og:title" content="Web IDE — C++ development in your browser" />
+    <meta
+      property="og:description"
+      content="Write, run, test, and debug C++ from your browser."
+    />
+    <meta property="og:url" content="https://webide.org/" />
+    <meta property="og:image" content="https://webide.org/web-ide.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="64" />
+    <meta property="og:image:height" content="64" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Web IDE — C++ development in your browser" />
+    <meta
+      name="twitter:description"
+      content="Write, run, test, and debug C++ from your browser."
+    />
+    <meta name="twitter:image" content="https://webide.org/web-ide.svg" />
+
+    <link rel="canonical" href="https://webide.org/" />
+    <link rel="icon" type="image/svg+xml" href="/web-ide.svg" />
+    <title>Web IDE</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -15,8 +45,25 @@
       // to be inline + synchronous — any deferred path lets the default
       // dark palette flash on light-mode users.
       try {
-        var t = localStorage.getItem('nova.theme')
-        document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light')
+        var theme = localStorage.getItem('web-ide.theme')
+
+        // Preserve existing users' preference while the public brand changes.
+        // This can be removed after the migration has
+        // been live long enough for returning users to visit once.
+        if (theme !== 'dark' && theme !== 'light') {
+          var legacyTheme = localStorage.getItem('nova.theme')
+          if (legacyTheme === 'dark' || legacyTheme === 'light') {
+            theme = legacyTheme
+            try {
+              localStorage.setItem('web-ide.theme', legacyTheme)
+            } catch (_) {
+              // Reading localStorage succeeded; a failed migration write
+              // should not prevent the stored preference from being used.
+            }
+          }
+        }
+
+        document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light')
       } catch (_) {
         document.documentElement.setAttribute('data-theme', 'light')
       }
@@ -28,7 +75,7 @@
          Colors are hardcoded (not CSS vars) because the main stylesheet
          hasn't parsed yet at this point. */
       html, body { margin: 0; padding: 0; height: 100%; }
-      .nova-boot {
+      .web-ide-boot {
         position: fixed;
         inset: 0;
         display: flex;
@@ -41,18 +88,18 @@
         background: #0a0a0a;
         color: rgba(255, 255, 255, 0.55);
       }
-      [data-theme='light'] .nova-boot {
+      [data-theme='light'] .web-ide-boot {
         background: #ffffff;
         color: rgba(0, 0, 0, 0.55);
       }
-      .nova-boot-dot {
+      .web-ide-boot-dot {
         width: 7px;
         height: 7px;
         border-radius: 50%;
         background: currentColor;
-        animation: nova-boot-pulse 1.1s ease-in-out infinite;
+        animation: web-ide-boot-pulse 1.1s ease-in-out infinite;
       }
-      @keyframes nova-boot-pulse {
+      @keyframes web-ide-boot-pulse {
         0%, 100% { opacity: 0.25; transform: scale(0.8); }
         50%      { opacity: 1;    transform: scale(1); }
       }
@@ -60,9 +107,9 @@
   </head>
   <body>
     <div id="root">
-      <div class="nova-boot" role="status" aria-live="polite">
-        <span class="nova-boot-dot" aria-hidden="true"></span>
-        <span>Loading Nova…</span>
+      <div class="web-ide-boot" role="status" aria-live="polite">
+        <span class="web-ide-boot-dot" aria-hidden="true"></span>
+        <span>Loading Web IDE…</span>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

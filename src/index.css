@@ -38,7 +38,7 @@
   --color-sidebar-border: oklch(0.3 0 0);
   --color-sidebar-ring: oklch(0.55 0.12 230);
 
-  /* Nova-specific surface layers — three elevations on top of background
+  /* Workbench surface layers — three elevations on top of background
      so panels feel like a coherent stack (deep ▸ rail ▸ chrome ▸ hover). */
   --color-rail: oklch(0.165 0 0);
   --color-chrome: oklch(0.2 0 0);
@@ -143,7 +143,7 @@ body,
   background: var(--color-scrollbar-thumb-hover);
 }
 
-/* Nova — shared panel chrome utilities.
+/* Shared panel chrome utilities.
    Use these everywhere a panel needs a section header (Explorer, Variables,
    Call Stack, Graph) so the typographic vocabulary stays in one place. */
 .nova-panel-header {
@@ -362,4 +362,3 @@ body,
   padding: 0 8px;
   white-space: nowrap;
 }
-

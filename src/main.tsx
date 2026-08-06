@@ -1,14 +1,13 @@
+import 'web-ide/styles.css'
 import './index.css'
-import '@vscode/codicons/dist/codicon.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import App from './App'
-import { initTheme } from '@/theme/theme-store'
+import { initWebIDETheme } from 'web-ide'
 import { AuthProvider } from '@/shared/context/AuthProvider'
 import { ProtectedRoute } from '@/lms/components/ProtectedRoute'
 import Login from '@/lms/pages/Login'
-import RootRedirect from '@/lms/pages/RootRedirect'
 import Dashboard from '@/lms/pages/Dashboard'
 import CreateClass from '@/lms/pages/CreateClass'
 import ClassPage from '@/lms/pages/ClassPage'
@@ -25,7 +24,21 @@ import LandingPage from '@/LandingPage'
 // inline boot script in index.html. The inline script runs before the
 // stylesheet parses so there's no flash; this call just brings the
 // zustand store in line with that pre-paint state.
-initTheme()
+try {
+  const legacyPreferences = [
+    ['nova.theme', 'web-ide.theme'],
+    ['nova.sidebar', 'web-ide.sidebar'],
+    ['nova.clangd.enabled', 'web-ide.clangd.enabled'],
+    ['nova.debug-toolbar.pos.v1', 'web-ide.debug-toolbar.pos.v1'],
+  ] as const
+  for (const [legacyKey, currentKey] of legacyPreferences) {
+    const value = window.localStorage.getItem(legacyKey)
+    if (!window.localStorage.getItem(currentKey) && value !== null) {
+      window.localStorage.setItem(currentKey, value)
+    }
+  }
+} catch { /* best-effort preference migration */ }
+initWebIDETheme()
 
 // Routes served without COOP/COEP. The SW gate is unnecessary there:
 // signInWithPopup needs unsafe-none headers (which is the whole point of

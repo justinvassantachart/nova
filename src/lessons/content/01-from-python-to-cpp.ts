@@ -16,7 +16,7 @@ const MAIN_CPP = `#include <iostream>
 // ----------------------------------------------------------------
 
 int main() {
-    std::cout << "===== Nova Cafe =====\\n";
+    std::cout << "===== Debug Cafe =====\\n";
 
     double lattePrice = 4.50;
     double muffinPrice = 3.25;
@@ -99,7 +99,7 @@ export const fromPythonToCpp: Lesson = {
                 + '2. The compiled program runs, and its output lands in the terminal.\n\n'
                 + 'Python skipped straight to step 2. The extra step buys you speed and an '
                 + 'army of pre-flight checks — which you\'re about to meet.',
-            check: { kind: 'stdout', includes: 'Nova Cafe', label: 'Run the program (watch the terminal)' },
+            check: { kind: 'stdout', includes: 'Debug Cafe', label: 'Run the program (watch the terminal)' },
             hint: 'The green Run button is in the top-right toolbar. If it is greyed out, the compiler is still downloading.',
             successNote: 'It compiled, then it ran. Hold that receipt — we\'ll come back to it.',
         },
@@ -129,7 +129,7 @@ export const fromPythonToCpp: Lesson = {
                 + 'Get comfortable with this rhythm: **edit → compile → run**. You\'ll do '
                 + 'it hundreds of times, and the compiler will catch most slips at the '
                 + '"compile" beat, where they\'re cheapest to fix.',
-            check: { kind: 'stdout', includes: 'Nova Cafe', label: 'Restore the semicolon and run clean' },
+            check: { kind: 'stdout', includes: 'Debug Cafe', label: 'Restore the semicolon and run clean' },
         },
         {
             id: 'first-line',

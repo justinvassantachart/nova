@@ -1,107 +1,151 @@
 # Guided lessons (`/learn`)
 
-A self-contained interactive course that takes a student from CS1 Python to
-C++ and linked lists inside the Nova IDE. Ten lessons, each teaching new
-language ground (types, functions/copies, vectors, pointers, the heap,
-structs, then the linked-list arc) with an embedded "AI bug hunt": plausible
-AI-generated code whose bug is flushed out with unit tests and the debugger.
-Live at `/learn`, no account required; progress persists in `localStorage`.
+The lesson host provides a ten-part course from introductory Python concepts to
+C++ and linked lists inside Web IDE. Each lesson combines short explanations,
+starter files, a focused debugging exercise, tests, and observable completion
+checks. No account is required, and progress persists in `localStorage`.
 
-## Architecture: the lesson system is a *host*, not a fork
+Lessons belong to the deployed site host, not to the reusable
+`packages/web-ide` package. They are a concrete example of an application
+embedding the workbench through its public API.
 
-The IDE is a reusable React component with a public host contract
-([`src/ide-host.ts`](../ide-host.ts)). The lesson runner embeds it exactly the
-way any third-party platform would:
+## Architecture: a host, not a workbench fork
+
+The lesson runner creates a `WebIDEHost` through the compatibility exports in
+[`src/ide-host.ts`](../ide-host.ts) and embeds the same composed application used
+by `/ide`:
 
 ```tsx
-<IDEHostProvider host={{
-    mode: 'lesson',
-    assignmentId: `lesson:${lesson.id}:r${resetNonce}`, // OPFS namespace
-    initialFiles: lesson.files,                          // workspace seed
-    chrome: { sidebar: false, brand: false },            // focused surface
-    wantsRuntimeEvents: true,                            // stdout / exit events
-    onEvent: (type, payload) => runtime.record(type, payload),
-}}>
-    <App />
+const ideRef = useRef<WebIDEInstanceHandle>(null)
+
+const host: IDEHost = {
+  workspace: {
+    id: `lesson:${lesson.id}:r${resetNonce}`,
+    initialFiles: lessonFiles,
+  },
+  chrome: { sidebar: false, brand: false },
+  events: {
+    includeRuntime: true,
+    emit: (type, payload) => {
+      runtime.record(type, payload)
+      report(type, payload)
+    },
+  },
+}
+
+<IDEHostProvider host={host}>
+  <App ref={ideRef} />
 </IDEHostProvider>
 ```
 
-Lessons run the IDE with reduced chrome (`IDEChrome` in `ide-host.ts`): no
-activity bar or file explorer — lesson workspaces are a small set of files
-(typically 1–3), all opened as editor tabs by the runner — and no IDE
-wordmark, since the lesson panel provides the page identity. Run/Debug/Tests,
-the debug panels, terminal and status bar remain.
+`IDEHostProvider` is a root-level compatibility name for
+`WebIDEHostProvider` from `web-ide/host`; it does not expose package internals.
 
-No IDE internals were modified to support lessons. Step completion is
-detected by observing the IDE's public state stores (`debug-store`,
-`execution-store`, `test-store`, the VFS) plus the host event stream. If you
-embed the IDE in your own platform, you can reuse this whole directory — or
-just the pattern.
+Lessons hide the activity bar, explorer, and workbench brand because the
+lesson panel supplies the page identity and each workspace contains only a few
+files. Run, Debug, Tests, terminal, debug panels, and status remain available.
+The runner uses the public handle to keep lesson files open when the explorer
+is hidden.
+
+Step completion observes two public seams:
+
+1. `WebIDEInstanceHandle.subscribe()` signals workbench changes, and
+   `snapshot()` returns immutable debug, panel, test, and workspace state.
+2. The host event sink records run output, exit status, and action counts in a
+   lesson-owned `LessonRuntime`.
+
+No lesson code imports Web IDE's VFS, React context, registry, or Zustand
+stores. Package refactors that preserve the public handle and event contracts
+therefore do not require a lesson-system fork.
 
 ## Anatomy
 
 | File | Role |
-|---|---|
-| `types.ts` | `Lesson` / `LessonStep` / `CheckSpec` — plain, JSON-serializable data |
+| --- | --- |
+| `types.ts` | JSON-friendly `Lesson`, `LessonStep`, and `CheckSpec` definitions |
 | `content/` | The ten lessons; `content/index.ts` is the registry |
-| `checks.ts` | Pure evaluator: `CheckSpec` × IDE-state snapshot → pass/fail per part |
-| `runtime.ts` | Accumulates host events (per-run stdout, exit code, action counts) |
-| `use-step-check.ts` | React hook: re-evaluates the active step's check on state change |
-| `progress-store.ts` | localStorage-persisted progress; sticky step completion |
-| `LessonRunner.tsx` | `/learn/:slug` — panel + embedded IDE |
-| `LessonPanel.tsx` | Instructions, live checklist, hints, step navigation, reset |
-| `LessonsHome.tsx` | `/learn` — the series landing page |
+| `checks.ts` | Pure `CheckSpec` evaluation against a public IDE snapshot |
+| `runtime.ts` | Lesson-owned host-event accumulator for output, exits, and action counts |
+| `use-step-check.ts` | React hook that re-evaluates a step when public IDE or runtime state changes |
+| `progress-store.ts` | `localStorage` progress, current step, and reset nonce |
+| `LessonRunner.tsx` | `/learn/:slug` host layout and Web IDE embedding |
+| `LessonPanel.tsx` | Instructions, checklist, hints, navigation, and reset |
+| `LessonsHome.tsx` | `/learn` catalog |
 
-## Telemetry (for studies)
+## Workspace lifecycle
 
-Step gating and recording are separate concerns:
+Each lesson reset increments `resetNonce`, which changes the host workspace ID.
+That gives the VFS a fresh browser-local namespace and allows the workbench to
+seed the starter files without racing persistence from the previous session.
 
-- **Gating** is local and instant: checks evaluate against the IDE's state
-  stores and the host event stream. Nothing needs a network.
-- **Recording**: when a user is signed in, every event flows into the
-  Firestore `events` collection under one `sessionId` — the IDE's
-  instrumented actions (`run`, `breakpoint_toggle`, `debug_step_over`,
-  `terminal_stdout`, `program_exit`, …) interleaved with lesson-level
-  events (`lesson_step_complete`, `lesson_step_navigate`,
-  `lesson_hint_open`, `lesson_complete`, `lesson_reset`). Every event
-  carries a `lessonStep` payload field, so a trace reads as "on step *fix*,
-  the student set a breakpoint, stepped twice, edited, re-ran, passed."
-  Anonymous visitors keep progress in localStorage only; to capture traces
-  from logged-out demo users, enable Firebase Anonymous Auth and sign in
-  silently on `/learn` routes.
+Because the explorer is hidden, `LessonRunner` opens every lesson file through
+`WebIDEInstanceHandle.ensureFilesOpen()`. If a learner closes a tab, the runner
+quietly restores it; if the final tab closes, the primary file is focused.
+
+## Completion checks
+
+`CheckSpec` values are pure data. Supported checks include:
+
+- manual confirmation and recorded host events;
+- breakpoint, pause, variable, call-stack, and heap state;
+- terminal output and program exit status;
+- current workspace source;
+- structured test results and selected right-side panel;
+- `all` and `any` combinations.
+
+`checks.ts` evaluates those specifications against a `CheckContext`. It has no
+React, Firebase, package-store, or VFS dependency, so check behavior is directly
+unit-testable.
+
+## Telemetry
+
+Completion gating is local and immediate. It does not require a network or an
+account.
+
+When a visitor is already signed in, IDE events and lesson-level events are
+sent to the root application's Firestore event sink under one session ID. The
+payload records the current lesson step, allowing a trace to relate edits,
+runs, breakpoints, debugger actions, hints, navigation, and completion.
+Anonymous visitors keep progress locally and do not write telemetry.
+
+The event sink and Firebase SDK remain in the site host. They are not part of
+Web IDE's package or plugin API.
 
 ## Authoring a lesson
 
-A lesson is starter files plus steps; each step's `check` describes the
-observable IDE state that completes it:
+A lesson defines starter files and ordered steps. Each step's `check` describes
+observable evidence required for completion:
 
 ```ts
 {
-    id: 'fix',
-    title: 'Fix the guard',
-    body: 'Change the loop condition, then **Run**.',   // markdown-lite
-    check: {
-        kind: 'all',
-        of: [
-            { kind: 'code', matches: 'while \\(current != nullptr\\)' },
-            { kind: 'stdout', includes: 'Sum:  60' },
-        ],
-    },
-    hint: 'Test the node, not its successor.',
+  id: 'fix',
+  title: 'Fix the guard',
+  body: 'Change the loop condition, then **Run**.',
+  check: {
+    kind: 'all',
+    of: [
+      { kind: 'code', matches: 'while \\(current != nullptr\\)' },
+      { kind: 'stdout', includes: 'Sum:  60' },
+    ],
+  },
+  hint: 'Test the node, not its successor.',
 }
 ```
 
-Check kinds: `manual`, `event`, `breakpoint`, `paused`, `variable`,
-`call-stack`, `heap`, `stdout`, `program-exit`, `code`, `tests`, `right-tab`,
-and the composites `all` / `any` (see `types.ts` for fields).
+Two authoring rules are enforced by `content.test.ts`:
 
-Two authoring rules, both enforced by `content.test.ts`:
+1. Do not hard-code line numbers. A source-line check uses an `anchor`, which
+   must match exactly one line of starter code and is resolved against the
+   learner's current file.
+2. A fix-gating code expression must not already match the starter code, or the
+   step would pass before the learner makes the intended change.
 
-1. **Never hard-code line numbers.** Checks that target a source line use an
-   `anchor` (a substring of that line), resolved against the *current* file
-   content — so checks survive the learner's edits. An anchor must match
-   exactly one line of the starter code.
-2. **Fix-gating `code` regexes must not match the starter code**, or the
-   "fix it" step auto-passes before the learner does anything.
+After changing lesson content or checks, run:
 
-Run `npx vitest run src/lessons` after editing content.
+```sh
+npm run test:app -- src/lessons
+npm run typecheck
+```
+
+For the broader workbench/host boundary, see
+[`docs/architecture/web-ide-extraction.md`](../../docs/architecture/web-ide-extraction.md).

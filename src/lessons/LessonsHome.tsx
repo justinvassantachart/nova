@@ -24,8 +24,8 @@ export default function LessonsHome() {
             {/* Top bar */}
             <header className="border-b border-border bg-[var(--color-chrome)]">
                 <div className="max-w-5xl mx-auto px-6 h-12 flex items-center gap-3">
-                    <span className="font-bold text-sm tracking-[0.18em] select-none">
-                        NOVA<span className="text-primary">·</span>LEARN
+                    <span className="text-sm font-semibold tracking-tight select-none">
+                        Web IDE Lessons
                     </span>
                     <div className="ml-auto flex items-center gap-4 text-xs">
                         <a href="/ide" className="text-muted-foreground hover:text-foreground flex items-center gap-1">
@@ -128,10 +128,9 @@ export default function LessonsHome() {
             <footer className="border-t border-border">
                 <div className="max-w-5xl mx-auto px-6 py-6 text-[12px] text-muted-foreground leading-relaxed">
                     <p>
-                        Built on the open-source Nova IDE — a reusable React component with a
-                        WebAssembly C++ toolchain and DAP debugger. The lesson engine drives the
-                        IDE purely through its public host API, so you can embed the same guided
-                        experience (or your own lessons) in any platform.
+                        These lessons are hosted by this application and use Web IDE through its
+                        public host API. The reusable editor, runtime, and panels can also be
+                        embedded in other applications.
                     </p>
                 </div>
             </footer>

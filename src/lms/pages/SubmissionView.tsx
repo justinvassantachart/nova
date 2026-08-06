@@ -38,10 +38,12 @@ export default function SubmissionView() {
     if (!submission || !assignmentId || !studentUid) return null
     if (submission.studentUid !== studentUid) return null
     return {
-      mode: 'teacher-review',
-      assignmentId,
-      submissionId: studentUid,
-      initialFiles: submission.files,
+      workspace: {
+        id: `submission:${assignmentId}:${studentUid}`,
+        initialFiles: submission.files,
+        localCache: 'memory',
+        readOnly: true,
+      },
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignmentId, studentUid, submission?.studentUid])

@@ -1,15 +1,14 @@
 // The guided-lesson side panel: renders the active step's instructions,
 // evaluates its completion check live against the IDE's state, and gates
 // step navigation on (sticky) completion. Pure host-side UI — it never
-// reaches into IDE components, only public stores and the lesson runtime.
+// reaches into IDE components, only the public instance facade and lesson runtime.
 
 import { useEffect, useRef } from 'react'
+import type { WebIDEInstanceHandle } from 'web-ide'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useDebugStore } from '@/store/debug-store'
-import { useTestStore } from '@/testing/test-store'
 import type { Lesson } from './types'
 import { workspacePath } from './types'
 import { LESSONS, nextLesson } from './content'
@@ -18,12 +17,13 @@ import { useStepCheck } from './use-step-check'
 import { MarkdownLite } from './markdown'
 import type { LessonRuntime } from './runtime'
 
-export function LessonPanel({ lesson, runtime, report }: {
+export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
     lesson: Lesson
     runtime: LessonRuntime
     // Telemetry channel (see LessonRunner): lesson-level events join the
     // same recorded trace as the IDE's debugger/editor events.
     report: (type: string, payload: Record<string, unknown>) => void
+    getIDEInstance: () => WebIDEInstanceHandle | null
 }) {
     const navigate = useNavigate()
     const progress = useLessonProgress((s) => s.byLesson[lesson.id]) ?? {
@@ -37,7 +37,7 @@ export function LessonPanel({ lesson, runtime, report }: {
     const lessonNumber = LESSONS.findIndex((l) => l.id === lesson.id) + 1
     const following = nextLesson(lesson)
 
-    const result = useStepCheck(step.check, lesson, runtime)
+    const result = useStepCheck(step.check, lesson, runtime, getIDEInstance)
     const stickyDone = progress.completedSteps.includes(step.id)
     const passed = stickyDone || result.passed
     const isManual = step.check.kind === 'manual'
@@ -78,11 +78,9 @@ export function LessonPanel({ lesson, runtime, report }: {
         report('lesson_reset', { lessonId: lesson.id })
         // Fresh OPFS namespace (via resetNonce in the host's assignmentId),
         // fresh debugger state, fresh runtime counters.
-        for (const file of Object.keys(lesson.files)) {
-            useDebugStore.getState().setFileBreakpoints(workspacePath(file), [])
-        }
-        useDebugStore.getState().reset()
-        useTestStore.getState().reset()
+        getIDEInstance()?.reset({
+            breakpointFiles: Object.keys(lesson.files).map(workspacePath),
+        })
         runtime.reset()
         resetLesson(lesson.id)
     }

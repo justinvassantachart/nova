@@ -1,4 +1,4 @@
-// Maps Firebase Auth error codes (and Nova's bridge-error wrappers) to
+// Maps Firebase Auth error codes (and the auth bridge's wrappers) to
 // friendly strings for end users. Centralized so Login.tsx and any
 // future auth UI surface the same wording, and so the switch can be
 // unit-tested independently of React.

@@ -80,14 +80,17 @@ function TeacherView({
   // Host identity is frozen on first mount so live Firestore updates to
   // starterFiles don't reseed the IDE and clobber teacher edits.
   const host = useMemo<IDEHost>(() => ({
-    mode: 'teacher-edit',
-    assignmentId,
-    initialFiles: assignment.starterFiles,
-    onWorkspaceChange: (files) =>
-      saveStarterFiles(classId, assignmentId, files).catch((e) =>
-        console.warn('[AssignmentPage] save starter failed', e),
-      ),
-    onEvent,
+    workspace: {
+      id: `assignment:${assignmentId}`,
+      initialFiles: assignment.starterFiles,
+      persistence: {
+        save: (files) =>
+          saveStarterFiles(classId, assignmentId, files).catch((e) =>
+            console.warn('[AssignmentPage] save starter failed', e),
+          ),
+      },
+    },
+    events: { emit: onEvent },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [classId, assignmentId])
 
@@ -424,18 +427,19 @@ function StudentView({
     if (!user || !submission) return null
     if (submission.assignmentId !== assignmentId) return null
     return {
-      mode: 'student-work',
-      assignmentId,
-      submissionId: user.uid,
-      initialFiles: submission.files,
+      workspace: {
+        id: `submission:${assignmentId}:${user.uid}`,
+        initialFiles: submission.files,
+        persistence: {
+          save: (files) =>
+            saveSubmissionFiles(classId, assignmentId, user.uid, files).catch((e) =>
+              console.warn('[AssignmentPage] save submission failed', e),
+            ),
+        },
+      },
       // Recorded sessions need the full runtime trace (terminal output,
       // exits, pause locations) — that's what makes replay faithful.
-      wantsRuntimeEvents: true,
-      onWorkspaceChange: (files) =>
-        saveSubmissionFiles(classId, assignmentId, user.uid, files).catch((e) =>
-          console.warn('[AssignmentPage] save submission failed', e),
-        ),
-      onEvent,
+      events: { emit: onEvent, includeRuntime: true },
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId, assignmentId, user?.uid, submission?.assignmentId])
@@ -444,7 +448,10 @@ function StudentView({
   // file state from this snapshot plus the edit stream that follows.
   useEffect(() => {
     if (!host) return
-    onEvent('session_start', { mode: host.mode, files: host.initialFiles ?? {} })
+    onEvent('session_start', {
+      mode: 'student-work',
+      files: host.workspace?.initialFiles ?? {},
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host])
 

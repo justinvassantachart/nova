@@ -5,7 +5,7 @@
 
 import type { CheckSpec } from './types'
 import { workspacePath } from './types'
-import type { MemorySnapshot, StackFrame, VariableNode } from '@/engine/IIDEEngine'
+import type { MemorySnapshot, StackFrame, VariableNode } from 'web-ide'
 
 export type CheckContext = {
     debug: {
@@ -13,12 +13,12 @@ export type CheckContext = {
         currentLine: number | null
         currentFile: string | null
         currentFunc: string | null
-        breakpoints: Record<string, number[]>
-        callStack: StackFrame[]
+        breakpoints: Readonly<Record<string, readonly number[]>>
+        callStack: readonly StackFrame[]
         memorySnapshot: MemorySnapshot | null
     }
     rightTab: string
-    tests: { name: string; status: 'running' | 'pass' | 'fail' }[]
+    tests: readonly { name: string; status: 'running' | 'pass' | 'fail' }[]
     // Current workspace files, '/workspace/...'-keyed.
     files: Record<string, string>
     // Terminal output accumulated since the most recent run.

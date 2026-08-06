@@ -12,7 +12,7 @@ export default function Dashboard() {
   return (
     <div className="h-screen w-screen flex flex-col">
       <header className="border-b px-4 py-2 flex items-center justify-between">
-        <h1 className="font-semibold">Nova</h1>
+        <h1 className="font-semibold">Web IDE</h1>
         <UserMenu />
       </header>
       <main className="flex-1 overflow-auto p-6">

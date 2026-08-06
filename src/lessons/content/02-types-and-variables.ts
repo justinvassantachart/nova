@@ -77,7 +77,7 @@ export const typesAndVariables: Lesson = {
                 + '- `bool` — `true` / `false` (lowercase, unlike Python!)\n'
                 + '- `char` — one character, in **single** quotes: `char grade = \'A\';`\n'
                 + '- `std::string` — text, in **double** quotes: '
-                + '`std::string name = "Nova";` (needs `#include <string>`)\n\n'
+                + '`std::string name = "Ada";` (needs `#include <string>`)\n\n'
                 + 'Mind the literals — these are four *different* things to C++: `3` '
                 + '(int), `3.0` (double), `\'3\'` (char), `"3"` (string). Python blurred '
                 + 'those lines; C++ never does.',
