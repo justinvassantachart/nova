@@ -48,7 +48,8 @@ export default function Login() {
             project's web config. See <code>README.md</code> for setup instructions.
           </p>
           <p>
-            You can still use the standalone IDE at <a className="underline" href="/ide">/ide</a>.
+            The <a className="underline" href="/ide">editor</a> and{' '}
+            <a className="underline" href="/learn">lessons</a> are available without Firebase.
           </p>
         </div>
       </div>
@@ -125,7 +126,12 @@ export default function Login() {
   return (
     <div className="h-screen w-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold text-center">Web IDE</h1>
+        <div className="text-center">
+          <h1 className="text-2xl font-semibold">Class account</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            An account is only needed for classes.
+          </p>
+        </div>
 
         <div role="tablist" aria-label="Authentication method" className="flex gap-1 p-1 bg-muted/50 rounded-md">
           <button
@@ -245,18 +251,17 @@ export default function Login() {
           disabled={busy}
           className="px-4 py-2 rounded-md border bg-background text-sm hover:bg-muted disabled:opacity-50"
         >
-          Continue with Google
+          Sign in with Google
         </button>
 
-        <div className="flex flex-col gap-1 text-center">
+        <div className="flex flex-col gap-2 text-center text-xs text-muted-foreground">
           {/* Hard navigations: these routes need the COOP/COEP-isolated
               headers that /login deliberately strips. */}
-          <a className="text-xs underline text-muted-foreground" href="/learn">
-            Just exploring? Try the interactive debugging lessons — no account needed
-          </a>
-          <a className="text-xs underline text-muted-foreground" href="/ide">
-            or use the standalone IDE
-          </a>
+          <span>Other parts of the site do not require an account.</span>
+          <div className="flex justify-center gap-4">
+            <a className="underline" href="/learn">Lessons</a>
+            <a className="underline" href="/ide">Editor</a>
+          </div>
         </div>
       </div>
     </div>

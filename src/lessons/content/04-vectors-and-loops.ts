@@ -53,12 +53,11 @@ STUDENT_TEST("finds a maximum in the middle") {
 export const vectorsAndLoops: Lesson = {
     id: 'vectors-and-loops',
     slug: 'vectors-and-loops',
-    title: 'Vectors, Loops & the Edges',
-    tagline: 'Python lists become std::vector, loops grow a third clause, and an AI maximum-finder forgets one element.',
+    title: 'Vectors and Loops',
+    tagline: 'std::vector, C++ loop syntax, and off-by-one errors.',
     description:
-        'Meet std::vector — the Python list with a declared element type — and both C++ loop styles. Then '
-        + 'audit an AI "standard maximum algorithm" that passes its demo and its own test, yet quietly '
-        + 'ignores the last element of every vector. Boundary tests flush it out; the debugger convicts it.',
+        'Learn how to store values in `std::vector`, use range-based and indexed loops, and test boundary '
+        + 'cases. Use the debugger to find a loop that skips the final element.',
     minutes: 15,
     tags: ['vectors', 'loops', 'testing', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP, 'tests.cpp': TESTS_CPP },
@@ -66,39 +65,37 @@ export const vectorsAndLoops: Lesson = {
     steps: [
         {
             id: 'vectors',
-            title: 'A list with a declared shape',
+            title: 'std::vector basics',
             body:
-                'Python\'s workhorse collection translates almost one-to-one:\n'
+                'A Python list can be represented by a C++ vector:\n'
                 + '```\nscores = [72, 95, 88]              # Python\nstd::vector<int> scores = {72, 95, 88};\n```\n'
                 + 'The `<int>` in angle brackets declares the **element type** — read '
-                + '`std::vector<int>` as "a vector *of* ints". (One type to rule the '
-                + 'whole list: no mixing 72 and "banana".) It needs `#include <vector>`.\n\n'
-                + 'The greatest hits, translated:\n'
+                + '`std::vector<int>` as "a vector *of* ints". Every element has the same '
+                + 'type. It needs `#include <vector>`.\n\n'
+                + 'Common operations:\n'
                 + '- `len(scores)` → `scores.size()`\n'
                 + '- `scores.append(x)` → `scores.push_back(x)`\n'
                 + '- `scores[i]` → `scores[i]` — same, indexed from 0\n\n'
-                + 'One sharp edge: Python throws `IndexError` for a bad index. C++ '
+                + 'Python throws `IndexError` for a bad index. The `[]` operator in C++ '
                 + '**doesn\'t check** — `scores[999]` reads whatever bytes live there. '
-                + 'Garbage, crashes, chaos: staying in bounds is *your* job now.',
+                + 'Code that uses `[]` must keep indexes within the vector bounds.',
             check: { kind: 'manual' },
         },
         {
             id: 'two-loops',
-            title: 'The two loops',
+            title: 'Two forms of for loop',
             body:
                 'C++ has Python\'s for-each, almost verbatim:\n'
                 + '```\nfor (int score : scores) { ... }   // for score in scores:\n```\n'
                 + 'And when you need the *index*, the classic three-clause `for`:\n'
                 + '```\nfor (size_t i = 0; i < scores.size(); i++) { ... }\n```\n'
                 + 'Read the three clauses as: **start** (`i = 0`), **keep going while** '
-                + '(`i < scores.size()`), **after each lap** (`i++`, shorthand for '
+                + '(`i < scores.size()`), **after each iteration** (`i++`, shorthand for '
                 + '`i = i + 1`). It\'s `for i in range(len(scores))` with the machinery '
                 + 'exposed.\n\n'
                 + '`size_t` is the unsigned (no-negatives) integer type that `.size()` '
-                + 'returns — use it for indexes and the compiler stays quiet.\n\n'
-                + 'Now read `main.cpp`: the AI used both loop styles. Check its '
-                + 'three-clause condition carefully... or don\'t — that\'s what the rest '
-                + 'of this lesson is for.',
+                + 'returns and is commonly used for indexes.\n\n'
+                + 'Read `main.cpp` and note that it uses both loop styles.',
             check: { kind: 'manual' },
         },
         {
@@ -106,10 +103,9 @@ export const vectorsAndLoops: Lesson = {
             title: 'Run the demo',
             body:
                 'Press **Run**.\n\n'
-                + 'Scores 72, 95, 88, 64 — highest 95. Correct! The AI calls it "the '
-                + 'standard maximum algorithm, the same one in every textbook." Ship it?',
+                + 'The scores are 72, 95, 88, and 64. The program reports 95 as the highest.',
             check: { kind: 'stdout', includes: 'Highest: 95', label: 'Run it — highest is 95' },
-            successNote: 'The demo passes. By now that phrase should make you reach for the test suite.',
+            successNote: 'The example produces the expected result for this input.',
         },
         {
             id: 'tests-file',
@@ -119,13 +115,12 @@ export const vectorsAndLoops: Lesson = {
                 + 'main.cpp; real projects give them their own file. One new line makes '
                 + 'that work:\n'
                 + '```\nint highestScore(const std::vector<int>& scores);\n```\n'
-                + 'A signature with a `;` instead of a body is a **declaration** — it '
+                + 'A signature with a `;` instead of a body is a **declaration**. It '
                 + 'tells the compiler "this function exists; the body lives elsewhere." '
                 + 'That\'s the contract that lets tests.cpp call into main.cpp.\n\n'
                 + 'And read that parameter type, using last lesson\'s vocabulary: '
-                + '`const std::vector<int>&` — by **reference** (`&`, no copying a '
-                + 'thousand scores) and `const` (a promise: the function may look, not '
-                + 'touch).',
+                + '`const std::vector<int>&` passes the vector by **reference** (`&`) and '
+                + 'uses `const` to prevent the function from modifying it.',
             check: { kind: 'manual' },
         },
         {
@@ -133,26 +128,22 @@ export const vectorsAndLoops: Lesson = {
             title: 'Run the provided test',
             body:
                 'Press **Tests** (the beaker).\n\n'
-                + 'The provided test passes — green. So the function is correct?\n\n'
-                + 'No. A passing test proves exactly **the fact it checks**, nothing '
-                + 'more. This test put the maximum in the *middle* of the vector. Hold '
-                + 'that thought.',
+                + 'The provided test passes. A passing test verifies the specific input '
+                + 'and expectation it contains. This test puts the maximum in the middle '
+                + 'of the vector.',
             check: { kind: 'tests', minTotal: 1, allPass: true, label: 'Run Tests — the provided test is green' },
         },
         {
             id: 'edge-thinking',
-            title: 'Think in boundaries',
+            title: 'Test boundary cases',
             body:
-                'Where do scanning bugs hide? Almost never in the middle. They hide at '
-                + 'the **edges**:\n'
+                'Loop tests should include boundary positions:\n'
                 + '- the **first** element\n'
                 + '- the **last** element\n'
                 + '- a **single-element** vector\n'
-                + '- (and the empty vector — a special beast we\'ll note later)\n\n'
-                + 'A reviewer\'s reflex you should steal: *test the boundaries first*, '
-                + 'because that\'s where `<` vs `<=` and `- 1` mistakes live. The '
-                + 'provided test covers the comfy middle. Nobody has asked about the '
-                + 'last element yet.',
+                + '- an **empty** vector\n\n'
+                + 'These cases help detect errors involving `<`, `<=`, and `- 1`. The '
+                + 'provided test covers only a maximum in the middle.',
             check: { kind: 'manual' },
         },
         {
@@ -171,11 +162,11 @@ export const vectorsAndLoops: Lesson = {
                 ],
             },
             hint: 'Paste the test below the first one in tests.cpp, then press the beaker again.',
-            successNote: 'Expected 99, actual 80. The "textbook algorithm" never met the last element.',
+            successNote: 'Expected 99, actual 80. The loop did not inspect the last element.',
         },
         {
             id: 'debug',
-            title: 'Stake out the loop',
+            title: 'Pause in the loop',
             body:
                 'The test says *what* (the last element is ignored); the debugger shows '
                 + '*why*. Set a **breakpoint** on the comparison inside the loop:\n'
@@ -192,14 +183,14 @@ export const vectorsAndLoops: Lesson = {
         },
         {
             id: 'watch-i',
-            title: 'Watch i — and watch it stop short',
+            title: 'Observe the loop index',
             body:
                 'Keep your eyes on `i` in the Variables panel and press **Continue** '
-                + '(`F5`) to lap the loop, pausing at each comparison: `i` goes 0... '
+                + '(`F5`) to continue the loop, pausing at each comparison: `i` goes 0... '
                 + '1... 2... and then the program **runs to the end**. The pause at '
                 + '`i == 3` — index of the last element — never comes.\n\n'
                 + 'The condition reads `i < scores.size() - 1`, i.e. `i < 3`. The loop '
-                + 'retires one element early, every time, on every vector.',
+                + 'stops before inspecting the last element.',
             check: {
                 kind: 'all',
                 of: [
@@ -207,45 +198,41 @@ export const vectorsAndLoops: Lesson = {
                     { kind: 'variable', name: 'i', equals: '2', label: 'See i reach 2 — and never 3' },
                 ],
             },
-            hint: 'Each Continue jumps to the next pause at your breakpoint. Count the pauses: 0, 1, 2... gone.',
+            hint: 'Each Continue advances to the next pause at your breakpoint. The observed index values are 0, 1, and 2.',
         },
         {
             id: 'diagnose',
-            title: 'Why would an AI write “- 1”?',
+            title: 'Why the loop stops early',
             body:
                 'Because `i < size() - 1` *is* correct — in loops that compare element '
-                + '`i` with element `i + 1` (think "is this list sorted?"). The pattern '
-                + 'is everywhere in training data. The AI reached for a shape that '
-                + '*looks* like the maximum loop and is one character wrong for it.\n\n'
-                + 'That\'s the deep lesson about AI code: it produces the **most '
-                + 'plausible** code, and plausible ≠ correct. Your defense is mechanical: '
-                + 'boundary tests, then the debugger.\n\n'
-                + 'Footnote for later: on an *empty* vector, `scores.size() - 1` '
+                + '`i` with element `i + 1`, such as checking whether a list is sorted. '
+                + 'This maximum function does not access `i + 1`, so subtracting one is '
+                + 'incorrect. Boundary tests and the debugger identify the difference.\n\n'
+                + 'On an *empty* vector, `scores.size() - 1` '
                 + 'underflows (unsigned 0 − 1 = enormous), and `scores[0]` in the first '
-                + 'line is already out of bounds. Edges upon edges — vectors reward '
-                + 'paranoia.',
+                + 'line is already out of bounds. Handling an empty vector would require '
+                + 'an additional design decision.',
             check: { kind: 'manual' },
         },
         {
             id: 'fix',
-            title: 'Fix the condition; let the suite judge',
+            title: 'Fix the loop condition',
             body:
                 'Scan the **whole** vector:\n'
                 + '```\nfor (size_t i = 0; i < scores.size(); i++) {\n```\n'
-                + 'Then run **Tests** — both should go green. Notice you don\'t re-argue '
-                + 'the old case: the max-in-the-middle test still standing guard is what '
-                + 'makes the fix safe.',
+                + 'Then run **Tests**. The existing middle-maximum test verifies that the '
+                + 'original case still works.',
             check: { kind: 'tests', minTotal: 2, allPass: true, label: 'Re-run Tests: all green' },
-            successNote: 'Both green — the middle still works AND the end is finally invited.',
+            successNote: 'Both the middle-maximum and last-maximum tests pass.',
         },
         {
             id: 'lock-it',
-            title: 'Lock in the lonely case',
+            title: 'Test a single-element vector',
             body:
-                'One more boundary from the census: the **single-element** vector.\n'
+                'Add a test for a **single-element** vector.\n'
                 + '```\nSTUDENT_TEST("a one-element vector is its own maximum") {\n'
                 + '    EXPECT_EQUALS(highestScore({42}), 42);\n}\n```\n'
-                + 'Run **Tests**. Three facts, three guards, forever.',
+                + 'Run **Tests** and confirm all three cases pass.',
             check: { kind: 'tests', minTotal: 3, allPass: true, label: 'Three tests, all passing' },
         },
         {
@@ -256,12 +243,9 @@ export const vectorsAndLoops: Lesson = {
                 + '`.size()`, `.push_back()`, `[i]`, **no bounds checking**\n'
                 + '- Both loops: range-for (`for (int s : v)`) and the three-clause '
                 + '`for` with `size_t`\n'
-                + '- **Boundary thinking**: first, last, single, empty — test the edges '
-                + 'first\n'
-                + '- Plausible-looking AI loops deserve a `- 1` audit\n\n'
-                + 'Next: the layer under everything — **pointers**. Python hid the '
-                + 'addresses from you; C++ hands them over, and the memory graph lets '
-                + 'you *watch*.',
+                + '- **Boundary cases**: first, last, single, and empty\n'
+                + '- How a `- 1` condition can skip the final element\n\n'
+                + 'The next lesson covers pointer values, dereferencing, and the memory graph.',
             check: { kind: 'manual' },
         },
     ],

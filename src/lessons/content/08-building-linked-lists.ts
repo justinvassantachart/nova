@@ -77,13 +77,11 @@ STUDENT_TEST("three pushes make a list of three") {
 export const buildingLinkedLists: Lesson = {
     id: 'building-linked-lists',
     slug: 'building-linked-lists',
-    title: 'Linked Lists I: Grow a Chain',
-    tagline: 'Structs + pointers + heap = a list you can watch grow, node by node — and an AI counter that\'s off by one.',
+    title: 'Building Linked Lists',
+    tagline: 'Building and traversing a linked list.',
     description:
-        'Everything you\'ve learned converges: a struct that points at its own type, allocated on the heap, '
-        + 'chained by arrows. Build a list and watch it grow live in the memory graph, master the traversal '
-        + 'loop — then catch the AI\'s length() function asking "is there a next?" when it should ask "is '
-        + 'there a node?", and miscounting every list ever.',
+        'Build a linked list from heap-allocated nodes, inspect it in the memory graph, and use the standard '
+        + 'traversal loop. Then correct an off-by-one error in the length function and add boundary tests.',
     minutes: 16,
     tags: ['linked lists', 'memory graph', 'testing', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP, 'tests.cpp': TESTS_CPP },
@@ -91,20 +89,20 @@ export const buildingLinkedLists: Lesson = {
     steps: [
         {
             id: 'why-lists',
-            title: 'Why chain nodes at all?',
+            title: 'Why use linked nodes?',
             body:
-                'A vector is one continuous shelf of boxes. Insert at the **front** and '
-                + 'every element shuffles one slot right — Python\'s '
-                + '`list.insert(0, x)` paid the same hidden tax.\n\n'
-                + 'A **linked list** abandons the shelf. Each value lives in its own '
-                + 'heap box — a **node** — holding the value and an arrow to the next '
+                'A vector stores its elements in a contiguous sequence. Inserting at the '
+                + '**front** requires moving the existing elements; Python\'s '
+                + '`list.insert(0, x)` has the same cost.\n\n'
+                + 'A **linked list** stores each value in a separate heap allocation '
+                + 'called a **node**. Each node holds a value and a pointer to the next '
                 + 'node:\n'
                 + '```\nhead -> [23|*] -> [8|*] -> [14|x]\n```\n'
                 + '`head` is a pointer to the first node; the last node\'s arrow is '
-                + '`nullptr` (drawn as `x`). Inserting at the front = make one box, '
-                + 'rewire one arrow. Nothing shuffles.\n\n'
-                + 'The trade: you give up `[i]` jumping. To reach the third node you '
-                + 'must *walk* — which is why traversal is the skill of this lesson.',
+                + '`nullptr` (drawn as `x`). Inserting at the front requires one new '
+                + 'node and one pointer update.\n\n'
+                + 'A linked list does not provide direct indexed access. Reaching a '
+                + 'later node requires traversing from the head.',
             check: { kind: 'manual' },
         },
         {
@@ -113,25 +111,25 @@ export const buildingLinkedLists: Lesson = {
             body:
                 'Here is the whole data structure:\n'
                 + '```\nstruct Node {\n    int value;\n    Node* next;\n};\n```\n'
-                + 'A struct containing a pointer **to its own type** — that one line is '
-                + 'the entire trick, and it\'s a greatest-hits reel of this course:\n'
+                + 'This struct contains a pointer **to its own type** and combines '
+                + 'several concepts from earlier lessons:\n'
                 + '- a **struct** bundles the fields (lesson 7)\n'
                 + '- `Node*` is a **pointer**, an arrow to another node (lesson 5)\n'
                 + '- nodes live on the **heap** via `new`, so they outlive every '
                 + 'function (lesson 6)\n'
                 + '- `nullptr` marks the end of the chain\n\n'
-                + 'And `pushFront` is three ideas in one line:\n'
+                + '`pushFront` allocates and initializes a node in one line:\n'
                 + '```\nNode* node = new Node{value, head};\n```\n'
                 + 'brace-init fills the fields in order — `value`, then '
-                + '`next = ` *the old head*. The new node is wired in before it even '
-                + 'has a name. `main` then re-aims: `head = pushFront(head, 23);`.',
+                + '`next = ` *the old head*. `main` then updates the head pointer with '
+                + '`head = pushFront(head, 23);`.',
             check: { kind: 'manual' },
         },
         {
             id: 'build-live',
-            title: 'Watch the chain exist',
+            title: 'Inspect the first node',
             body:
-                'Don\'t take the diagram\'s word for it. Set a **breakpoint** on the '
+                'Set a **breakpoint** on the '
                 + 'second push:\n'
                 + '```\nhead = pushFront(head, 8);\n```\n'
                 + 'press **Debug**, and open the **Graph** tab.\n\n'
@@ -148,13 +146,12 @@ export const buildingLinkedLists: Lesson = {
         },
         {
             id: 'watch-grow',
-            title: 'Grow it one node at a time',
+            title: 'Inspect additional nodes',
             body:
                 'Press **Step Over** (`F10`) and watch the graph: a second box '
                 + 'appears — `[8]` — its arrow landing on `[14]`, and `head` hops to '
-                + 'the newcomer. Step again past the third push: `[23] -> [8] -> [14]`.\n\n'
-                + 'That picture *is* the linked list. Every linked-list bug you will '
-                + 'ever fix is an arrow in that picture pointing somewhere silly.',
+                + 'the new node. Step again past the third push: `[23] -> [8] -> [14]`.\n\n'
+                + 'The graph shows the list as nodes connected by their `next` pointers.',
             check: {
                 kind: 'all',
                 of: [
@@ -162,24 +159,24 @@ export const buildingLinkedLists: Lesson = {
                     { kind: 'heap', minAllocations: 2, label: 'See the chain reach 2+ nodes' },
                 ],
             },
-            successNote: 'A data structure you can point at. Keep the Graph tab close for the rest of the course.',
+            successNote: 'The Graph tab now shows the nodes and the pointers between them.',
         },
         {
             id: 'traversal',
-            title: 'The traversal loop — learn it cold',
+            title: 'The traversal loop',
             body:
                 'Read `printList`:\n'
                 + '```\nNode* curr = head;\nwhile (curr != nullptr) {\n'
                 + '    std::cout << curr->value << " -> ";\n    curr = curr->next;\n}\n```\n'
-                + 'This is **the** pattern — start a cursor at the head, work on the '
+                + 'This is the standard pattern: start a cursor at the head, process the '
                 + 'current node, hop the arrow, stop at `nullptr`. Python\'s '
                 + '`for x in lst` was doing exactly this for you, invisibly.\n\n'
-                + 'Memorize the guard: `while (curr != nullptr)` — "**while there is a '
-                + 'node**". Every word matters, as the AI is about to demonstrate.\n\n'
-                + 'Press **Continue** (`F5`) and let the program finish. Read the '
-                + 'terminal *carefully*.',
+                + 'The guard `while (curr != nullptr)` means "**while there is a '
+                + 'node**".\n\n'
+                + 'Press **Continue** (`F5`) and let the program finish. Compare the '
+                + 'printed nodes with the reported length.',
             check: { kind: 'stdout', includes: 'Length: 2', label: 'Run to the end — three nodes print, Length says 2' },
-            successNote: '23, 8, 14 printed... and "Length: 2". One of those functions is lying.',
+            successNote: 'Three nodes were printed, but length reported 2.',
         },
         {
             id: 'tests',
@@ -201,24 +198,22 @@ export const buildingLinkedLists: Lesson = {
                 + 'nodes; `length` claims two:\n'
                 + '```\nwhile (curr != nullptr)        // printList: "while there is a node"\n'
                 + 'while (curr->next != nullptr)  // length:    "while there is a NEXT node"\n```\n'
-                + 'The AI\'s counter asks "does this node have a successor?" — so it '
-                + 'counts every node *except the last*. The comment even confesses: '
+                + 'The counter asks "does this node have a successor?" — so it '
+                + 'counts every node *except the last*. The comment says '
                 + '"hopping until it reaches the last one." It reaches the last node '
                 + 'and forgets to count it.\n\n'
-                + 'Comparing against a known-good pattern beat staring at the buggy '
-                + 'line. Steal that move: when one function works and its sibling '
-                + 'doesn\'t, **diff them in your head**.\n\n'
-                + 'Worse: ask what `length(nullptr)` — an empty list — would do. '
-                + '`curr->next` when `curr` is `nullptr`... follows an arrow that '
-                + 'isn\'t there. One wrong guard, two bugs: a miscount *and* a crash '
-                + 'waiting for the first empty list.',
+                + 'Comparing this loop with the working traversal in `printList` '
+                + 'makes the difference clear.\n\n'
+                + 'Also consider `length(nullptr)` for an empty list. Evaluating '
+                + '`curr->next` when `curr` is `nullptr` is invalid. The same guard '
+                + 'causes both the miscount and an empty-list crash.',
             check: { kind: 'manual' },
         },
         {
             id: 'confirm',
-            title: 'Watch the last node go uncounted',
+            title: 'Inspect the loop count',
             body:
-                'Conviction by debugger: move your **breakpoint** to the counting '
+                'Move your **breakpoint** to the counting '
                 + 'line:\n'
                 + '```\ncount++;\n```\n'
                 + 'and press **Debug**. It pauses with `count` 0 (node 23), '
@@ -242,23 +237,22 @@ export const buildingLinkedLists: Lesson = {
                 'Make `length` use the real traversal guard:\n'
                 + '```\nwhile (curr != nullptr) {\n```\n'
                 + 'Then press **Tests** — green. (And notice the empty-list crash '
-                + 'died with the same edit: checking `curr` itself is what makes '
+                + 'is fixed by the same edit: checking `curr` itself makes '
                 + 'walking from `nullptr` safe.)',
             check: { kind: 'tests', minTotal: 1, allPass: true, label: 'Re-run Tests: green' },
-            successNote: 'While there is a NODE. Three nodes, count of three.',
+            successNote: 'The loop now visits all three nodes.',
         },
         {
             id: 'armor',
-            title: 'Armor the edges',
+            title: 'Test boundary cases',
             body:
                 'Lock in both boundaries with two more tests in `tests.cpp`:\n'
                 + '```\nSTUDENT_TEST("a single node has length 1") {\n'
                 + '    EXPECT_EQUALS(length(pushFront(nullptr, 42)), 1);\n}\n\n'
                 + 'STUDENT_TEST("the empty list has length 0") {\n'
                 + '    EXPECT_EQUALS(length(nullptr), 0);\n}\n```\n'
-                + 'Run **Tests** — three green. That empty-list test would have '
-                + '*crashed the whole suite* before your fix. Now it\'s a tripwire '
-                + 'protecting everyone who touches this file after you.',
+                + 'Run **Tests** — three green. The empty-list test would have '
+                + 'crashed before the fix and now prevents that case from regressing.',
             check: { kind: 'tests', minTotal: 3, allPass: true, label: 'Three tests, all passing' },
         },
         {
@@ -275,8 +269,8 @@ export const buildingLinkedLists: Lesson = {
                 + 'bugs\n'
                 + '- Forward-declared contracts (`struct Node;`) let tests compile '
                 + 'against signatures alone\n\n'
-                + 'You can build and read a chain. Next: **surgery** — removing nodes, '
-                + 'where prev/curr dance and the edge cases bite.',
+                + 'Next: remove nodes by updating the links around them and handle '
+                + 'the relevant boundary cases.',
             check: { kind: 'manual' },
         },
     ],

@@ -97,14 +97,11 @@ STUDENT_TEST("removes a middle value") {
 export const linkedListEdgeCases: Lesson = {
     id: 'linked-list-edge-cases',
     slug: 'linked-list-edge-cases',
-    title: 'Linked Lists II: Edge-Case Surgery',
-    tagline: 'Removing a node is surgery on live arrows. The AI handles the easy patient and loses the head.',
+    title: 'Removing Linked-List Nodes',
+    tagline: 'Removing linked-list nodes and handling boundary cases.',
     description:
-        'Unlinking a node means rewiring the arrow that leads into it — the famous prev/curr walk. The AI\'s '
-        + 'removeValue aces the demo, passes its own test, and silently does NOTHING when asked to remove '
-        + 'the head, because it moves a private copy of the head pointer. Take an edge-case census, write '
-        + 'the test the AI skipped, watch the abandonment in the graph, and meet Node*& — a reference to a '
-        + 'pointer.',
+        'Remove a node by updating the pointer that leads to it. Test middle, tail, head, missing-value, and '
+        + 'empty-list cases, then use Node*& so the function can update the caller\'s head pointer.',
     minutes: 16,
     tags: ['linked lists', 'testing', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP },
@@ -112,74 +109,71 @@ export const linkedListEdgeCases: Lesson = {
     steps: [
         {
             id: 'surgery',
-            title: 'Removal is rewiring',
+            title: 'Remove a node by updating links',
             body:
                 'To remove `[3]` from this chain:\n'
                 + '```\nhead -> [7|*] -> [3|*] -> [12|x]\n```\n'
                 + 'you make the arrow that *enters* `[3]` skip over it:\n'
                 + '```\nhead -> [7|*] ---------> [12|x]      then: delete the [3] node\n```\n'
-                + 'So you need a pointer to the node **before** the victim. Hence the '
-                + '**prev/curr walk** — read it in `removeValue`:\n'
+                + 'This requires a pointer to the node **before** the one being removed. '
+                + 'Read the **prev/curr traversal** in `removeValue`:\n'
                 + '```\nwhile (curr != nullptr && curr->value != value) {\n'
                 + '    prev = curr;\n    curr = curr->next;\n}\n```\n'
-                + '`curr` hunts; `prev` trails one step behind. When `curr` lands on '
-                + 'the victim, `prev->next = curr->next;` performs the bypass, and '
-                + '`delete curr;` settles the heap ledger from lesson 6.',
+                + '`curr` searches while `prev` stays one step behind. When `curr` '
+                + 'reaches the target, `prev->next = curr->next;` bypasses it, and '
+                + '`delete curr;` releases its allocation.',
             check: { kind: 'manual' },
         },
         {
             id: 'census',
-            title: 'The edge-case census',
+            title: 'List the boundary cases',
             body:
-                'Linked-list surgery has a standard list of patients, and you should '
-                + 'recite it before reviewing *any* list code — yours, a teammate\'s, '
-                + 'or an AI\'s:\n'
-                + '- remove a **middle** node — the comfy case\n'
+                'Linked-list removal has a standard set of cases to review:\n'
+                + '- remove a **middle** node\n'
                 + '- remove the **tail** — does `curr->next` being null break the '
                 + 'rewire?\n'
-                + '- remove the **head** — there is **no prev**! Who rewires `head` '
+                + '- remove the **head** — there is **no prev**, so the function must update `head` '
                 + 'itself?\n'
                 + '- remove a **missing value** — must change nothing\n'
                 + '- remove from the **empty list** — must survive\n\n'
-                + 'The AI\'s note says "Handle every case" and "I tested removing a '
-                + 'middle value." One of those sentences is load-bearing. Audit time.',
+                + 'The provided note says "Handle every case" but mentions testing '
+                + 'only a middle value. Review the other cases as well.',
             check: { kind: 'manual' },
         },
         {
             id: 'run',
-            title: 'Run the demo (the comfy case)',
+            title: 'Run the middle-node case',
             body:
                 'Press **Run**. The demo removes 3 — a middle node — from '
                 + '`7 -> 3 -> 12`.',
             check: { kind: 'stdout', includes: 'After:  7 -> 12 -> x', label: 'Run it — the middle removal works' },
-            successNote: 'Flawless... on the one case the AI admits to testing.',
+            successNote: 'The provided middle-node case works.',
         },
         {
             id: 'provided-test',
-            title: 'Its own test agrees',
+            title: 'Run the provided test',
             body:
                 'The test at the bottom of `main.cpp` checks the same middle '
                 + 'removal — length 2, then both survivors in order, reached with '
                 + 'lesson 7\'s arrow: `list->next->value`. Press **Tests**: green.\n\n'
-                + 'A green suite tells you the *covered* cases work. Glance back at '
-                + 'the census: which patient has no test?',
+                + 'A passing suite confirms only the covered cases. Compare the test '
+                + 'with the boundary cases listed above.',
             check: { kind: 'tests', minTotal: 1, allPass: true, label: 'Run Tests — the middle case passes' },
         },
         {
             id: 'audit',
-            title: 'Read the head branch like a prosecutor',
+            title: 'Inspect the head-removal branch',
             body:
                 'Here\'s the AI\'s head case:\n'
                 + '```\nif (prev == nullptr) {\n    head = curr->next;  // removing the head: advance past it\n    return;\n}\n```\n'
                 + 'Looks plausible. Now read the **signature**:\n'
                 + '```\nvoid removeValue(Node* head, int value)\n```\n'
-                + '`head` is a parameter — passed **by value**. You have diagnosed '
-                + 'this disease for an int (lesson 3), a pointer (lesson 5), and a '
-                + 'struct (lesson 7). Final form: assigning to a *copy of the head '
-                + 'pointer* re-aims the copy, the copy dies at `}`, and the caller\'s '
-                + '`head` never hears about any of it.\n\n'
+                + '`head` is a parameter passed **by value**. As with the earlier int, '
+                + 'pointer, and struct examples, assigning to a *copy of the head '
+                + 'pointer* changes only that local copy. The caller\'s `head` remains '
+                + 'unchanged when the function returns.\n\n'
                 + 'Prediction: removing the head will silently do **nothing**. '
-                + 'Prove it with a test.',
+                + 'Verify that prediction with a test.',
             check: { kind: 'manual' },
         },
         {
@@ -196,17 +190,16 @@ export const linkedListEdgeCases: Lesson = {
                 + '    EXPECT_EQUALS(list->value, 12);\n}\n```\n'
                 + 'Press **Tests**.',
             check: { kind: 'tests', minTotal: 2, minFailed: 1, label: 'Run Tests — the head case fails' },
-            successNote: 'Length still 2, head still 7. The "handled" head case is a no-op, exactly as predicted.',
+            successNote: 'The length is still 2 and the head is still 7, confirming that the caller was not updated.',
         },
         {
             id: 'reproduce',
             title: 'Make the demo hit the bug',
             body:
-                'Now catch it red-handed. Make `main` remove the **head** instead of '
+                'Make `main` remove the **head** instead of '
                 + 'the middle — change the call to:\n'
                 + '```\nremoveValue(head, 7);\n```\n'
-                + 'and **Run**: the "After" line still shows all three nodes. The '
-                + 'smallest reproduction, on screen.',
+                + 'and **Run**. The "After" line still shows all three nodes.',
             check: {
                 kind: 'all',
                 of: [
@@ -217,7 +210,7 @@ export const linkedListEdgeCases: Lesson = {
         },
         {
             id: 'watch',
-            title: 'Watch the abandonment',
+            title: 'Inspect the copied head pointer',
             body:
                 'Set a **breakpoint** on the head-branch line:\n'
                 + '```\nhead = curr->next;\n```\n'
@@ -225,9 +218,8 @@ export const linkedListEdgeCases: Lesson = {
                 + 'see it: `main`\'s `head` arrow AND `removeValue`\'s own `head` '
                 + 'arrow — **two separate pointers** aiming at node `[7]`.\n\n'
                 + 'Press **Step Over** (`F10`): the *local* `head` hops to `[3]`... '
-                + 'and `main`\'s `head` doesn\'t move. The function then returns, its '
-                + 'frame evaporates, and with it the only pointer that knew about the '
-                + 'removal.',
+                + 'and `main`\'s `head` does not move. When the function returns, its '
+                + 'local pointer is discarded.',
             check: {
                 kind: 'all',
                 of: [
@@ -247,14 +239,13 @@ export const linkedListEdgeCases: Lesson = {
                 + '```\nvoid removeValue(Node*& head, int value) {\n```\n'
                 + 'Read `Node*&` inside-out: "a **reference to** a pointer-to-Node." '
                 + 'Now `head = curr->next;` re-aims the *caller\'s* head. While '
-                + 'you\'re in that branch, settle the ledger too — the AI never '
-                + 'deleted the unlinked node:\n'
+                + 'editing that branch, also release the unlinked node, which the original '
+                + 'code never deleted:\n'
                 + '```\nif (prev == nullptr) {\n    Node* victim = curr;\n'
                 + '    head = curr->next;\n    delete victim;\n    return;\n}\n```\n'
                 + 'Press **Tests**: both green. And notice — neither the call site '
-                + 'nor your test changed. References are invisible where they\'re '
-                + 'used; **the signature is the only witness**. That\'s why you read '
-                + 'signatures first.',
+                + 'nor your test changed. Reference syntax appears in the function '
+                + 'signature rather than at each call site.',
             check: {
                 kind: 'all',
                 of: [
@@ -268,7 +259,7 @@ export const linkedListEdgeCases: Lesson = {
         },
         {
             id: 'verify-demo',
-            title: 'The demo, healed',
+            title: 'Run the corrected demo',
             body:
                 'Press **Run**. Removing 7 — the head — now yields '
                 + '`After:  3 -> 12 -> x`.',
@@ -276,9 +267,9 @@ export const linkedListEdgeCases: Lesson = {
         },
         {
             id: 'armor',
-            title: 'Finish the census',
+            title: 'Add the remaining boundary tests',
             body:
-                'Two patients remain untested. Add both:\n'
+                'Two cases remain untested. Add both:\n'
                 + '```\nSTUDENT_TEST("a missing value changes nothing") {\n'
                 + '    Node* list = nullptr;\n'
                 + '    list = pushFront(list, 12);\n'
@@ -289,8 +280,8 @@ export const linkedListEdgeCases: Lesson = {
                 + '    Node* list = nullptr;\n'
                 + '    removeValue(list, 5);\n'
                 + '    EXPECT_EQUALS(length(list), 0);\n}\n```\n'
-                + 'Press **Tests** — four green. The census is fully armed: anyone '
-                + 'who touches `removeValue` after you answers to all five cases.',
+                + 'Press **Tests**. The four tests now cover the middle, head, '
+                + 'missing-value, and empty-list cases.',
             check: { kind: 'tests', minTotal: 4, allPass: true, label: 'Four tests, all passing' },
         },
         {
@@ -298,16 +289,13 @@ export const linkedListEdgeCases: Lesson = {
             title: 'What you just learned',
             body:
                 '- Removal = **rewire the inbound arrow**, then delete the node\n'
-                + '- The **prev/curr walk**: curr hunts, prev trails\n'
-                + '- The **edge-case census**: middle, tail, head, missing, empty — '
-                + 'recite it over any list code\n'
+                + '- The **prev/curr traversal**: curr searches while prev follows\n'
+                + '- Review middle, tail, head, missing, and empty-list cases\n'
                 + '- Pass-by-value\'s final form: a copied **head pointer** makes '
                 + 'head-updates vanish; `Node*&` hands over the real one\n'
-                + '- Tests pin every census case so the next editor can\'t regress '
-                + 'them\n\n'
-                + 'One lesson left: the capstone. The classic interview question, an '
-                + 'AI solution that vaporizes two-thirds of the list, and you — with '
-                + 'a full toolbox.',
+                + '- Tests cover the boundary cases so later changes can be checked\n\n'
+                + 'The final lesson applies these pointer and testing skills to '
+                + 'reversing a linked list.',
             check: { kind: 'manual' },
         },
     ],

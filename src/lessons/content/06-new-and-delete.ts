@@ -35,12 +35,11 @@ int main() {
 export const newAndDelete: Lesson = {
     id: 'new-and-delete',
     slug: 'new-and-delete',
-    title: 'The Heap: new & delete',
-    tagline: 'Python\'s garbage collector retired. Watch an AI program leak four boxes while printing flawless output.',
+    title: 'Heap Allocation',
+    tagline: 'Heap allocation, new, delete, and memory leaks.',
     description:
-        'Stack variables die at their closing brace; heap boxes live until YOU delete them — and Python\'s '
-        + 'garbage collector isn\'t coming. Learn new and delete, then stake out an AI score tracker whose '
-        + 'output is perfect while the memory graph fills with orphaned boxes no test could ever see.',
+        'Learn the difference between stack and heap lifetimes, use new and delete, and inspect a memory '
+        + 'leak that does not affect the program\'s output.',
     minutes: 12,
     tags: ['heap', 'memory graph', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP },
@@ -48,14 +47,14 @@ export const newAndDelete: Lesson = {
     steps: [
         {
             id: 'lifetimes',
-            title: 'Who decides when a box dies?',
+            title: 'Stack and heap lifetimes',
             body:
                 'Every variable you\'ve made so far lives on the **stack**: born at its '
                 + 'declaration, dead at its closing `}`. Automatic, free, and the reason '
                 + 'lesson 3\'s copies vanished when the function returned.\n\n'
                 + 'In Python, objects lived as long as *something referenced them* — a '
                 + '**garbage collector** swept up the rest while you weren\'t looking.\n\n'
-                + 'C++\'s second region, the **heap**, takes the training wheels off:\n'
+                + 'C++ also provides the **heap**, where allocation and cleanup are explicit:\n'
                 + '- **you** allocate a box (`new`)\n'
                 + '- the box ignores every closing brace and **outlives the function '
                 + 'that made it**\n'
@@ -63,7 +62,7 @@ export const newAndDelete: Lesson = {
                 + 'Why want this? Data whose lifetime *shouldn\'t* follow the call stack '
                 + '— like the nodes of a linked list that must survive long after '
                 + '`pushFront` returns. The heap is where next lesson\'s structures '
-                + 'live; today you earn the keys.',
+                + 'live. This lesson introduces that lifetime model.',
             check: { kind: 'manual' },
         },
         {
@@ -72,16 +71,16 @@ export const newAndDelete: Lesson = {
             body:
                 '```\nint* p = new int(42);   // allocate a heap box holding 42; p aims at it\n'
                 + '*p += 1;                // use it like any pointee\ndelete p;               // free the BOX (p itself still exists)\n```\n'
-                + '- `new int(42)` carves out a heap box and hands back its **address** '
+                + '- `new int(42)` allocates a heap box and returns its **address** '
                 + '— which is why pointers had to come first\n'
                 + '- `delete p` frees **the box p points at**, not the pointer variable\n'
                 + '- `delete nullptr` is defined to do nothing — a safe no-op you can '
                 + 'rely on\n'
-                + '- after `delete p`, the arrow **dangles**: following it is undefined '
+                + '- after `delete p`, the pointer **dangles**: following it is undefined '
                 + 'behavior\n\n'
                 + 'The one rule of ownership: **every `new` is matched by exactly one '
-                + '`delete`.** Zero deletes = a leak. Two = corruption. This ledger is '
-                + 'now your job.',
+                + '`delete`.** Zero deletes cause a leak; deleting the same allocation '
+                + 'twice can corrupt memory.',
             check: { kind: 'manual' },
         },
         {
@@ -90,18 +89,18 @@ export const newAndDelete: Lesson = {
             body:
                 'Read `main.cpp` — each round allocates a fresh score box; the AI says '
                 + '"memory stays tidy." Press **Run**.\n\n'
-                + 'Five rounds print, the final score is 500, there\'s even a `delete` '
-                + 'at the end. Output: flawless.',
+                + 'Five rounds print, the final score is 500, and there is a `delete` '
+                + 'at the end. The output alone does not reveal the leak.',
             check: { kind: 'stdout', includes: 'Final score: 500', label: 'Run it — the output is perfect' },
-            successNote: 'Perfect output. Which proves exactly nothing about memory — leaks are invisible in stdout.',
+            successNote: 'The output is correct, but stdout does not show whether memory was released.',
         },
         {
             id: 'stakeout',
-            title: 'Stake out the allocation',
+            title: 'Inspect the allocation',
             body:
                 'Here\'s the problem with leaks: no output shows them, and no '
                 + '`EXPECT_EQUALS` can see them — tests check *answers*, and the answers '
-                + 'are all correct. This is a job for the **memory graph**.\n\n'
+                + 'are all correct. Use the **memory graph** to inspect allocations.\n\n'
                 + 'Set a **breakpoint** on the allocation line:\n'
                 + '```\ncurrent = makeScoreBox(round * 100);\n```\n'
                 + 'press **Debug**, and open the **Graph** tab. First pause, round 1: '
@@ -117,7 +116,7 @@ export const newAndDelete: Lesson = {
         },
         {
             id: 'watch-leak',
-            title: 'Watch the orphans pile up',
+            title: 'Inspect repeated allocations',
             body:
                 'Press **Continue** (`F5`) three times — each lap allocates one box and '
                 + 'returns to your breakpoint. Watch the heap column:\n'
@@ -125,8 +124,9 @@ export const newAndDelete: Lesson = {
                 + '- after lap two: a box holding 200 with the arrow — and the **100 box '
                 + 'still there, with no arrow at all**\n'
                 + '- after lap three: three boxes, two of them unreachable\n\n'
-                + 'Every round re-aims `current` at a new box and **abandons the old '
-                + 'one**. Nothing points at the orphans; nothing can ever delete them.',
+                + 'Every round re-aims `current` at a new box and loses access to the '
+                + 'previous one. Nothing points at those earlier allocations, so the '
+                + 'program can no longer delete them.',
             check: {
                 kind: 'all',
                 of: [
@@ -134,36 +134,36 @@ export const newAndDelete: Lesson = {
                     { kind: 'heap', minAllocations: 3, label: 'See 3+ boxes in the heap column' },
                 ],
             },
-            successNote: 'Boxes with no inbound arrow: in Python, collector food. In C++, a permanent leak.',
+            successNote: 'The boxes with no inbound pointer remain allocated for the rest of the process.',
         },
         {
             id: 'diagnose',
             title: 'The leak, diagnosed',
             body:
-                'An unreachable object in Python gets garbage-collected. The same '
-                + 'object in C++ just... sits there, rent-free, until the process dies. '
-                + 'Five rounds leak four boxes; a server doing this per-request leaks '
-                + 'until it falls over. And remember — the program\'s *answers* were '
-                + 'perfect. Leaks don\'t fail tests; they fail 3 a.m. pager duty.\n\n'
+                'An unreachable object in Python can be garbage-collected. The same '
+                + 'object in this C++ program remains allocated until the process exits. '
+                + 'Five rounds leak four boxes. In a long-running program, repeated '
+                + 'leaks can eventually exhaust available memory. The program\'s '
+                + 'output can still be correct while this happens.\n\n'
                 + 'The AI did write a `delete` — one, at the end, for the final box. '
-                + 'The ledger says: five `new`s, one `delete`. Four unpaid debts.\n\n'
+                + 'There are five `new` calls and one `delete`, leaving four allocations unreleased.\n\n'
                 + 'The fix follows the rule: before re-aiming `current` at a new box, '
                 + '**delete the one it\'s holding**.',
             check: { kind: 'manual' },
         },
         {
             id: 'fix',
-            title: 'Pay the debt before taking a new box',
+            title: 'Delete the previous allocation',
             body:
                 'Add one line *inside the loop*, just **before** the allocation:\n'
                 + '```\ndelete current;\ncurrent = makeScoreBox(round * 100);\n```\n'
                 + 'Round 1 deletes `nullptr` — which you now know is a safe no-op '
                 + '(that\'s why `current` starts as `nullptr` rather than garbage). '
-                + 'Every later round frees the previous box first. Five news, five '
-                + 'deletes: ledger balanced.',
+                + 'Every later round frees the previous box first. The five '
+                + 'allocations now have five matching deletes.',
             check: { kind: 'code', matches: 'delete current;[\\s\\S]*delete current;', label: 'Delete the old box inside the loop (keep the final delete too)' },
             hint: 'The new delete goes inside the for-loop, before makeScoreBox. The original delete after the loop stays — it frees the LAST box.',
-            successNote: 'Every new now has its delete. The ledger balances.',
+            successNote: 'Each allocation now has one matching delete.',
         },
         {
             id: 'verify',
@@ -171,29 +171,27 @@ export const newAndDelete: Lesson = {
             body:
                 'Prove it: press **Debug** again (the breakpoint is still there) and '
                 + '**Continue** through a few rounds watching the heap column.\n\n'
-                + 'Now it\'s one box at a time — the old one vanishes the instant the '
-                + 'debt is paid, then the new one appears. Let it run to the end: the '
+                + 'Now it\'s one box at a time — the old one is released before the '
+                + 'new one appears. Let it run to the end: the '
                 + 'output is *identical* to the leaky version. Only the graph knows the '
-                + 'difference — remember that next time output "proves" a program '
-                + 'correct.',
+                + 'difference, which is why output is not enough to verify memory management.',
             check: { kind: 'stdout', includes: 'Final score: 500', label: 'Run to the end — same output, tidy memory' },
             hint: 'Continue (F5) until the program exits, or remove the breakpoint and Run.',
         },
         {
             id: 'dangling',
-            title: 'The opposite sin: deleting too soon',
+            title: 'Deleting too soon',
             body:
-                'Leaks are forgetting to delete. The mirror-image bug is deleting **too '
+                'A leak comes from failing to delete an allocation. Another bug is deleting **too '
                 + 'early** and using the box anyway:\n'
                 + '```\ndelete current;\nstd::cout << *current;   // dangling: the box is gone\n```\n'
                 + 'That might print garbage, might print the old value, might crash — '
-                + 'undefined behavior, the worst kind of bug *because* it\'s '
-                + 'inconsistent.\n\n'
-                + 'The discipline that prevents both sins is the same ledger: every box '
+                + 'undefined behavior, so results can vary between runs.\n\n'
+                + 'The ownership rule prevents both problems: every box '
                 + 'has exactly one owner, the owner deletes it exactly once, and nobody '
-                + 'touches it after. (Grown-up C++ automates this ledger with '
-                + 'destructors and smart pointers — `std::vector` was secretly doing '
-                + 'heap bookkeeping for you all along. Appreciate it now?)',
+                + 'touches it after. Modern C++ commonly automates ownership with '
+                + 'destructors and smart pointers. `std::vector` also manages its own '
+                + 'heap storage.',
             check: { kind: 'manual' },
         },
         {
@@ -204,12 +202,12 @@ export const newAndDelete: Lesson = {
                 + 'garbage collector\n'
                 + '- `new int(42)` returns an address; `delete p` frees the box; '
                 + '`delete nullptr` is safely nothing\n'
-                + '- **Every new: exactly one delete** — the ownership ledger\n'
+                + '- **Every new: exactly one delete** — the ownership rule\n'
                 + '- Leaks are invisible to output *and* to tests; the **memory graph** '
                 + 'is your leak detector\n'
-                + '- Dangling pointers are the mirror-image sin\n\n'
-                + 'You now hold every ingredient of a linked list: structs are next, '
-                + 'then the chain itself.',
+                + '- Using a pointer after deletion is undefined behavior\n\n'
+                + 'The next lesson introduces structs, which will later be combined '
+                + 'with pointers and heap allocation to build a linked list.',
             check: { kind: 'manual' },
         },
     ],

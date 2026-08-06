@@ -1,12 +1,8 @@
-// /learn — landing page for the guided lesson series. No account required;
-// progress lives in localStorage. Cross-section links (sign-in, IDE) are
-// hard <a> navigations so each document loads with the headers its route
-// needs (the login route must NOT be cross-origin isolated; everything
-// else must be).
+// /learn — lesson index. No account is required; progress lives in
+// localStorage. Cross-section links are hard navigations so each document
+// loads with the security headers its route needs.
 
 import { Link } from 'react-router-dom'
-import { Badge } from '@/components/ui/badge'
-import { Codicon } from '@/components/ui/codicon'
 import { useAuth } from '@/shared/context/auth-context'
 import { LESSONS } from './content'
 import { useLessonProgress } from './progress-store'
@@ -15,125 +11,105 @@ export default function LessonsHome() {
     const { user, configured } = useAuth()
     const byLesson = useLessonProgress((s) => s.byLesson)
 
-    const completedCount = LESSONS.filter((l) => byLesson[l.id]?.completedAt).length
-    const anyProgress = LESSONS.some((l) => (byLesson[l.id]?.completedSteps.length ?? 0) > 0)
-    const resume = LESSONS.find((l) => !byLesson[l.id]?.completedAt) ?? LESSONS[0]
+    const completedCount = LESSONS.filter((lesson) => byLesson[lesson.id]?.completedAt).length
+    const anyProgress = LESSONS.some(
+        (lesson) => (byLesson[lesson.id]?.completedSteps.length ?? 0) > 0,
+    )
+    const resume = LESSONS.find((lesson) => !byLesson[lesson.id]?.completedAt) ?? LESSONS[0]
 
     return (
-        <div className="h-full bg-background text-foreground overflow-y-auto">
-            {/* Top bar */}
-            <header className="border-b border-border bg-[var(--color-chrome)]">
-                <div className="max-w-5xl mx-auto px-6 h-12 flex items-center gap-3">
-                    <span className="text-sm font-semibold tracking-tight select-none">
-                        Web IDE Lessons
-                    </span>
-                    <div className="ml-auto flex items-center gap-4 text-xs">
-                        <a href="/ide" className="text-muted-foreground hover:text-foreground flex items-center gap-1">
-                            <Codicon name="code" size={13} /> Standalone IDE
+        <div className="h-full overflow-y-auto bg-background text-foreground">
+            <header className="border-b border-border">
+                <div className="mx-auto flex min-h-14 max-w-3xl items-center gap-4 px-6 py-3">
+                    <a href="/" className="text-sm font-semibold tracking-tight">
+                        Lessons
+                    </a>
+                    <nav className="ml-auto flex items-center gap-4 text-sm" aria-label="Lesson navigation">
+                        <a href="/ide" className="text-muted-foreground hover:text-foreground">
+                            Editor
                         </a>
                         {configured && (
                             user
                                 ? <a href="/dashboard" className="text-muted-foreground hover:text-foreground">Dashboard</a>
                                 : <a href="/login" className="text-muted-foreground hover:text-foreground">Sign in</a>
                         )}
-                    </div>
+                    </nav>
                 </div>
             </header>
 
-            {/* Hero */}
-            <div className="max-w-5xl mx-auto px-6 pt-12 pb-8">
-                <h1 className="text-3xl font-bold tracking-tight">From Python to C++ — for real</h1>
-                <p className="mt-3 text-[15px] text-muted-foreground max-w-2xl leading-relaxed">
-                    Ten hands-on lessons that take you from CS1 Python to C++ and linked lists,
-                    inside a real debugger that runs entirely in your browser. Every lesson teaches
-                    new language ground, then puts it to work on the skill this decade demands:{' '}
-                    <span className="text-foreground font-medium">debugging code an AI wrote for you</span> —
-                    with unit tests, breakpoints, and a live picture of memory.
-                </p>
-                <p className="mt-2 text-[13px] text-muted-foreground">
-                    No install, no account. Each step checks itself off as you do the real thing.
-                </p>
-                <div className="mt-5 flex items-center gap-4">
-                    <Link
-                        to={`/learn/${resume.slug}`}
-                        className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-primary text-primary-foreground text-[13px] font-medium hover:bg-primary/90 transition-colors"
-                    >
-                        {anyProgress ? 'Continue learning' : 'Start lesson 1'}
-                        <Codicon name="arrow-right" size={13} />
-                    </Link>
-                    {completedCount > 0 && (
-                        <span className="text-[12px] text-muted-foreground">
-                            {completedCount} of {LESSONS.length} lessons completed
-                        </span>
-                    )}
-                </div>
-            </div>
-
-            {/* Lesson cards */}
-            <div className="max-w-5xl mx-auto px-6 pb-10 grid gap-4 sm:grid-cols-2">
-                {LESSONS.map((lesson, i) => {
-                    const p = byLesson[lesson.id]
-                    const done = !!p?.completedAt
-                    const started = !done && (p?.completedSteps.length ?? 0) > 0
-                    const stepCount = lesson.steps.length
-                    const doneCount = p?.completedSteps.length ?? 0
-                    return (
-                        <Link
-                            key={lesson.id}
-                            to={`/learn/${lesson.slug}`}
-                            className="group rounded-lg border border-border bg-[var(--color-chrome)] p-5 hover:border-primary transition-colors flex flex-col"
-                        >
-                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                <span className="font-mono">Lesson {i + 1}</span>
-                                <span>·</span>
-                                <span>{lesson.minutes} min</span>
-                                {done && (
-                                    <span className="ml-auto flex items-center gap-1 text-emerald-500 font-medium">
-                                        <Codicon name="pass-filled" size={12} /> Completed
-                                    </span>
-                                )}
-                                {started && (
-                                    <span className="ml-auto text-primary font-medium">
-                                        {doneCount}/{stepCount} steps
-                                    </span>
-                                )}
-                            </div>
-                            <h2 className="mt-1.5 text-[16px] font-semibold group-hover:text-primary transition-colors">
-                                {lesson.title}
-                            </h2>
-                            <p className="mt-1 text-[13px] text-muted-foreground leading-relaxed flex-1">
-                                {lesson.tagline}
-                            </p>
-                            <div className="mt-3 flex flex-wrap gap-1.5">
-                                {lesson.tags.map((t) => (
-                                    <Badge
-                                        key={t}
-                                        variant={t === 'AI-generated code' ? 'default' : 'secondary'}
-                                        className="text-[10px]"
-                                    >
-                                        {t}
-                                    </Badge>
-                                ))}
-                            </div>
-                            <div className="mt-4 text-[12px] font-medium text-primary flex items-center gap-1">
-                                {done ? 'Review lesson' : started ? 'Continue' : 'Start lesson'}
-                                <Codicon name="arrow-right" size={12} className="transition-transform group-hover:translate-x-0.5" />
-                            </div>
-                        </Link>
-                    )
-                })}
-            </div>
-
-            {/* Footer */}
-            <footer className="border-t border-border">
-                <div className="max-w-5xl mx-auto px-6 py-6 text-[12px] text-muted-foreground leading-relaxed">
-                    <p>
-                        These lessons are hosted by this application and use Web IDE through its
-                        public host API. The reusable editor, runtime, and panels can also be
-                        embedded in other applications.
+            <main className="mx-auto max-w-3xl px-6 py-10 sm:py-12">
+                <section aria-labelledby="lessons-title">
+                    <h1 id="lessons-title" className="text-2xl font-semibold tracking-tight">
+                        C++ lessons for Python students
+                    </h1>
+                    <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+                        Ten lessons cover C++ syntax, types, functions, vectors, pointers,
+                        memory, structs, and linked lists. Each lesson includes a short
+                        exercise using the editor, debugger, or tests.
                     </p>
-                </div>
-            </footer>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                        No account is required. Progress is stored in this browser.
+                    </p>
+                    <div className="mt-5 flex flex-wrap items-center gap-4">
+                        <Link
+                            to={`/learn/${resume.slug}`}
+                            className="inline-flex h-9 items-center rounded-md border border-border px-4 text-sm font-medium hover:bg-muted"
+                        >
+                            {anyProgress ? 'Continue' : 'Start with lesson 1'}
+                        </Link>
+                        {completedCount > 0 && (
+                            <span className="text-sm text-muted-foreground">
+                                {completedCount} of {LESSONS.length} completed
+                            </span>
+                        )}
+                    </div>
+                </section>
+
+                <section className="mt-10" aria-labelledby="lesson-list-title">
+                    <h2 id="lesson-list-title" className="text-sm font-semibold">
+                        Lesson list
+                    </h2>
+                    <ol className="mt-3 divide-y divide-border border-y border-border">
+                        {LESSONS.map((lesson, index) => {
+                            const progress = byLesson[lesson.id]
+                            const done = Boolean(progress?.completedAt)
+                            const doneCount = progress?.completedSteps.length ?? 0
+                            const started = !done && doneCount > 0
+
+                            return (
+                                <li key={lesson.id}>
+                                    <Link
+                                        to={`/learn/${lesson.slug}`}
+                                        className="group block py-5"
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="text-xs text-muted-foreground">
+                                                Lesson {index + 1} · {lesson.minutes} min
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                                {done
+                                                    ? 'Completed'
+                                                    : started
+                                                        ? `${doneCount}/${lesson.steps.length} steps`
+                                                        : 'Not started'}
+                                            </div>
+                                        </div>
+                                        <h3 className="mt-1 text-base font-semibold group-hover:underline">
+                                            {lesson.title}
+                                        </h3>
+                                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                                            {lesson.tagline}
+                                        </p>
+                                        <p className="mt-2 text-xs text-muted-foreground">
+                                            Topics: {lesson.tags.join(', ')}
+                                        </p>
+                                    </Link>
+                                </li>
+                            )
+                        })}
+                    </ol>
+                </section>
+            </main>
         </div>
     )
 }

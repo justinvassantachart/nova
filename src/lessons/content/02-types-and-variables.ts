@@ -40,12 +40,11 @@ int main() {
 export const typesAndVariables: Lesson = {
     id: 'types-and-variables',
     slug: 'types-and-variables',
-    title: 'Types & Variables',
-    tagline: 'In Python the value had a type. In C++ the variable does — and division reads the types, not your mind.',
+    title: 'Types and Variables',
+    tagline: 'C++ variable types and the behavior of integer division.',
     description:
-        'C++ makes you declare what every variable holds, and in exchange the compiler guards your code '
-        + 'like a bouncer. Learn the core types, then debug an AI pizza planner whose flawless-looking '
-        + 'division quietly starves a party — because integers don\'t do fractions.',
+        'Learn how C++ variable declarations work, review common types, and correct a pizza calculation '
+        + 'that uses integer division instead of rounding up.',
     minutes: 12,
     tags: ['C++ basics', 'types', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP },
@@ -53,72 +52,68 @@ export const typesAndVariables: Lesson = {
     steps: [
         {
             id: 'type-on-the-variable',
-            title: 'Where the type lives',
+            title: 'Declare a variable type',
             body:
                 'In Python this is legal:\n'
                 + '```\nx = 7\nx = "seven"\n```\n'
                 + 'The *value* has a type; the name `x` will point at anything. C++ moves '
                 + 'the type onto the **variable itself**:\n'
                 + '```\nint x = 7;\n```\n'
-                + 'Read it as: "`x` is a box shaped for an `int`, starting at 7." The box '
-                + 'keeps that shape forever — `x = "seven"` won\'t compile.\n\n'
-                + 'What you get for the ceremony: the compiler checks every single use of '
-                + '`x` before the program runs, and the program never wastes time asking '
-                + '"what type is this?" while running. Declare once, checked everywhere.',
+                + 'This declares `x` as an `int` and gives it the initial value 7. Its type '
+                + 'does not change, so `x = "seven"` will not compile.\n\n'
+                + 'The compiler checks each use of `x` against its declared type before the '
+                + 'program runs.',
             check: { kind: 'manual' },
         },
         {
             id: 'type-table',
-            title: 'The starter set of types',
+            title: 'Common C++ types',
             body:
-                'Five types cover most beginner C++:\n'
+                'These five types are common in introductory C++:\n'
                 + '- `int` — whole numbers: `int guests = 7;`\n'
                 + '- `double` — decimal numbers: `double price = 4.50;`\n'
                 + '- `bool` — `true` / `false` (lowercase, unlike Python!)\n'
                 + '- `char` — one character, in **single** quotes: `char grade = \'A\';`\n'
                 + '- `std::string` — text, in **double** quotes: '
                 + '`std::string name = "Ada";` (needs `#include <string>`)\n\n'
-                + 'Mind the literals — these are four *different* things to C++: `3` '
-                + '(int), `3.0` (double), `\'3\'` (char), `"3"` (string). Python blurred '
-                + 'those lines; C++ never does.',
+                + 'These are four different values and types in C++: `3` (int), `3.0` '
+                + '(double), `\'3\'` (char), and `"3"` (string).',
             check: { kind: 'manual' },
         },
         {
             id: 'guardrail',
-            title: 'Feel the guardrail',
+            title: 'Cause a type error',
             body:
-                'Prove the compiler is watching. Add this line right after the `guests` '
+                'Add this line right after the `guests` '
                 + 'declaration:\n'
                 + '```\nguests = "seven";\n```\n'
-                + 'Press **Run** and read the error: it refuses to put a string into an '
-                + '`int`-shaped box. Python would have happily rebound the name and let '
-                + 'the crash happen later, somewhere far from the mistake.\n\n'
+                + 'Press **Run** and read the error. A string cannot be assigned to a '
+                + 'variable declared as `int`.\n\n'
                 + 'Now **delete the line** — you\'ll need a working program in a moment.',
             check: { kind: 'event', event: 'compile_error', label: 'Try assigning "seven" to an int — read the error' },
             hint: 'Add the line, Run, read the message, then remove the line again.',
-            successNote: 'The compiler caught it at the exact line of the mistake — before the program existed.',
+            successNote: 'The compiler reports the type mismatch before running the program.',
         },
         {
             id: 'run',
             title: 'Run the pizza planner',
             body:
-                'Remove your experiment (if you haven\'t), then **Run** the AI\'s party '
-                + 'planner and read the terminal.\n\n'
-                + '7 guests × 3 slices = 21 slices needed. The AI promised "the math '
-                + 'guarantees nobody goes hungry."',
+                'Remove the invalid assignment if it is still present, then **Run** the '
+                + 'pizza planner and read the terminal.\n\n'
+                + '7 guests × 3 slices = 21 slices needed.',
             check: { kind: 'stdout', includes: 'somebody goes hungry', label: 'Run it — somebody goes hungry' },
-            successNote: 'The math "guaranteed" it. The terminal disagrees.',
+            successNote: 'The program orders only two pizzas, which provide 16 slices.',
         },
         {
             id: 'read-output',
-            title: 'Numbers don\'t lie',
+            title: 'Inspect the result',
             body:
                 'The output: 21 slices needed, but **2 pizzas** ordered — that\'s 16 '
                 + 'slices. Five slices short.\n\n'
                 + '21 ÷ 8 = 2.625, and you can\'t order 0.625 of a pizza, so the right '
-                + 'order is **3**. Somewhere, 2.625 became 2. The suspect line:\n'
+                + 'order is **3**. The value 2.625 became 2 on this line:\n'
                 + '```\nint pizzasToOrder = slicesNeeded / slicesPerPizza;\n```\n'
-                + 'Let\'s catch it in the act instead of theorizing.',
+                + 'The next steps use the debugger to inspect this calculation.',
             check: { kind: 'manual' },
         },
         {
@@ -128,8 +123,8 @@ export const typesAndVariables: Lesson = {
                 'Set a **breakpoint** on the division line (click left of its line '
                 + 'number), then press **Debug**.\n\n'
                 + 'The program freezes with the division *about to happen*. Check the '
-                + 'Variables panel: `slicesNeeded` is 21, `slicesPerPizza` is 8 — the '
-                + 'inputs are perfect. Whatever goes wrong, goes wrong on this line.',
+                + 'Variables panel: `slicesNeeded` is 21 and `slicesPerPizza` is 8. The '
+                + 'inputs have the expected values.',
             check: {
                 kind: 'all',
                 of: [
@@ -141,11 +136,11 @@ export const typesAndVariables: Lesson = {
         },
         {
             id: 'step-over',
-            title: 'Watch 2.625 become 2',
+            title: 'Observe integer division',
             body:
                 'Press **Step Over** (`F10`) once and watch `pizzasToOrder` get its '
                 + 'value.\n\n'
-                + '21 ÷ 8 = 2.625... so what landed in the box?',
+                + 'Although 21 ÷ 8 is 2.625, `pizzasToOrder` receives an integer value.',
             check: {
                 kind: 'all',
                 of: [
@@ -153,11 +148,11 @@ export const typesAndVariables: Lesson = {
                     { kind: 'variable', name: 'pizzasToOrder', equals: '2', label: 'See pizzasToOrder become 2' },
                 ],
             },
-            successNote: '2, not 2.625 — and not even 3. The fraction was thrown away, not rounded.',
+            successNote: 'The fractional part is discarded, so the result is 2.',
         },
         {
             id: 'diagnose',
-            title: 'Integer division: the rule',
+            title: 'Integer division',
             body:
                 'When **both** sides of `/` are `int`s, C++ does *integer division*: it '
                 + 'keeps the whole part and **discards the remainder**. `21 / 8` is `2`. '
@@ -165,21 +160,19 @@ export const typesAndVariables: Lesson = {
                 + 'In Python terms: C++\'s `/` on two ints behaves like Python\'s `//`. '
                 + 'Python\'s true-division (`21 / 8 == 2.625`) only happens in C++ when at '
                 + 'least one side is a `double` — `21.0 / 8` is `2.625`.\n\n'
-                + 'Notice what decided the behavior: **the types of the operands**, not '
-                + 'the values, not the variable receiving the result. Types aren\'t '
-                + 'paperwork; they choose what the math *means*.',
+                + 'The types of the operands determine this behavior, not the type of '
+                + 'the variable that receives the result.',
             check: { kind: 'manual' },
         },
         {
             id: 'fix',
-            title: 'Fix it — order enough pizza',
+            title: 'Round up the pizza count',
             body:
-                'We don\'t want 2.625 pizzas; we want to **round up**. The classic '
-                + 'integer trick — add "one pizza\'s worth minus one slice" before '
+                'The number of pizzas must **round up**. Add one less than the divisor before '
                 + 'dividing:\n'
                 + '```\nint pizzasToOrder =\n    (slicesNeeded + slicesPerPizza - 1) / slicesPerPizza;\n```\n'
                 + '`(21 + 7) / 8 = 3`. Exact multiples stay exact: `(24 + 7) / 8 = 3`.\n\n'
-                + 'Apply the fix (that one, or your own), keep the party at 7 guests, and '
+                + 'Apply the fix, keep the value at 7 guests, and '
                 + '**Run**.',
             check: {
                 kind: 'all',
@@ -188,18 +181,16 @@ export const typesAndVariables: Lesson = {
                     { kind: 'stdout', includes: 'Everyone is fed!', label: 'Run it: everyone is fed' },
                 ],
             },
-            hint: 'Feed everyone by fixing the division, not by shrinking the party. Stop the debugger first if it is still paused.',
-            successNote: 'Three pizzas. Everyone is fed. 🍕',
+            hint: 'Fix the division without changing the number of guests. Stop the debugger first if it is still paused.',
+            successNote: 'The program now orders three pizzas.',
         },
         {
             id: 'predict',
-            title: 'Predict, then verify',
+            title: 'Test an exact multiple',
             body:
-                'A quick scientist\'s rep: with your fix in place, set `guests = 8;` — '
+                'With your fix in place, set `guests = 8;` — '
                 + 'that\'s 24 slices, exactly 3 pizzas, zero leftover.\n\n'
-                + '**Predict the two output lines first**, then Run and check yourself. '
-                + 'This habit — predict, run, compare — is debugging\'s beating heart, '
-                + 'and you\'ll use it in every lesson from here on.',
+                + 'Predict the output, then run the program and compare the result.',
             check: {
                 kind: 'all',
                 of: [
@@ -207,7 +198,7 @@ export const typesAndVariables: Lesson = {
                     { kind: 'stdout', includes: 'Everyone is fed!', label: 'Exactly 3 pizzas still feeds everyone' },
                 ],
             },
-            successNote: 'Prediction confirmed. (24 + 7) / 8 = 3 — the ceiling trick doesn\'t over-order.',
+            successNote: 'For 24 slices, the calculation still orders exactly three pizzas.',
         },
         {
             id: 'recap',
@@ -221,8 +212,7 @@ export const typesAndVariables: Lesson = {
                 + 'sides are whole\n'
                 + '- The ceiling trick: `(a + b - 1) / b`\n'
                 + '- Predict → run → compare\n\n'
-                + 'Next: functions — where C++ quietly *copies* your arguments, and an AI '
-                + 'swap function that swears it swapped.',
+                + 'The next lesson covers function arguments, copies, and references.',
             check: { kind: 'manual' },
         },
     ],

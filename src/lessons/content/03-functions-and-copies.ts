@@ -51,12 +51,11 @@ STUDENT_TEST("swapScores really swaps") {
 export const functionsAndCopies: Lesson = {
     id: 'functions-and-copies',
     slug: 'functions-and-copies',
-    title: 'Functions & the Copy Machine',
-    tagline: 'C++ copies your arguments. An AI swap function, a demo that lied, and your first unit test.',
+    title: 'Functions and References',
+    tagline: 'Function arguments, pass-by-value, references, and unit tests.',
     description:
-        'Function signatures in C++ carry types — and a secret: every argument is a copy. An AI-written '
-        + 'swap function "passes" its demo without ever running, a two-line test exposes it, and the call '
-        + 'stack shows you the copies with your own eyes. Fix it with references and prove it with tests.',
+        'Learn how C++ function signatures declare types, how pass-by-value copies arguments, and how '
+        + 'references allow a function to modify caller variables. Use a unit test and debugger to verify a swap function.',
     minutes: 15,
     tags: ['functions', 'references', 'testing', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP },
@@ -64,7 +63,7 @@ export const functionsAndCopies: Lesson = {
     steps: [
         {
             id: 'signatures',
-            title: 'Signatures: def, with types',
+            title: 'C++ function signatures',
             body:
                 'A Python function:\n'
                 + '```\ndef area(w, h):\n    return w * h\n```\n'
@@ -77,39 +76,35 @@ export const functionsAndCopies: Lesson = {
                 + '- and one rule Python didn\'t have: a function must be **declared '
                 + 'before the line that calls it** — the compiler reads top to bottom\n\n'
                 + 'The first line — `double area(double w, double h)` — is the '
-                + '**signature**: the function\'s public contract. Learn to read '
-                + 'signatures the way you read a title before a book; this lesson turns '
-                + 'on one.',
+                + '**signature**. It states the function name, parameter types, and return type.',
             check: { kind: 'manual' },
         },
         {
             id: 'run-demo',
-            title: 'Run the AI\'s demo',
+            title: 'Run the example program',
             body:
                 'Read `swapScores` and `main`, then press **Run**.\n\n'
-                + 'The standings print bigger-score-first, exactly as ordered. The AI '
-                + '"traced through the demo" and the demo agrees. Would you ship it?',
+                + 'The standings print the larger score first, which is the expected output.',
             check: { kind: 'stdout', includes: '1st place: 2750', label: 'Run it — the standings look right' },
-            successNote: 'Looks perfect. Keep that feeling — it\'s about to be instructive.',
+            successNote: 'The example output is correct, but the swap function has not been tested yet.',
         },
         {
             id: 'demo-lied',
-            title: 'The demo never ran the code',
+            title: 'Check whether the function ran',
             body:
                 'Look again at main:\n'
                 + '```\nif (alice < bruno) {\n    swapScores(alice, bruno);\n}\n```\n'
                 + 'Alice has 2750, Bruno has 1200 — the condition is **false**. '
                 + '`swapScores` was *never called*. The output is right because the '
                 + 'inputs happened to start in the right order.\n\n'
-                + 'This is the oldest trap in code review, and AI code walks you into it '
-                + 'constantly: **a passing demo only proves the demo.** To check the '
+                + 'The example does not exercise the function. To check the '
                 + 'function, you have to call the function and verify what it did — '
                 + 'mechanically, repeatably. That\'s a **unit test**.',
             check: { kind: 'manual' },
         },
         {
             id: 'meet-tests',
-            title: 'Meet your test framework',
+            title: 'Read the unit test',
             body:
                 'Scroll to the bottom of `main.cpp`:\n'
                 + '```\nSTUDENT_TEST("swapScores really swaps") {\n'
@@ -118,10 +113,9 @@ export const functionsAndCopies: Lesson = {
                 + '- `STUDENT_TEST("name") { ... }` declares a test\n'
                 + '- `EXPECT_EQUALS(actual, expected)` checks one fact and records '
                 + 'pass/fail\n\n'
-                + 'The **Tests** button (the beaker) sets `main()` aside and runs every '
-                + 'test instead, reporting results in the Tests panel. No eyeballing, no '
-                + '"looks right" — the test calls `swapScores(3, 9)` and *demands* x '
-                + 'becomes 9.',
+                + 'The **Tests** button runs every '
+                + 'test instead, reporting results in the Tests panel. The test calls `swapScores(3, 9)` '
+                + 'and checks that `x` becomes 9.',
             check: { kind: 'manual' },
         },
         {
@@ -129,14 +123,13 @@ export const functionsAndCopies: Lesson = {
             title: 'Run the test',
             body: 'Click **Tests** (the beaker) and watch the Tests panel.',
             check: { kind: 'tests', minTotal: 1, minFailed: 1, label: 'Run the tests — the swap test fails' },
-            successNote: 'Expected 9, actual 3. The function did nothing. The demo said nothing. The test talked.',
+            successNote: 'Expected 9, actual 3. The function did not modify the caller\'s variable.',
         },
         {
             id: 'reproduce',
-            title: 'Make main reproduce it',
+            title: 'Reproduce the bug in main',
             body:
-                'Time for the debugger. First, make `main` actually exercise the bug — '
-                + 'the smallest reproduction you can build. Swap the starting scores so '
+                'Make `main` exercise the bug. Swap the starting scores so '
                 + 'the `if` fires:\n'
                 + '```\nint alice = 1200;\n```\n'
                 + 'and give Bruno the 2750. Then set a **breakpoint** on the first line '
@@ -153,27 +146,26 @@ export const functionsAndCopies: Lesson = {
         },
         {
             id: 'two-frames',
-            title: 'Two frames, four boxes',
+            title: 'Inspect the stack frames',
             body:
                 'Press **Debug**. You pause *inside* `swapScores`.\n\n'
-                + 'Look at the Variables panel: there are **two stack frames** — `main` '
+                + 'Look at the Variables panel. There are **two stack frames** — `main` '
                 + 'at the bottom with `alice` and `bruno`, and `swapScores` on top with '
-                + '`a`, `b`, and `temp`. Each function call gets its own frame: a private '
-                + 'workspace of boxes that lives until the function returns.\n\n'
-                + 'And here\'s the headline: `a` holds 1200 and `b` holds 2750 — **copies** '
-                + 'of alice and bruno. Four separate boxes. C++ photocopied your '
-                + 'arguments at the call.',
+                + '`a`, `b`, and `temp`. Each function call gets its own frame containing '
+                + 'its local variables until the function returns.\n\n'
+                + '`a` holds 1200 and `b` holds 2750. They are **copies** of `alice` and '
+                + '`bruno`, so there are four separate variables.',
             check: { kind: 'paused', func: 'swapScores', label: 'Debug until you pause inside swapScores()' },
             hint: 'If the program ran to the end, check the breakpoint dot is still on "int temp = a;" and press Debug again.',
         },
         {
             id: 'watch-copies',
-            title: 'Watch the copies swap',
+            title: 'Step through the copies',
             body:
                 'Press **Step Over** (`F10`) twice and watch the swap work *perfectly* — '
                 + 'on the copies: `temp` takes 1200, `a` takes 2750...\n\n'
-                + 'The algorithm is flawless. Keep one eye on `main`\'s frame below: '
-                + '`alice` and `bruno` haven\'t moved.',
+                + 'The swap works on `a` and `b`. In `main`\'s frame below, `alice` and '
+                + '`bruno` remain unchanged.',
             check: {
                 kind: 'all',
                 of: [
@@ -184,13 +176,12 @@ export const functionsAndCopies: Lesson = {
         },
         {
             id: 'step-out',
-            title: 'Return to the scene',
+            title: 'Return to main',
             body:
                 'Press **Step Out** (`⇧F11`) to finish `swapScores` and land back in '
                 + '`main`.\n\n'
-                + 'The `swapScores` frame is **gone** — and its boxes (`a`, `b`, `temp`) '
-                + 'died with it. All that beautiful swapping evaporated. `alice` is still '
-                + '1200, `bruno` still 2750.',
+                + 'The `swapScores` frame is gone, along with its local variables `a`, `b`, '
+                + 'and `temp`. `alice` is still 1200 and `bruno` is still 2750.',
             check: {
                 kind: 'all',
                 of: [
@@ -198,28 +189,28 @@ export const functionsAndCopies: Lesson = {
                     { kind: 'variable', name: 'alice', equals: '1200', label: 'alice is unchanged in main\'s frame' },
                 ],
             },
-            successNote: 'The function swapped its own copies, then threw them away. Nothing reached main.',
+            successNote: 'The function changed only its local copies, not the variables in main.',
         },
         {
             id: 'why',
-            title: 'Pass-by-value — and the Python you forgot',
+            title: 'Pass by value and references',
             body:
                 'C++ passes arguments **by value**: the parameter is a fresh copy, and '
                 + 'assigning to it never touches the caller\'s variable.\n\n'
-                + 'Surprise: Python does this too. `def swap(a, b): a, b = b, a` is the '
-                + 'same disappointment — rebinding a parameter never affects the caller. '
-                + 'Python only *felt* different because mutating a list or dict changed '
+                + 'Python also passes references to objects by value. In '
+                + '`def swap(a, b): a, b = b, a`, rebinding a parameter does not affect '
+                + 'the caller. Mutating a list or dict can appear different because it changes '
                 + 'the one shared object. C++ just makes the choice explicit and puts it '
                 + 'in the signature:\n'
                 + '- `int a` — give me a **copy**\n'
                 + '- `int& a` — give me **the caller\'s actual box, under a new name**\n\n'
-                + 'That `&` is a **reference**. With `int& a`, the line `a = b;` writes '
-                + 'straight into the caller\'s variable.',
+                + 'That `&` declares a **reference**. With `int& a`, the line `a = b;` '
+                + 'modifies the caller\'s variable.',
             check: { kind: 'manual' },
         },
         {
             id: 'fix',
-            title: 'Fix the signature, trust the test',
+            title: 'Pass arguments by reference',
             body:
                 'Change the signature to take references:\n'
                 + '```\nvoid swapScores(int& a, int& b) {\n```\n'
@@ -232,28 +223,26 @@ export const functionsAndCopies: Lesson = {
                     { kind: 'tests', minTotal: 1, allPass: true, label: 'Re-run Tests: green' },
                 ],
             },
-            successNote: 'Same call site, same body — one & changed the contract, and the test proves it.',
+            successNote: 'The reference parameters allow the function to modify the caller\'s variables.',
         },
         {
             id: 'ship-it',
-            title: 'Now the standings earn their order',
+            title: 'Verify the program',
             body:
                 'Press **Run**. With alice = 1200 and bruno = 2750, the `if` fires, the '
-                + 'swap *actually works*, and Bruno\'s 2750 prints first — the right '
-                + 'output for the right reason this time.',
+                + 'swap runs, and Bruno\'s 2750 prints first.',
             check: { kind: 'stdout', includes: '1st place: 2750', label: 'Run it — 2750 leads via a real swap' },
         },
         {
             id: 'your-test',
-            title: 'Extend the suite',
+            title: 'Add another test',
             body:
                 'One test guards one fact. Add a second `STUDENT_TEST` at the bottom — '
                 + 'say, swapping equal values:\n'
                 + '```\nSTUDENT_TEST("swapping equal values changes nothing") {\n'
                 + '    int p = 5;\n    int q = 5;\n    swapScores(p, q);\n'
                 + '    EXPECT_EQUALS(p, 5);\n    EXPECT_EQUALS(q, 5);\n}\n```\n'
-                + 'Run **Tests** — both green. Every test you add is a tripwire that '
-                + 'outlives today.',
+                + 'Run **Tests** and confirm both tests pass.',
             check: { kind: 'tests', minTotal: 2, allPass: true, label: 'Two tests, all passing' },
             hint: 'Paste the test after the first one, then click Tests again.',
         },
@@ -263,13 +252,11 @@ export const functionsAndCopies: Lesson = {
             body:
                 '- **Signatures**: return type + typed parameters = the contract\n'
                 + '- **Stack frames**: every call gets private boxes that die at return\n'
-                + '- **Pass-by-value**: arguments are copies — in C++ *and*, secretly, in '
-                + 'Python\n'
+                + '- **Pass-by-value**: arguments are copies in C++, and Python also passes '
+                + 'object references by value\n'
                 + '- **References** (`int&`): hand a function the real box\n'
-                + '- **Demos prove nothing; tests prove the fact they check**\n\n'
-                + 'Next: collections. Python lists become `std::vector`, loops get a '
-                + 'third clause, and an AI "standard maximum algorithm" forgets exactly '
-                + 'one element.',
+                + '- Unit tests verify specific function behavior\n\n'
+                + 'The next lesson covers `std::vector`, loop syntax, and boundary cases.',
             check: { kind: 'manual' },
         },
     ],

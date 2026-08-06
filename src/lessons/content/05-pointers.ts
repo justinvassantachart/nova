@@ -50,12 +50,11 @@ STUDENT_TEST("awardBonus adds 50 through the pointer") {
 export const pointersLesson: Lesson = {
     id: 'pointers',
     slug: 'pointers',
-    title: 'Pointers: Addresses Made Visible',
-    tagline: 'Python hid the arrows. C++ hands them to you — and an AI bonus function moves an arrow instead of a score.',
+    title: 'Pointers and Addresses',
+    tagline: 'Pointer values, dereferencing, and inspecting memory.',
     description:
-        'Every Python name was secretly a reference; C++ promotes the address to a value you can store, '
-        + 'pass, and follow. Learn & and *, watch pointers as live arrows in the memory graph, and debug an '
-        + 'AI function that meant to add 50 points and instead pointed 50 ints into the wilderness.',
+        'Learn how C++ stores memory addresses in pointers, how `&` and `*` work, and how to inspect '
+        + 'pointer values in the memory graph. Correct a function that changes an address instead of a score.',
     minutes: 15,
     tags: ['pointers', 'memory graph', 'testing', 'AI-generated code'],
     files: { 'main.cpp': MAIN_CPP, 'tests.cpp': TESTS_CPP },
@@ -63,68 +62,62 @@ export const pointersLesson: Lesson = {
     steps: [
         {
             id: 'python-hid-this',
-            title: 'The arrows were always there',
+            title: 'Pointer basics',
             body:
                 'In Python, `b = a` never copied a list — it made another name for the '
-                + 'same object. Every variable was secretly an arrow, and `id(x)` let '
-                + 'you peek at where it pointed. You\'ve been using references your whole '
-                + 'programming life; Python just refused to let you *hold* one.\n\n'
-                + 'C++ hands you the arrow as a first-class value — a **pointer**:\n'
+                + 'same object. `id(x)` can show an object\'s identity. C++ lets a program '
+                + 'store a memory address directly in a **pointer**:\n'
                 + '```\nint alice = 120;\nint* p = &alice;\n```\n'
                 + '- `&alice` — "the **address of** alice" (where her box lives in '
                 + 'memory)\n'
-                + '- `int* p` — "p is a pointer to an int": a box that holds an '
-                + '*address*\n'
-                + '- `*p` — "the thing p points at": follow the arrow\n\n'
-                + 'Storable, copyable, passable — an address is just a value, like 120.',
+                + '- `int* p` — `p` is a pointer to an int and stores an address\n'
+                + '- `*p` — read or modify the int at that address\n\n'
+                + 'An address is a value that can be stored, copied, and passed to a function.',
             check: { kind: 'manual' },
         },
         {
             id: 'two-ops',
-            title: 'Follow the arrow to read — or to write',
+            title: 'Dereference to read or write',
             body:
                 '`*p` works on both sides of `=`:\n'
                 + '```\nint x = *p;      // READ through the arrow\n*p = 200;        // WRITE through the arrow -- alice becomes 200\n```\n'
-                + 'That second line is the superpower: anyone holding `&alice` can '
-                + 'change alice from anywhere in the program.\n\n'
+                + 'The second line changes `alice` through its address.\n\n'
                 + 'And the special value: `nullptr` — "this pointer aims at nothing", '
                 + 'C++\'s `None` for pointers. Following a null arrow (`*p` when p is '
-                + 'nullptr) crashes the program. Rule one of pointers: **know where it '
-                + 'points before you follow it.**',
+                + 'nullptr) causes invalid memory access. Check that a pointer is valid '
+                + 'before dereferencing it.',
             check: { kind: 'manual' },
         },
         {
             id: 'run',
-            title: 'Run the AI\'s bonus program',
+            title: 'Run the bonus program',
             body:
-                'Read `main.cpp` — the AI picks a leader by pointer and awards a bonus '
+                'Read `main.cpp`. The program picks a leader by pointer and awards a bonus '
                 + 'through it. Press **Run**.\n\n'
-                + 'Alice leads with 120... and after her +50 bonus she has... 120. '
-                + 'Hm. The AI insists the bonus "lands on the winning player\'s actual '
-                + 'score variable." You know what comes next.',
+                + 'Alice starts with 120. After the function attempts to add a 50-point '
+                + 'bonus, her score is still 120.',
             check: { kind: 'stdout', includes: 'Leader\'s score after bonus: 120', label: 'Run it — the bonus changed nothing' },
         },
         {
             id: 'run-tests',
-            title: 'Put a number on the lie',
+            title: 'Run the provided test',
             body:
                 'Open `tests.cpp`: the test hands `awardBonus` the address of a score '
                 + 'of 100 and demands 150. Press **Tests**.',
             check: { kind: 'tests', minTotal: 1, minFailed: 1, label: 'Run Tests — expected 150, actual 100' },
-            successNote: 'awardBonus received a perfectly good address and improved nothing.',
+            successNote: 'awardBonus receives a valid address but does not change the score.',
         },
         {
             id: 'graph-intro',
-            title: 'Open the memory graph',
+            title: 'Inspect the memory graph',
             body:
-                'This lesson gets a new instrument. Set a **breakpoint** on the call:\n'
+                'Set a **breakpoint** on the call:\n'
                 + '```\nawardBonus(leader);\n```\n'
                 + 'press **Debug**, and when it pauses, open the **Graph** tab in the '
                 + 'right panel.\n\n'
-                + 'There\'s `main`\'s frame: `alice` 120, `bruno` 95 — and `leader`, '
-                + 'drawn as an actual **arrow** pointing at alice\'s box. That\'s not a '
-                + 'metaphor; it\'s your program\'s memory, live. (The `if` didn\'t fire — '
-                + 'bruno\'s 95 doesn\'t beat 120 — so the arrow stayed on alice.)',
+                + 'The `main` frame shows `alice` at 120, `bruno` at 95, and `leader` '
+                + 'pointing to `alice`. The `if` condition is false because 95 is not greater '
+                + 'than 120, so `leader` retains `alice`\'s address.',
             check: {
                 kind: 'all',
                 of: [
@@ -137,14 +130,12 @@ export const pointersLesson: Lesson = {
         },
         {
             id: 'step-into',
-            title: 'Step INTO the call',
+            title: 'Step into awardBonus',
             body:
-                'Press **Step Into** (`F11`) — the debugger dives *into* `awardBonus` '
-                + 'instead of hopping over it.\n\n'
-                + 'A new frame appears with `scorePtr` — a **second arrow to the same '
-                + 'box**. Recognize the move? Arguments are copies (lesson 3) — and '
-                + 'copying a pointer copies the *arrow*, not the box it aims at. Two '
-                + 'arrows, one alice.',
+                'Press **Step Into** (`F11`) to pause inside `awardBonus`.\n\n'
+                + 'A new frame appears with `scorePtr`, which holds the same address as '
+                + '`leader`. Arguments are copies, so copying a pointer copies its address. '
+                + 'Both pointers refer to `alice`.',
             check: {
                 kind: 'all',
                 of: [
@@ -155,36 +146,32 @@ export const pointersLesson: Lesson = {
         },
         {
             id: 'watch-the-arrow',
-            title: 'Watch the arrow fly away',
+            title: 'Observe pointer arithmetic',
             body:
                 'The line about to run is the AI\'s entire bonus logic:\n'
                 + '```\nscorePtr += 50;\n```\n'
                 + 'Press **Step Over** (`F10`) and watch the graph.\n\n'
-                + 'The arrow doesn\'t add anything to alice — it **detaches and flies 50 '
-                + 'int-slots away**, pointing into the wilderness. Adding to a *pointer* '
-                + 'moves the address (that\'s called pointer arithmetic, and it has real '
-                + 'uses — this is not one of them).',
+                + 'The operation does not change `alice`. It advances the pointer by 50 '
+                + '`int` positions. This is pointer arithmetic, but it is not the intended '
+                + 'operation for this function.',
             check: { kind: 'event', event: 'debug_step_over', label: 'Step Over the += line and watch the graph' },
-            successNote: 'The score never changed; the arrow did. One missing character: *',
+            successNote: 'The pointer value changed, but the score did not. The expression needs `*`.',
         },
         {
             id: 'diagnose',
-            title: 'p vs *p — say what you mean',
+            title: 'Pointer value and pointed-to value',
             body:
                 'Two spellings, two meanings:\n'
                 + '```\nscorePtr += 50;     // move the ARROW 50 slots\n*scorePtr += 50;    // add 50 to the BOX it points at\n```\n'
-                + 'The AI wrote a sentence about the arrow when it meant a sentence '
-                + 'about the box. Both compile; only one is the program you asked for. '
-                + 'C++ trusts you with addresses — the `*` is how you say which level '
-                + 'you\'re talking about.\n\n'
-                + 'Note also what *didn\'t* break: main\'s `leader` still points at '
-                + 'alice, because `scorePtr` was a copy. The damage stayed inside the '
-                + 'function — this time.',
+                + 'Both expressions compile, but they modify different values. The `*` '
+                + 'selects the value stored at the pointer\'s address.\n\n'
+                + 'The `leader` pointer in `main` still points to `alice` because `scorePtr` '
+                + 'is a copy. Changing the copied pointer does not change `leader`.',
             check: { kind: 'manual' },
         },
         {
             id: 'fix',
-            title: 'Add the star, prove the fix',
+            title: 'Dereference the pointer',
             body:
                 'Fix the line:\n'
                 + '```\n*scorePtr += 50;\n```\n'
@@ -196,32 +183,28 @@ export const pointersLesson: Lesson = {
                     { kind: 'tests', minTotal: 1, allPass: true, label: 'Re-run Tests: green' },
                 ],
             },
-            successNote: '100 → 150. The bonus finally lands in the box, not on the arrow.',
+            successNote: 'The function changes the score from 100 to 150.',
         },
         {
             id: 'verify-main',
-            title: 'Verify the whole story',
+            title: 'Run the corrected program',
             body:
                 'Press **Run** and read all three lines: Alice 170, Bruno 95, leader\'s '
-                + 'score 170 — the bonus went through the pointer into alice\'s actual '
-                + 'box, which is exactly what "through the pointer" was supposed to '
-                + 'mean.',
+                + 'score 170. Dereferencing the pointer updates `alice`\'s value.',
             check: { kind: 'stdout', includes: 'Leader\'s score after bonus: 170', label: 'Run it — 120 + 50 = 170' },
         },
         {
             id: 'null-guard',
-            title: 'Guard the null arrow',
+            title: 'Handle nullptr',
             body:
-                'One more professional touch. What if someone calls '
-                + '`awardBonus(nullptr)`? `*scorePtr` would follow an arrow to nowhere — '
-                + 'crash. Make the function shrug instead:\n'
+                'If someone calls `awardBonus(nullptr)`, dereferencing `scorePtr` causes '
+                + 'invalid memory access. Return without changing anything in this case:\n'
                 + '```\nif (scorePtr == nullptr) {\n    return;\n}\n```\n'
-                + 'first thing in `awardBonus`. Then add the tripwire to `tests.cpp`:\n'
+                + 'Place this at the start of `awardBonus`. Then add a test to `tests.cpp`:\n'
                 + '```\nSTUDENT_TEST("a null pointer is safely ignored") {\n'
                 + '    awardBonus(nullptr);\n    EXPECT(true);\n}\n```\n'
-                + '(`EXPECT(true)` just records that we made it here alive — without the '
-                + 'guard, the crash would have taken the whole suite down.) Run '
-                + '**Tests**: all green.',
+                + '`EXPECT(true)` records that the call returned without terminating the '
+                + 'test process. Run **Tests** and confirm both tests pass.',
             check: {
                 kind: 'all',
                 of: [
@@ -237,15 +220,12 @@ export const pointersLesson: Lesson = {
             body:
                 '- `&x` takes an address; `int* p` stores one; `*p` follows it — to '
                 + 'read **or write**\n'
-                + '- `nullptr` is the arrow to nowhere; guard before you follow\n'
+                + '- `nullptr` represents no valid address; check it before dereferencing\n'
                 + '- Pointers are values: copied like ints, so a function gets a copy of '
-                + 'the *arrow*\n'
-                + '- `p += n` moves the arrow; `*p += n` changes the box — one `*` '
-                + 'apart\n'
-                + '- The **Graph tab** draws your pointers live\n\n'
-                + 'Next: so far every box died automatically at its closing brace. Time '
-                + 'to make boxes that *outlive* their function — `new`, `delete`, and '
-                + 'the heap — where linked lists will live.',
+                + 'the address\n'
+                + '- `p += n` changes the address; `*p += n` changes the pointed-to value\n'
+                + '- The **Graph tab** displays pointer relationships\n\n'
+                + 'The next lesson covers `new`, `delete`, and heap allocation.',
             check: { kind: 'manual' },
         },
     ],

@@ -100,39 +100,33 @@ STUDENT_TEST("reversing 10 -> 20 -> 30 yields 30 -> 20 -> 10") {
 export const reverseALinkedList: Lesson = {
     id: 'reverse-a-linked-list',
     slug: 'reverse-a-linked-list',
-    title: 'Capstone: Reverse the Chain',
-    tagline: 'The classic interview question, an AI solution that vaporizes the list mid-flip — and you, fully armed.',
+    title: 'Reversing a Linked List',
+    tagline: 'Reversing a linked list and testing the result.',
     description:
-        'The graduation exercise. An AI delivers the famous in-place reversal with a confident O(n)/O(1) '
-        + 'sales pitch — and loses two-thirds of the list on the first flip. Run the tests before trusting '
-        + 'anything, watch the chain snap live in the memory graph, restore the three-pointer dance, and '
-        + 'armor it for whoever comes after you.',
+        'Review an in-place linked-list reversal, run the tests, and use the memory graph to identify a lost '
+        + 'link. Correct the algorithm by saving the next pointer before updating the current node.',
     minutes: 18,
-    tags: ['linked lists', 'capstone', 'testing', 'AI-generated code'],
+    tags: ['linked lists', 'pointers', 'testing', 'AI-generated code'],
     files: { 'list.h': LIST_H, 'main.cpp': MAIN_CPP, 'tests.cpp': TESTS_CPP },
     primaryFile: 'main.cpp',
     steps: [
         {
             id: 'capstone',
-            title: 'The graduation exercise',
+            title: 'Review the reversal function',
             body:
-                'Nine lessons ago you\'d never compiled a line of C++. Since then: '
-                + 'types, functions and their copies, vectors and loop edges, '
-                + 'pointers, the heap, structs, building chains, and edge-case '
-                + 'surgery.\n\n'
-                + 'The capstone is the most famous linked-list question in the world: '
-                + '**reverse the list in place**. An AI has already "solved" it — '
-                + 'read its pitch in `main.cpp`, complete with a complexity analysis.\n\n'
-                + 'Your job is a full professional review, in the order professionals '
-                + 'do it: **read → test → debug → fix → armor.** No step skipped, '
-                + 'nothing taken on faith.',
+                'This lesson combines types, pass-by-value, vectors, loops, pointers, '
+                + 'heap allocation, structs, and linked-list operations.\n\n'
+                + 'The task is to **reverse the list in place**. The provided '
+                + 'implementation includes a complexity analysis but contains a '
+                + 'pointer-ordering error.\n\n'
+                + 'Review it in this order: **read → test → debug → fix → add boundary tests.**',
             check: { kind: 'manual' },
         },
         {
             id: 'headers',
-            title: 'Three files — a real project shape',
+            title: 'Three project files',
             body:
-                'This workspace finally looks like real C++:\n'
+                'This workspace uses three C++ files:\n'
                 + '- `list.h` — the **header**: the Node struct and the four '
                 + 'signatures. The shared contract.\n'
                 + '- `main.cpp` — the implementations, plus the demo\n'
@@ -142,26 +136,25 @@ export const reverseALinkedList: Lesson = {
                 + 'without repeating themselves. (It\'s the C++ answer to Python\'s '
                 + '`import`.) The `#pragma once` at the top means "if several files '
                 + 'include me, only count me once."\n\n'
-                + 'Last lesson the contract lived in hand-written declarations; a '
-                + 'header is that idea, industrialized. From here on, every '
-                + 'multi-file program you meet will be shaped like this one.',
+                + 'The previous lesson used hand-written declarations. A header keeps '
+                + 'those shared declarations in one place for a multi-file program.',
             check: { kind: 'manual' },
         },
         {
             id: 'read-predict',
-            title: 'Read the algorithm. Predict.',
+            title: 'Read the algorithm and predict the result',
             body:
                 'Read `reverse` slowly:\n'
                 + '```\nwhile (curr != nullptr) {\n    curr->next = prev;   // flip this node\'s arrow backward\n'
                 + '    prev = curr;         // prev advances\n    curr = curr->next;   // curr advances... where, exactly?\n}\n```\n'
-                + 'The idea is genuinely right: walk once, flip each arrow to point '
-                + 'backward, `prev` becomes the new head. The pitch is word-perfect.\n\n'
+                + 'The overall approach is correct: walk once, update each pointer to point '
+                + 'backward, and `prev` becomes the new head.\n\n'
                 + 'Now trace the **first iteration** on paper, with '
                 + '`10 -> 20 -> 30`: after `curr->next = prev;`, node 10\'s arrow '
                 + 'points at `nullptr`. Then `curr = curr->next;` sends curr to... '
                 + 'node 10\'s next... which you *just flipped*.\n\n'
-                + 'Make your prediction and hold it. Reviewers who predict before '
-                + 'running learn twice as much from what happens next.',
+                + 'Predict the result before running the program, then compare the '
+                + 'prediction with the test result.',
             check: { kind: 'manual' },
         },
         {
@@ -173,24 +166,22 @@ export const reverseALinkedList: Lesson = {
                 + '`10 -> 20 -> 30`, reverses, and demands all three values in '
                 + 'reversed order.\n\n'
                 + 'Press **Tests**.\n\n'
-                + '(If the panel reports the suite stopped early: an assertion '
-                + '*crashed* — `head->next` was `nullptr` and the test followed it. '
-                + 'A crash mid-test is itself a verdict: the wreck is worse than a '
-                + 'wrong number.)',
+                + '(If the panel reports that the suite stopped early, an assertion '
+                + 'crashed because `head->next` was `nullptr` and the test followed it. '
+                + 'That also indicates that the reversal is incorrect.)',
             check: { kind: 'tests', minTotal: 1, minFailed: 1, label: 'Run Tests — the reversal fails' },
-            successNote: 'Length 1, not 3. The list didn\'t reverse — it nearly ceased to exist.',
+            successNote: 'The resulting length is 1 instead of 3, so the reversal lost access to two nodes.',
         },
         {
             id: 'stakeout',
-            title: 'Stake out the flip',
+            title: 'Inspect the first pointer update',
             body:
                 'Set a **breakpoint** on the flip line:\n'
                 + '```\ncurr->next = prev;\n```\n'
                 + 'press **Debug**, and open the **Graph** tab.\n\n'
                 + 'First pause: the full chain is alive — '
                 + '`[10] -> [20] -> [30] -> x` — with `prev` at nothing, `curr` on '
-                + '`[10]`. Three boxes, all reachable. Remember this picture; it\'s '
-                + 'the last time you\'ll see it intact.',
+                + '`[10]`. All three boxes are reachable at this point.',
             check: {
                 kind: 'all',
                 of: [
@@ -202,49 +193,46 @@ export const reverseALinkedList: Lesson = {
         },
         {
             id: 'the-snap',
-            title: 'Watch the chain snap',
+            title: 'Step through the pointer updates',
             body:
-                'Now **Step Over** (`F10`) three times, watching the graph like a '
-                + 'hawk:\n'
-                + '1. `curr->next = prev;` — node 10\'s arrow flips to `x`. Fine for '
-                + 'node 10... but the bridge to `[20]` just ceased to exist.\n'
-                + '2. `prev = curr;` — prev steps onto `[10]`. Still fine.\n'
+                'Now **Step Over** (`F10`) three times and watch the graph:\n'
+                + '1. `curr->next = prev;` — node 10 now points to `x`, so it no longer '
+                + 'points to `[20]`.\n'
+                + '2. `prev = curr;` — prev now points to `[10]`.\n'
                 + '3. `curr = curr->next;` — curr follows 10\'s next... **which is '
-                + 'now null**. curr falls off the world. The loop is over.\n\n'
-                + 'Look at the wreckage: `[20]` and `[30]` still exist on the heap — '
-                + 'no arrow from any stack frame reaches them. Orphaned, mid-surgery '
-                + '(lesson 6 would call it a leak; lesson 9 would call it abandoned '
-                + 'patients). `head` becomes `prev` = node 10 alone.',
+                + 'now null**. The loop ends after one iteration.\n\n'
+                + '`[20]` and `[30]` still exist on the heap, but no pointer from a '
+                + 'stack frame reaches them. `head` becomes `prev`, which points only '
+                + 'to node 10.',
             check: { kind: 'event', event: 'debug_step_over', count: 3, label: 'Step Over ×3 — watch curr fall off the flipped arrow' },
-            successNote: 'Your paper prediction, confirmed in pixels: the flip destroyed the only path forward.',
+            successNote: 'The debugger confirms that updating curr->next removed the only path to the remaining nodes.',
         },
         {
             id: 'diagnose',
-            title: 'The three-pointer dance',
+            title: 'Save the next pointer',
             body:
-                'The AI\'s loop has two jobs for one arrow: `curr->next` is both '
-                + '**the link being flipped** and **the road ahead**. Flip first and '
-                + 'the road is gone.\n\n'
-                + 'The fix is to save the road before demolishing it — the famous '
-                + '**save, flip, advance**:\n'
+                'The loop uses `curr->next` for two purposes: it is both '
+                + '**the link being reversed** and **the pointer to the next node**. '
+                + 'Updating it first makes the next node inaccessible.\n\n'
+                + 'The fix is to save the next pointer before changing it: '
+                + '**save, update, advance**:\n'
                 + '```\nwhile (curr != nullptr) {\n'
-                + '    Node* next = curr->next;   // SAVE the road ahead\n'
-                + '    curr->next = prev;         // FLIP the arrow\n'
+                + '    Node* next = curr->next;   // SAVE the next node\n'
+                + '    curr->next = prev;         // REVERSE the link\n'
                 + '    prev = curr;               // ADVANCE prev\n'
-                + '    curr = next;               // ADVANCE across the saved road\n}\n```\n'
-                + 'One extra pointer, dancing one step ahead of the demolition. '
-                + 'That\'s the entire secret of in-place reversal.',
+                + '    curr = next;               // ADVANCE to the saved node\n}\n```\n'
+                + 'The additional pointer preserves access to the unprocessed part of '
+                + 'the list while each link is reversed.',
             check: { kind: 'manual' },
         },
         {
             id: 'fix',
-            title: 'Restore the dance; let the suite judge',
+            title: 'Apply the fix and run the tests',
             body:
                 'Apply the fix in `reverse`, then press **Tests**.\n\n'
                 + 'If you\'re curious first: with the breakpoint still set, **Debug** '
-                + 'and step through a lap or two — the graph shows arrows flipping '
-                + 'one by one while the chain *stays whole*, the two halves trading '
-                + 'nodes across the dance.',
+                + 'and step through one or two iterations. The graph shows links '
+                + 'reversing while `next` preserves access to the remaining nodes.',
             check: {
                 kind: 'all',
                 of: [
@@ -253,20 +241,19 @@ export const reverseALinkedList: Lesson = {
                 ],
             },
             hint: 'Add "Node* next = curr->next;" as the first line of the loop, and make the last line "curr = next;".',
-            successNote: 'Three nodes in, three nodes out, order reversed. The dance holds.',
+            successNote: 'All three nodes remain reachable in reversed order.',
         },
         {
             id: 'run-demo',
-            title: 'See it with your own eyes',
+            title: 'Run the corrected demo',
             body: 'Press **Run** — the demo prints the chain both ways.',
             check: { kind: 'stdout', includes: 'After:  30 -> 20 -> 10 -> x', label: 'Run it — 30 -> 20 -> 10' },
         },
         {
             id: 'armor',
-            title: 'Armor it for the next person',
+            title: 'Add boundary tests',
             body:
-                'Capstone discipline: a fix isn\'t finished until the boundaries are '
-                + 'pinned. Add the census\'s two classics to `tests.cpp`:\n'
+                'Add tests for a single-node list and an empty list to `tests.cpp`:\n'
                 + '```\nSTUDENT_TEST("reversing a single node keeps it") {\n'
                 + '    Node* head = pushFront(nullptr, 42);\n'
                 + '    reverse(head);\n'
@@ -281,25 +268,21 @@ export const reverseALinkedList: Lesson = {
         },
         {
             id: 'graduation',
-            title: 'You\'ve completed the course 🎓',
+            title: 'Course complete',
             body:
-                'Look at what\'s in your toolbox now:\n'
+                'This course covered:\n'
                 + '- **C++ from Python**: compilation, types on variables, '
                 + 'signatures, vectors, both loops\n'
                 + '- **The value rule**: everything copies — ints, pointers, structs, '
                 + 'even head pointers — unless a `&` says otherwise\n'
-                + '- **Memory, owned**: `&`/`*`/`->`, `new`/`delete`, the ledger, '
-                + 'leaks and dangling arrows\n'
-                + '- **Linked lists**: build, traverse, edge-case surgery, and the '
-                + 'reversal dance\n'
-                + '- **The review loop**: read → test → debug → fix → armor — '
+                + '- **Memory management**: `&`/`*`/`->`, `new`/`delete`, '
+                + 'leaks, and dangling pointers\n'
+                + '- **Linked lists**: build, traverse, remove nodes, and reverse links\n'
+                + '- **The review process**: read → test → debug → fix → add tests — '
                 + 'especially for code that arrives looking confident, AI-written or '
                 + 'otherwise\n\n'
-                + 'That last skill is the one that compounds: the demos lied, the '
-                + 'comments lied, the complexity analysis was impeccable and '
-                + 'irrelevant — **the tests and the debugger never lied**.\n\n'
-                + 'The standalone IDE at `/ide` has everything you used here. Go '
-                + 'build something — and break it on purpose first.',
+                + 'The editor at `/ide` includes the tools used in these lessons and '
+                + 'can be used for additional C++ programs.',
             check: { kind: 'manual' },
         },
     ],

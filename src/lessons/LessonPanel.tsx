@@ -195,7 +195,7 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
                     >
                         <summary className="cursor-pointer select-none text-[12px] text-muted-foreground hover:text-foreground flex items-center gap-1.5 list-none">
                             <Codicon name="lightbulb" size={13} className="text-amber-500" />
-                            <span className="underline decoration-dotted underline-offset-2">Need a hint?</span>
+                            <span className="underline decoration-dotted underline-offset-2">Show hint</span>
                         </summary>
                         <div className="mt-1.5 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[12.5px] leading-relaxed text-foreground/90">
                             {step.hint}
@@ -208,7 +208,7 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
                     <div className="mt-3 px-3 py-2 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-2">
                         <Codicon name="pass-filled" size={14} className="text-emerald-500 mt-0.5" />
                         <div className="text-[12.5px] leading-snug text-foreground/90">
-                            {step.successNote ?? 'Step complete — nice work.'}
+                            {step.successNote ?? 'Step complete.'}
                         </div>
                     </div>
                 )}
