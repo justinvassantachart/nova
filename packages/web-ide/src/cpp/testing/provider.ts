@@ -290,6 +290,14 @@ export function createNovaCppOutputParser(): TestOutputParser {
   return new NovaCppOutputParser()
 }
 
+const NOVA_TEST_HEADER_REFERENCE = /(?:^|[\s/<"'])nova_test\.h(?=$|[\s>"'])/m
+
+function usesNovaTestSupport(files: Readonly<Record<string, string>>): boolean {
+  return Object.values(files).some((contents) => (
+    NOVA_TEST_HEADER_REFERENCE.test(contents)
+  ))
+}
+
 export const cppTestProvider: TestProvider = {
   id: 'web-ide.testing.cpp',
   label: 'C++ Tests',
@@ -313,9 +321,14 @@ export const cppTestProvider: TestProvider = {
     )
 
     // These copies exist only in the execution plan: they never enter the VFS,
-    // OPFS persistence, file explorer, or host workspace snapshot.
-    preparedFiles[NOVA_TEST_HEADER_PATH] = NOVA_TEST_HEADER
-    preparedFiles[NOVA_TEST_IMPL_PATH] = NOVA_TEST_IMPL
+    // OPFS persistence, file explorer, or host workspace snapshot. Ordinary
+    // Run/Debug must not compile the test implementation unless the workspace
+    // references its public header: every extra .cpp file is a complete,
+    // sequential compiler invocation in the browser runtime.
+    if (executeTests || usesNovaTestSupport(preparedFiles)) {
+      preparedFiles[NOVA_TEST_HEADER_PATH] = NOVA_TEST_HEADER
+      preparedFiles[NOVA_TEST_IMPL_PATH] = NOVA_TEST_IMPL
+    }
 
     if (!executeTests) {
       return { execution: { files: preparedFiles, mode } }

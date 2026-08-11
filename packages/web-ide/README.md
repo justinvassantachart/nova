@@ -184,9 +184,11 @@ framework-specific output into public structured `TestEvent` values consumed by
 the optional generic Tests panel.
 
 `cppTestingPlugin` preserves Nova's `nova_test.h`, `STUDENT_TEST`, and
-`EXPECT_EQUALS` behavior. It supplies the header and implementation for normal
-C++ runs, and only for Tests adds a copied hidden-main transform and synthetic
-runner. `pythonTestingPlugin` supplies an ephemeral standard-library `unittest`
+`EXPECT_EQUALS` behavior. It supplies the header and implementation for Tests
+or when ordinary C++ source references `nova_test.h`; unrelated Run
+and Debug commands do not pay for an extra test-framework compilation. Tests
+also add a copied hidden-main transform and synthetic runner.
+`pythonTestingPlugin` supplies an ephemeral standard-library `unittest`
 discovery runner. Neither provider writes generated files to the workspace,
 local cache, explorer, or host persistence.
 

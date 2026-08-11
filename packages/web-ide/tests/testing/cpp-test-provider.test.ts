@@ -43,6 +43,43 @@ describe('C++ test execution provider', () => {
     })
   })
 
+  it.each(['run', 'debug'] as const)(
+    'does not compile test support for an ordinary %s',
+    async (mode) => {
+      const files = {
+        '/workspace/main.cpp': '#include <iostream>\nint main() { return 0; }',
+        '/workspace/helper.cpp': 'int helper() { return 1; }',
+        '/workspace/unrelated.cpp': '#include "my_nova_test.h"',
+      }
+
+      const prepared = await cppTestProvider.prepare({
+        files,
+        mode,
+        executeTests: false,
+      })
+
+      expect(prepared.execution.files).toEqual(files)
+      expect(prepared.execution.files).not.toHaveProperty(NOVA_TEST_HEADER_PATH)
+      expect(prepared.execution.files).not.toHaveProperty(NOVA_TEST_IMPL_PATH)
+      expect(prepared.execution.files).not.toHaveProperty(NOVA_TEST_RUNNER_PATH)
+    },
+  )
+
+  it.each([
+    ['path include', '#include "./nova_test.h"'],
+    ['comment-separated include', '#include /* compatibility */ "nova_test.h"'],
+    ['macro include', '#define TEST_HEADER "nova_test.h"\n#include TEST_HEADER'],
+  ])('preserves support for a %s', async (_name, source) => {
+    const prepared = await cppTestProvider.prepare({
+      files: { '/workspace/tests.cpp': source },
+      mode: 'debug',
+      executeTests: false,
+    })
+
+    expect(prepared.execution.files).toHaveProperty(NOVA_TEST_HEADER_PATH)
+    expect(prepared.execution.files).toHaveProperty(NOVA_TEST_IMPL_PATH)
+  })
+
   it('owns the hidden-main transform, runner entrypoint, and per-run parser', async () => {
     const prepared = await cppTestProvider.prepare({
       files: {
