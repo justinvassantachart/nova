@@ -17,9 +17,12 @@ not authorized or configured for public distribution.
   developer paths, and unresolved `@/` aliases.
 - No copied compiler/sysroot archive, Stanford library, Firebase service worker,
   deployment file, or local yowasp tarball.
-- Production dependency audit has no known vulnerabilities. The current full
-  audit has six low-severity findings in development-only browser polyfill
-  tooling; reassess those when upgrading the build toolchain.
+- The packed package consumer uses five exact browser shims instead of the
+  whole-stdlib polyfill plugin and its top-level-await transform. Production
+  dependency audit has no known vulnerabilities. Nova's repository-wide
+  development audit still includes the host application's separate polyfill
+  toolchain; reassess that root-only stack independently rather than adding it
+  back to the reusable package harness.
 
 ## Decisions required before publication
 
