@@ -10,10 +10,14 @@ export interface VariableNode {
   name: string
   type: string
   value: string | number
-  rawValue: number
-  address: number
-  size: number
-  isPointer: boolean
+  /** Numeric representation supplied by native runtimes, when meaningful. */
+  rawValue?: number
+  /** Address in the runtime's native address space, when available. */
+  address?: number
+  /** Native storage size in bytes, when available. */
+  size?: number
+  /** Whether this value represents a native pointer. */
+  isPointer?: boolean
   pointsTo?: number
   pointeeType?: string
   isStruct?: boolean
@@ -31,8 +35,11 @@ export interface HeapAllocation {
 export interface StackFrame {
   id: string
   funcName: string
+  /** Workspace source path for this frame, when reported by the runtime. */
+  file?: string
   line: number
-  sp: number
+  /** Native stack pointer, when reported by the runtime. */
+  sp?: number
   variables: VariableNode[]
   isActive: boolean
 }
@@ -71,7 +78,12 @@ export interface RuntimeStreamInterceptor {
 export interface RuntimeExecutionPlan {
   files: WorkspaceFiles
   mode: RuntimeExecutionMode
-  /** Workspace path to execute when the runtime needs an explicit entrypoint. */
+  /**
+   * Workspace path to execute when the runtime needs an explicit entrypoint.
+   * Providers with a fixed engine entrypoint may reject a collision during
+   * `prepare`; a TestProvider can stage colliding user files under ephemeral
+   * paths in its execution plan.
+   */
   entrypoint?: string
   streamInterceptor?: RuntimeStreamInterceptor
 }
@@ -80,11 +92,30 @@ export interface RuntimeStartRequest {
   mode: RuntimeExecutionMode
 }
 
+/**
+ * Breakpoints contributed for one transient runtime workflow. Keys are
+ * workspace source paths and values are one-based source lines.
+ */
+export type RuntimeBreakpointMap = Readonly<Record<string, readonly number[]>>
+
+/** The terminal result of one runtime start request. */
+export type RuntimeOutcome =
+  | { type: 'completed'; exitCode: number }
+  | { type: 'stopped' }
+  | { type: 'error'; error: { type: string; message: string } }
+
 export interface RuntimeCapabilities {
   debug: boolean
   breakpoints: boolean
   stdin: boolean
   graphics: boolean
+  /**
+   * The runtime publishes address-aware stack/heap snapshots that can drive
+   * Web IDE's native-memory Graph panel. Existing providers that omit this
+   * retain the legacy Graph behavior; debuggers without meaningful addresses
+   * should explicitly set it false.
+   */
+  memoryVisualization?: boolean
 }
 
 export interface RuntimeDiagnostic {
@@ -116,14 +147,30 @@ export interface RuntimeSession {
   prepare(plan: RuntimeExecutionPlan): Promise<RuntimePreparationResult>
   start(request: RuntimeStartRequest): Promise<void>
   stop(): void
+  /** Waits for the latest start request without changing its state. */
+  waitForSettlement?(): Promise<RuntimeOutcome>
+  /** Requests a stop and resolves after that start request has fully settled. */
+  stopAndWait?(): Promise<RuntimeOutcome>
 
   setBreakpoints(file: string, lines: number[]): Promise<void>
+  /**
+   * Atomically replaces one owner's transient breakpoint contribution.
+   * Owners are compared by object identity and are scoped to this session.
+   */
+  replaceBreakpointOverlay?(
+    owner: object,
+    breakpoints: RuntimeBreakpointMap,
+  ): Promise<void>
+  /** Removes only the matching owner's transient breakpoint contribution. */
+  clearBreakpointOverlay?(owner: object): Promise<void>
   stepInto(): Promise<void>
   stepOver(): Promise<void>
   stepOut(): Promise<void>
   continueExecution(): Promise<void>
   writeStdin?(data: string): void
   dispose?(): void
+  /** Disposes the session and resolves after any initialization/run cleanup. */
+  disposeAndWait?(): Promise<RuntimeOutcome>
 }
 
 /** Declarative runtime contribution; sessions are lazy and instance-scoped. */

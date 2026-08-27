@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const fixtureRoot = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(fixtureRoot, '../..')
-const tarball = path.join(repositoryRoot, 'web-ide-0.1.0.tgz')
+const tarball = path.join(repositoryRoot, 'web-ide-0.3.1.tgz')
 const temporaryConsumer = await mkdtemp(
   path.join(tmpdir(), 'web-ide-packed-consumer-'),
 )
@@ -38,7 +38,7 @@ try {
   manifest.dependencies['web-ide'] = `file:${tarball}`
   await writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`)
 
-  if (!run('npm', ['install', '--no-fund', '--no-audit'])) {
+  if (!run('npm', ['install', '--ignore-scripts', '--strict-peer-deps', '--no-fund', '--no-audit'])) {
     process.exitCode ||= 1
   } else if (!run('npm', ['audit', '--omit=dev', '--audit-level=low'])) {
     process.exitCode ||= 1

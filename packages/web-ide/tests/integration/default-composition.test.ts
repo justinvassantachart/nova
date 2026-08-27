@@ -99,6 +99,7 @@ describe('default C++ Web IDE composition', () => {
         breakpoints: true,
         stdin: true,
         graphics: false,
+        memoryVisualization: true,
       },
     })
     expect(manager.testProviders.get(webIDEConfiguration.testProvider!)).toBe(

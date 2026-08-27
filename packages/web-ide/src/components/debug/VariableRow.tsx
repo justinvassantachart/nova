@@ -14,7 +14,7 @@ export function VariableRow({ variable, depth, resolvePointer }: VariableRowProp
 
     const structChildren = variable.isStruct && variable.members ? variable.members : null
     const pointerChildren =
-        variable.isPointer && variable.pointsTo && resolvePointer
+        variable.isPointer && variable.pointsTo !== undefined && resolvePointer
             ? resolvePointer(variable.pointsTo) ?? null
             : null
     const children = structChildren ?? pointerChildren
@@ -41,7 +41,11 @@ export function VariableRow({ variable, depth, resolvePointer }: VariableRowProp
                     paddingLeft: `${depth * 12 + 8}px`,
                     cursor: expandable ? 'pointer' : 'default',
                 }}
-                title={variable.address > 0 ? `0x${variable.address.toString(16).padStart(8, '0')}` : undefined}
+                title={
+                    variable.address !== undefined && variable.address > 0
+                        ? `0x${variable.address.toString(16).padStart(8, '0')}`
+                        : undefined
+                }
             >
                 <Codicon
                     name="chevron-right"
@@ -62,9 +66,9 @@ export function VariableRow({ variable, depth, resolvePointer }: VariableRowProp
             </div>
             {expanded && children && (
                 <>
-                    {children.map((child) => (
+                    {children.map((child, index) => (
                         <VariableRow
-                            key={child.name}
+                            key={`${child.name}-${index}`}
                             variable={child}
                             depth={depth + 1}
                             resolvePointer={resolvePointer}

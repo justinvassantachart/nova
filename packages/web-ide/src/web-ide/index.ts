@@ -5,7 +5,10 @@ export { useWebIDEHost } from './react/host-context'
 export { useLanguageTooling } from './react/language-tooling-context'
 export { initWebIDETheme } from './public/theme'
 
-export type { WebIDEConfiguration } from './contracts/configuration'
+export type {
+  WebIDEConfiguration,
+  WebIDEInitialLayout,
+} from './contracts/configuration'
 export type {
   LanguageToolingProvider,
   LanguageToolingProviderComponentProps,
@@ -63,11 +66,13 @@ export type {
   DrawCommand,
   HeapAllocation,
   MemorySnapshot,
+  RuntimeBreakpointMap,
   RuntimeCapabilities,
   RuntimeDiagnostic,
   RuntimeExecutionMode,
   RuntimeExecutionPlan,
   RuntimeEventChannels,
+  RuntimeOutcome,
   RuntimeProvider,
   RuntimePreparationResult,
   RuntimeSession,
@@ -76,6 +81,12 @@ export type {
   StackFrame,
   VariableNode,
 } from './contracts/runtime'
+export type {
+  IDESourceDecoration,
+  IDESourceDecorationKind,
+  IDESourceLocation,
+  IDESourcePresentationOwner,
+} from './contracts/source-presentation'
 export type {
   PreparedTestExecution,
   TestAssertion,

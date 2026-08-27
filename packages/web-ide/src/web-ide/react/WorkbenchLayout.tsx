@@ -6,7 +6,6 @@ import { GlobalHotkeys } from '@/components/layout/GlobalHotkeys'
 import { HostEventBridge } from '@/components/layout/HostEventBridge'
 import { ActivityBar } from '@/components/sidebar/ActivityBar'
 import { SidebarPanel } from '@/components/sidebar/SidebarPanel'
-import { useSidebarStore } from '@/components/sidebar/sidebar-store'
 import { Editor } from '@/components/editor/Editor'
 import { RightPanel } from '@/components/layout/RightPanel'
 import {
@@ -16,16 +15,24 @@ import {
 } from '@/components/ui/resizable'
 import { useWebIDEHost } from './host-context'
 import { useWebIDEConfiguration } from './configuration-context'
+import { usePanelLayout } from './panel-layout-context'
 import '@/components/sidebar/sidebar.css'
+import { useSidebarLayout } from './sidebar-layout-context'
 
 /** Reusable workbench UI. Runtime and contribution providers sit above it. */
 export function WorkbenchLayout() {
   const host = useWebIDEHost()
   const configuration = useWebIDEConfiguration()
-  const sidebarCollapsed = useSidebarStore((state) => state.collapsed)
+  const { initialLayout } = usePanelLayout()
+  const { snapshot: sidebarLayout } = useSidebarLayout()
+  const sidebarCollapsed = sidebarLayout.collapsed
   const chromeSidebar = host?.chrome?.sidebar !== false
   const chromeStatusBar = host?.chrome?.statusBar !== false
   const sidebarVisible = chromeSidebar && !sidebarCollapsed
+  const customPanelColumn = configuration.initialLayout?.panelColumnPercent !== undefined
+  const editorColumnPercent = customPanelColumn
+    ? 100 - initialLayout.panelColumnPercent - (sidebarVisible ? 18 : 0)
+    : 55
 
   useEffect(() => {
     if (configuration.reloadWhenNotIsolated && !window.crossOriginIsolated) {
@@ -48,20 +55,36 @@ export function WorkbenchLayout() {
           >
             {sidebarVisible && (
               <>
-                <ResizablePanel id="sidebar" defaultSize="18" minSize="10" maxSize="40">
+                <ResizablePanel
+                  id="sidebar"
+                  defaultSize="18"
+                  minSize="10"
+                  maxSize="40"
+                  data-web-ide-region="sidebar-column"
+                >
                   <SidebarPanel />
                 </ResizablePanel>
                 <ResizableHandle withHandle />
               </>
             )}
 
-            <ResizablePanel id="editor" defaultSize="55" minSize="25">
+            <ResizablePanel
+              id="editor"
+              defaultSize={`${editorColumnPercent}`}
+              minSize="25"
+              data-web-ide-region="editor-column"
+            >
               <Editor />
             </ResizablePanel>
 
             <ResizableHandle withHandle />
 
-            <ResizablePanel id="right" defaultSize="27" minSize="15">
+            <ResizablePanel
+              id="right"
+              defaultSize={`${initialLayout.panelColumnPercent}`}
+              minSize="15"
+              data-web-ide-region="panel-column"
+            >
               <RightPanel />
             </ResizablePanel>
           </ResizablePanelGroup>

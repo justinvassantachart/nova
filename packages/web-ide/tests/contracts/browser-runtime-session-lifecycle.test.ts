@@ -8,7 +8,7 @@ vi.mock('debugger-sh', () => ({
   Engine: { create: engineCreate },
 }))
 
-import { cppRuntimeProvider } from '../../src/runtimes/providers'
+import { cppRuntimeProvider, pythonRuntimeProvider } from '../../src/runtimes/providers'
 import type {
   RuntimeExecutionMode,
   RuntimeSession,
@@ -108,6 +108,7 @@ class FakeEngine {
   readonly stdin = { write: vi.fn(() => Promise.resolve()) }
   readonly debugger = new FakeDebugger()
   readonly calls: string[] = []
+  settleRunOnStop = true
   private readonly runs: Deferred<FakeRunResult>[] = []
 
   readonly run = vi.fn((): Promise<FakeRunResult> => {
@@ -118,7 +119,7 @@ class FakeEngine {
   })
 
   readonly stop = vi.fn((): void => {
-    this.activeRun()?.resolve({ type: 'stopped' })
+    if (this.settleRunOnStop) this.activeRun()?.resolve({ type: 'stopped' })
   })
 
   complete(result: FakeRunResult): void {
@@ -166,6 +167,89 @@ afterEach(() => {
 })
 
 describe('BrowserRuntimeSession run lifecycle', () => {
+  it('publishes one stable completed settlement without changing the void start API', async () => {
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    engineCreate.mockResolvedValueOnce(engine)
+
+    const { running } = await beginRun(adapter, engine, 'run')
+    const firstSettlement = adapter.waitForSettlement!()
+    const sameSettlement = adapter.waitForSettlement!()
+    expect(sameSettlement).toBe(firstSettlement)
+
+    engine.complete({ type: 'completed', exitCode: 7 })
+
+    await expect(running).resolves.toBeUndefined()
+    await expect(firstSettlement).resolves.toEqual({
+      type: 'completed',
+      exitCode: 7,
+    })
+    expect(adapter.stopAndWait!()).toBe(firstSettlement)
+    expect(engine.stop).not.toHaveBeenCalled()
+  })
+
+  it('shares one pending stopped settlement across repeated running stops', async () => {
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    const exits: number[] = []
+    engineCreate.mockResolvedValueOnce(engine)
+    engine.settleRunOnStop = false
+    adapter.events.exit.subscribe((code) => exits.push(code))
+
+    const { running } = await beginRun(adapter, engine, 'run')
+    const pendingSettlement = adapter.waitForSettlement!()
+    const firstStop = adapter.stopAndWait!()
+    const repeatedStop = adapter.stopAndWait!()
+
+    expect(firstStop).toBe(pendingSettlement)
+    expect(repeatedStop).toBe(firstStop)
+    let stopSettled = false
+    void firstStop.then(() => {
+      stopSettled = true
+    })
+    await Promise.resolve()
+    expect(stopSettled).toBe(false)
+    engine.complete({ type: 'stopped' })
+    await expect(firstStop).resolves.toEqual({ type: 'stopped' })
+    await running
+    expect(engine.stop).toHaveBeenCalledTimes(1)
+    expect(exits).toEqual([0])
+  })
+
+  it('awaits the same stopped settlement when a debug session is paused', async () => {
+    vi.useFakeTimers()
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    const paused = vi.fn()
+    engineCreate.mockResolvedValueOnce(engine)
+    engine.debugger.responder = ({ command }) => {
+      if (command === 'stackTrace') {
+        return {
+          success: true,
+          body: {
+            stackFrames: [
+              { id: 1, name: 'main', line: 3, source: { path: '/main.cpp' } },
+            ],
+          },
+        }
+      }
+      if (command === 'scopes') return { success: true, body: { scopes: [] } }
+      return { success: true }
+    }
+    adapter.events.debugPaused.subscribe(paused)
+
+    const { running } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('stopped', { threadId: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(paused).toHaveBeenCalledTimes(1)
+
+    const pendingSettlement = adapter.waitForSettlement!()
+    expect(adapter.stopAndWait!()).toBe(pendingSettlement)
+    await expect(pendingSettlement).resolves.toEqual({ type: 'stopped' })
+    await running
+    expect(engine.stop).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves run-before-initialize ordering and retries configuration until acknowledged', async () => {
     vi.useFakeTimers()
     const engine = new FakeEngine()
@@ -226,6 +310,7 @@ describe('BrowserRuntimeSession run lifecycle', () => {
     adapter.events.stderr.subscribe((text) => errors.push(text))
 
     const { running } = await beginRun(adapter, engine, 'debug')
+    const settlement = adapter.waitForSettlement!()
     engine.debugger.emit('initialized')
     await vi.advanceTimersByTimeAsync(120_000)
     await running
@@ -235,6 +320,13 @@ describe('BrowserRuntimeSession run lifecycle', () => {
     expect(engine.stop).toHaveBeenCalledTimes(1)
     expect(exits).toEqual([1])
     expect(errors.join('')).toContain('Debugger configuration timed out')
+    await expect(settlement).resolves.toEqual({
+      type: 'error',
+      error: {
+        type: 'DebuggerConfigurationError',
+        message: 'Debugger configuration timed out before the runtime became ready.',
+      },
+    })
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -297,12 +389,16 @@ describe('BrowserRuntimeSession run lifecycle', () => {
     engineCreate.mockResolvedValueOnce(engine)
 
     const { running: firstRun } = await beginRun(adapter, engine, 'debug')
+    const firstSettlement = adapter.waitForSettlement!()
     engine.debugger.emit('initialized')
     engine.debugger.emit('stopped', { threadId: 1 })
     adapter.stop()
     await firstRun
+    await expect(firstSettlement).resolves.toEqual({ type: 'stopped' })
 
     const secondRun = adapter.start({ mode: 'run' })
+    const secondSettlement = adapter.waitForSettlement!()
+    expect(secondSettlement).not.toBe(firstSettlement)
     await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(2))
     await vi.advanceTimersByTimeAsync(100)
 
@@ -311,6 +407,37 @@ describe('BrowserRuntimeSession run lifecycle', () => {
 
     engine.complete({ type: 'completed', exitCode: 0 })
     await secondRun
+    await expect(secondSettlement).resolves.toEqual({
+      type: 'completed',
+      exitCode: 0,
+    })
+  })
+
+  it('settles an automatically replaced run before starting its successor', async () => {
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    const exits: number[] = []
+    engineCreate.mockResolvedValueOnce(engine)
+    adapter.events.exit.subscribe((code) => exits.push(code))
+
+    const { running: firstRun } = await beginRun(adapter, engine, 'run')
+    const firstSettlement = adapter.waitForSettlement!()
+    const secondRun = adapter.start({ mode: 'run' })
+    const secondSettlement = adapter.waitForSettlement!()
+
+    expect(secondSettlement).not.toBe(firstSettlement)
+    await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(2))
+    await firstRun
+    await expect(firstSettlement).resolves.toEqual({ type: 'stopped' })
+
+    engine.complete({ type: 'completed', exitCode: 4 })
+    await secondRun
+    await expect(secondSettlement).resolves.toEqual({
+      type: 'completed',
+      exitCode: 4,
+    })
+    expect(exits).toEqual([0, 4])
+    expect(engine.stop).toHaveBeenCalledTimes(1)
   })
 
   it('reports resolved engine errors as failures instead of successful exits', async () => {
@@ -323,6 +450,7 @@ describe('BrowserRuntimeSession run lifecycle', () => {
     adapter.events.stderr.subscribe((text) => errors.push(text))
 
     const { running } = await beginRun(adapter, engine, 'run')
+    const settlement = adapter.waitForSettlement!()
     engine.complete({
       type: 'error',
       error: { type: 'EngineError', message: 'worker failed' },
@@ -331,6 +459,29 @@ describe('BrowserRuntimeSession run lifecycle', () => {
 
     expect(exits).toEqual([1])
     expect(errors.join('')).toContain('Runtime error: EngineError: worker failed')
+    await expect(settlement).resolves.toEqual({
+      type: 'error',
+      error: { type: 'EngineError', message: 'worker failed' },
+    })
+  })
+
+  it('settles engine initialization failures as typed errors exactly once', async () => {
+    const adapter = createSession()
+    const exits: number[] = []
+    engineCreate.mockRejectedValueOnce(new TypeError('engine unavailable'))
+    adapter.events.exit.subscribe((code) => exits.push(code))
+
+    await adapter.prepare({ files: workspace, mode: 'run' })
+    const running = adapter.start({ mode: 'run' })
+    const settlement = adapter.waitForSettlement!()
+
+    await expect(running).resolves.toBeUndefined()
+    await expect(settlement).resolves.toEqual({
+      type: 'error',
+      error: { type: 'TypeError', message: 'engine unavailable' },
+    })
+    expect(adapter.waitForSettlement!()).toBe(settlement)
+    expect(exits).toEqual([1])
   })
 
   it('flushes intercepted trailing output before publishing normal exit', async () => {
@@ -396,8 +547,18 @@ describe('BrowserRuntimeSession run lifecycle', () => {
     const running = adapter.start({ mode: 'run' })
     await vi.waitFor(() => expect(engineCreate).toHaveBeenCalledTimes(1))
     adapter.dispose?.()
+    const firstDisposal = adapter.disposeAndWait!()
+    const repeatedDisposal = adapter.disposeAndWait!()
+    let disposalSettled = false
+    void firstDisposal.then(() => {
+      disposalSettled = true
+    })
+    expect(repeatedDisposal).toBe(firstDisposal)
+    await Promise.resolve()
+    expect(disposalSettled).toBe(false)
     creation.resolve(engine)
     await running
+    await expect(firstDisposal).resolves.toEqual({ type: 'stopped' })
 
     expect(engine.stop).toHaveBeenCalledTimes(1)
     expect(engine.run).not.toHaveBeenCalled()
@@ -407,22 +568,338 @@ describe('BrowserRuntimeSession run lifecycle', () => {
     )
   })
 
-  it('publishes debugResumed only from the authoritative continued event', async () => {
+  it('publishes debugResumed once from a successful resume command', async () => {
     vi.useFakeTimers()
     const engine = new FakeEngine()
     const adapter = createSession()
     const resumed = vi.fn()
     engineCreate.mockResolvedValueOnce(engine)
+    engine.debugger.responder = ({ command }) => {
+      if (command === 'stackTrace') {
+        return {
+          success: true,
+          body: {
+            stackFrames: [
+              { id: 1, name: 'main', line: 1, source: { path: '/main.cpp' } },
+            ],
+          },
+        }
+      }
+      if (command === 'scopes') return { success: true, body: { scopes: [] } }
+      return { success: true }
+    }
     adapter.events.debugResumed.subscribe(resumed)
 
     const { running } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('stopped', { threadId: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    await adapter.stepOver()
     await adapter.stepOver()
 
     expect(commands(engine, 'next')).toHaveLength(1)
-    expect(resumed).not.toHaveBeenCalled()
+    expect(resumed).toHaveBeenCalledTimes(1)
+    // Current built-in adapters do not emit this, but ignore a future/late
+    // event so one user command still produces one public transition.
     engine.debugger.emit('continued')
     expect(resumed).toHaveBeenCalledTimes(1)
 
+    engine.complete({ type: 'completed', exitCode: 0 })
+    await running
+  })
+
+  it('rejects active C++ breakpoint edits without mutating accepted breakpoints', async () => {
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    const diagnostics = vi.fn()
+    const validated = vi.fn()
+    const stderr: string[] = []
+    const message =
+      'Stop the current debug session before changing breakpoints; this runtime cannot replace them while execution is active.'
+    engineCreate.mockResolvedValueOnce(engine)
+    adapter.events.diagnostic.subscribe(diagnostics)
+    adapter.events.breakpointsValidated.subscribe(validated)
+    adapter.events.stderr.subscribe((text) => stderr.push(text))
+
+    await adapter.setBreakpoints('/workspace/main.cpp', [2])
+    const { running: firstRun } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(1))
+
+    await expect(
+      adapter.setBreakpoints('/workspace/main.cpp', [3]),
+    ).rejects.toThrow(message)
+    expect(commands(engine, 'setBreakpoints')).toHaveLength(1)
+    expect(validated).toHaveBeenCalledExactlyOnceWith({
+      file: '/workspace/main.cpp',
+      lines: [2],
+    })
+    expect(diagnostics).toHaveBeenCalledExactlyOnceWith({
+      message,
+      severity: 'warning',
+      phase: 'execution',
+      mode: 'debug',
+    })
+    expect(stderr.join('')).toContain(message)
+
+    adapter.stop()
+    await firstRun
+
+    // Starting again without an edit proves the rejected value never replaced
+    // the accepted map.
+    const { running: secondRun } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(2))
+    expect(commands(engine, 'setBreakpoints')[1]?.arguments).toEqual({
+      source: { path: '/main.cpp' },
+      breakpoints: [{ line: 2 }],
+    })
+    adapter.stop()
+    await secondRun
+
+    // Once idle, the same edit is accepted and used by the following session.
+    await expect(
+      adapter.setBreakpoints('/workspace/main.cpp', [3]),
+    ).resolves.toBeUndefined()
+    const { running: thirdRun } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(3))
+    expect(commands(engine, 'setBreakpoints')[2]?.arguments).toEqual({
+      source: { path: '/main.cpp' },
+      breakpoints: [{ line: 3 }],
+    })
+
+    engine.complete({ type: 'completed', exitCode: 0 })
+    await thirdRun
+  })
+
+  it('merges editor breakpoints with two owner-isolated overlays without publishing overlay lines', async () => {
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    const ownerA = {}
+    const ownerB = {}
+    const validated: { file: string; lines: number[] }[] = []
+    engineCreate.mockResolvedValueOnce(engine)
+    engine.debugger.responder = ({ command, arguments: args }) => {
+      if (command !== 'setBreakpoints') return { success: true }
+      const requested = (args?.breakpoints ?? []) as { line: number }[]
+      return {
+        success: true,
+        body: {
+          breakpoints: requested.map(({ line }) => ({
+            verified: true,
+            line: line === 2 ? 3 : line,
+          })),
+        },
+      }
+    }
+    adapter.events.breakpointsValidated.subscribe((event) => validated.push(event))
+
+    await adapter.setBreakpoints('/workspace/main.cpp', [2])
+    await adapter.replaceBreakpointOverlay!(ownerA, {
+      '/workspace/main.cpp': [4, 2],
+    })
+    await adapter.replaceBreakpointOverlay!(ownerB, {
+      '/workspace/main.cpp': [6],
+    })
+    const { running: firstRun } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(1))
+
+    expect(commands(engine, 'setBreakpoints')[0]?.arguments).toEqual({
+      source: { path: '/main.cpp' },
+      breakpoints: [{ line: 2 }, { line: 4 }, { line: 6 }],
+    })
+    expect(validated).toEqual([{
+      file: '/workspace/main.cpp',
+      lines: [3],
+    }])
+    engine.complete({ type: 'completed', exitCode: 0 })
+    await firstRun
+
+    await adapter.clearBreakpointOverlay!(ownerA)
+    const { running: secondRun } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(2))
+    expect(commands(engine, 'setBreakpoints')[1]?.arguments).toEqual({
+      source: { path: '/main.cpp' },
+      breakpoints: [{ line: 3 }, { line: 6 }],
+    })
+
+    engine.complete({ type: 'completed', exitCode: 0 })
+    await secondRun
+  })
+
+  it('clears an empty-replaced overlay through the Python adapter reset lifecycle', async () => {
+    const firstEngine = new FakeEngine()
+    const adapter = pythonRuntimeProvider.createSession()
+    const owner = {}
+    sessions.push(adapter)
+    engineCreate.mockResolvedValueOnce(firstEngine)
+
+    await adapter.prepare({
+      files: { '/workspace/main.py': 'print("overlay")' },
+      mode: 'debug',
+      entrypoint: '/workspace/main.py',
+    })
+    await adapter.replaceBreakpointOverlay!(owner, {
+      '/workspace/main.py': [1],
+    })
+    const firstRun = adapter.start({ mode: 'debug' })
+    await vi.waitFor(() => expect(firstEngine.run).toHaveBeenCalledTimes(1))
+    firstEngine.debugger.emit('initialized')
+    await vi.waitFor(() => (
+      expect(commands(firstEngine, 'configurationDone')).toHaveLength(1)
+    ))
+    expect(commands(firstEngine, 'setBreakpoints')[0]?.arguments).toEqual({
+      source: { path: '/main.py' },
+      breakpoints: [{ line: 1 }],
+    })
+    firstEngine.complete({ type: 'completed', exitCode: 0 })
+    await firstRun
+
+    await adapter.replaceBreakpointOverlay!(owner, {})
+    expect(firstEngine.stop).toHaveBeenCalledTimes(1)
+
+    const secondEngine = new FakeEngine()
+    engineCreate.mockResolvedValueOnce(secondEngine)
+    const secondRun = adapter.start({ mode: 'debug' })
+    await vi.waitFor(() => expect(secondEngine.run).toHaveBeenCalledTimes(1))
+    secondEngine.debugger.emit('initialized')
+    await vi.waitFor(() => (
+      expect(commands(secondEngine, 'configurationDone')).toHaveLength(1)
+    ))
+    expect(commands(secondEngine, 'setBreakpoints')[0]?.arguments).toEqual({
+      source: { path: '/main.py' },
+      breakpoints: [],
+    })
+    secondEngine.complete({ type: 'completed', exitCode: 0 })
+    await secondRun
+
+    await adapter.disposeAndWait!()
+    await expect(adapter.replaceBreakpointOverlay!(owner, {
+      '/workspace/main.py': [1],
+    })).rejects.toThrow('disposed runtime session')
+    await expect(adapter.clearBreakpointOverlay!(owner)).rejects.toThrow(
+      'disposed runtime session',
+    )
+  })
+
+  it('bounds overlays with the provider quota and isolates the same owner token per session', async () => {
+    const firstEngine = new FakeEngine()
+    const secondEngine = new FakeEngine()
+    const first = pythonRuntimeProvider.createSession()
+    const second = pythonRuntimeProvider.createSession()
+    const owner = {}
+    sessions.push(first, second)
+    engineCreate.mockResolvedValueOnce(firstEngine).mockResolvedValueOnce(secondEngine)
+
+    await expect(first.replaceBreakpointOverlay!(owner, {
+      [`/workspace/${'界'.repeat(1_200)}.py`]: [1],
+    })).rejects.toThrow(/accepts at most 3500/)
+    await first.replaceBreakpointOverlay!(owner, { '/workspace/main.py': [2] })
+    for (const invalidPath of [
+      'relative.py',
+      '/sysroot/private.py',
+      '/workspace/../outside.py',
+      '/workspace/a//b.py',
+      '/workspace/nul\0.py',
+    ]) {
+      await expect(first.replaceBreakpointOverlay!(owner, {
+        [invalidPath]: [1],
+      })).rejects.toThrow(/Breakpoint overlay|Workspace file path/u)
+    }
+    await Promise.all([
+      first.prepare({
+        files: { '/workspace/main.py': 'print("first")' },
+        mode: 'debug',
+        entrypoint: '/workspace/main.py',
+      }),
+      second.prepare({
+        files: { '/workspace/main.py': 'print("second")' },
+        mode: 'debug',
+        entrypoint: '/workspace/main.py',
+      }),
+    ])
+    const firstRun = first.start({ mode: 'debug' })
+    await vi.waitFor(() => expect(firstEngine.run).toHaveBeenCalledTimes(1))
+    const secondRun = second.start({ mode: 'debug' })
+    await vi.waitFor(() => expect(secondEngine.run).toHaveBeenCalledTimes(1))
+    firstEngine.debugger.emit('initialized')
+    secondEngine.debugger.emit('initialized')
+    await vi.waitFor(() => {
+      expect(commands(firstEngine, 'configurationDone')).toHaveLength(1)
+      expect(commands(secondEngine, 'configurationDone')).toHaveLength(1)
+    })
+
+    expect(commands(firstEngine, 'setBreakpoints')[0]?.arguments).toEqual({
+      source: { path: '/main.py' },
+      breakpoints: [{ line: 2 }],
+    })
+    expect(commands(secondEngine, 'setBreakpoints')[0]?.arguments).toEqual({
+      source: { path: '/main.py' },
+      breakpoints: [],
+    })
+    firstEngine.complete({ type: 'completed', exitCode: 0 })
+    secondEngine.complete({ type: 'completed', exitCode: 0 })
+    await Promise.all([firstRun, secondRun])
+  })
+
+  it('rejects an over-quota editor-plus-multiple-owner aggregate atomically', async () => {
+    const engine = new FakeEngine()
+    const adapter = pythonRuntimeProvider.createSession()
+    const ownerA = {}
+    const ownerB = {}
+    const editorFile = `/workspace/${'e'.repeat(1_000)}.py`
+    const ownerAFile = `/workspace/${'a'.repeat(1_000)}.py`
+    const rejectedOwnerBFile = `/workspace/${'b'.repeat(1_800)}.py`
+    sessions.push(adapter)
+    engineCreate.mockResolvedValueOnce(engine)
+
+    await adapter.setBreakpoints(editorFile, [1])
+    await adapter.replaceBreakpointOverlay!(ownerA, { [ownerAFile]: [2] })
+    await adapter.replaceBreakpointOverlay!(ownerB, { '/workspace/b.py': [3] })
+    await expect(adapter.replaceBreakpointOverlay!(ownerB, {
+      [rejectedOwnerBFile]: [4],
+    })).rejects.toThrow(/accepts at most 3500/)
+
+    await adapter.prepare({
+      files: { '/workspace/main.py': 'print("quota")' },
+      mode: 'debug',
+      entrypoint: '/workspace/main.py',
+    })
+    const running = adapter.start({ mode: 'debug' })
+    await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(1))
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(1))
+
+    const configured = commands(engine, 'setBreakpoints').map(({ arguments: args }) => ({
+      file: (args?.source as { path?: string } | undefined)?.path,
+      lines: (args?.breakpoints as { line: number }[]).map(({ line }) => line),
+    }))
+    expect(configured).toEqual(expect.arrayContaining([
+      { file: editorFile.slice('/workspace'.length), lines: [1] },
+      { file: ownerAFile.slice('/workspace'.length), lines: [2] },
+      { file: '/b.py', lines: [3] },
+    ]))
+    expect(configured).toHaveLength(3)
+
+    engine.complete({ type: 'completed', exitCode: 0 })
+    await running
+  })
+
+  it('keeps the ordinary non-overlay breakpoint configuration unchanged', async () => {
+    const engine = new FakeEngine()
+    const adapter = createSession()
+    engineCreate.mockResolvedValueOnce(engine)
+    await adapter.setBreakpoints('/workspace/main.cpp', [8, 3, 8])
+
+    const { running } = await beginRun(adapter, engine, 'debug')
+    engine.debugger.emit('initialized')
+    await vi.waitFor(() => expect(commands(engine, 'configurationDone')).toHaveLength(1))
+    expect(commands(engine, 'setBreakpoints')[0]?.arguments).toEqual({
+      source: { path: '/main.cpp' },
+      breakpoints: [{ line: 3 }, { line: 8 }],
+    })
     engine.complete({ type: 'completed', exitCode: 0 })
     await running
   })

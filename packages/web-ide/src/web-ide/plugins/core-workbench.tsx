@@ -28,7 +28,9 @@ export const coreWorkbenchPlugin: IDEPlugin = {
         title: 'Graph',
         component: MemoryVisualizer,
         order: 20,
-        when: ({ runtimeCapabilities }) => runtimeCapabilities.debug,
+        when: ({ runtimeCapabilities }) =>
+          runtimeCapabilities.debug
+          && runtimeCapabilities.memoryVisualization !== false,
       },
     ],
     commands: [

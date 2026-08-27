@@ -104,6 +104,7 @@ describe('built-in runtime providers', () => {
         breakpoints: true,
         stdin: true,
         graphics: false,
+        memoryVisualization: true,
       },
     })
     expect(pythonRuntimeProvider).toMatchObject({
@@ -111,10 +112,11 @@ describe('built-in runtime providers', () => {
       label: 'Python',
       languageIds: ['python'],
       capabilities: {
-        debug: false,
-        breakpoints: false,
+        debug: true,
+        breakpoints: true,
         stdin: true,
         graphics: false,
+        memoryVisualization: false,
       },
     })
     expect(engineCreate).not.toHaveBeenCalled()
@@ -187,10 +189,16 @@ describe('built-in runtime providers', () => {
     await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(1))
 
     expect(engineCreate).toHaveBeenCalledExactlyOnceWith('python')
-    expect(engine.debugger.filterInternals).toBe(true)
+    // Web IDE filters against the full prepared workspace itself. The engine's
+    // Python-only filter treats only /main.py as user code and would hide
+    // imported workspace modules from the call stack.
+    expect(engine.debugger.filterInternals).toBe(false)
     expect(engine.debugger.enabled).toBe(false)
     expect(engine.fs).toMatchObject({
-      'main.py': 'print("hello")',
+      'main.py': expect.stringContaining(
+        '__web_ide_runpy.run_path(__web_ide_entrypoint, run_name="__main__")',
+      ),
+      'lesson.py': 'print("hello")',
       'helpers.py': 'VALUE = 1',
     })
 
@@ -207,24 +215,27 @@ describe('built-in runtime providers', () => {
     await running
   })
 
-  it('rejects Python debugging without loading the engine', async () => {
+  it('accepts Python debugging and enables the Python debugger lazily', async () => {
+    const engine = new FakeEngine()
+    engineCreate.mockResolvedValueOnce(engine)
     const session = createSession(pythonRuntimeProvider)
 
     await expect(session.prepare({
-      files: { '/workspace/main.py': 'print("run only")' },
+      files: { '/workspace/main.py': 'print("debug")' },
       mode: 'debug',
       entrypoint: '/workspace/main.py',
-    })).resolves.toEqual({
-      success: false,
-      errors: ['Runtime provider "web-ide.runtime.python" does not support debugging'],
-    })
-    await expect(session.start({ mode: 'debug' })).rejects.toThrow(
-      'Runtime provider "web-ide.runtime.python" does not support debugging',
-    )
-    await expect(session.setBreakpoints('/workspace/main.py', [1])).rejects.toThrow(
-      'Runtime provider "web-ide.runtime.python" does not support breakpoints',
-    )
+    })).resolves.toEqual({ success: true, errors: [] })
+    await expect(session.setBreakpoints('/workspace/main.py', [1])).resolves.toBeUndefined()
     expect(engineCreate).not.toHaveBeenCalled()
+
+    const running = session.start({ mode: 'debug' })
+    await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(1))
+
+    expect(engineCreate).toHaveBeenCalledExactlyOnceWith('python')
+    expect(engine.debugger.enabled).toBe(true)
+
+    engine.complete()
+    await running
   })
 
   it('builds nested runtime directories without flattening Python imports', async () => {
@@ -258,6 +269,57 @@ describe('built-in runtime providers', () => {
     await running
   })
 
+  it('preserves nested and workspace-root imports in an alternate Python launcher', async () => {
+    const engine = new FakeEngine()
+    engineCreate.mockResolvedValueOnce(engine)
+    const session = createSession(pythonRuntimeProvider)
+
+    await expect(session.prepare({
+      files: {
+        '/workspace/apps/demo/start.py': [
+          'from sibling import SIBLING',
+          'from root_helper import ROOT',
+          'print(SIBLING, ROOT)',
+        ].join('\n'),
+        '/workspace/apps/demo/sibling.py': 'SIBLING = "nested"',
+        '/workspace/root_helper.py': 'ROOT = "root"',
+      },
+      mode: 'run',
+      entrypoint: '/workspace/apps/demo/start.py',
+    })).resolves.toEqual({ success: true, errors: [] })
+
+    const running = session.start({ mode: 'run' })
+    await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(1))
+
+    expect(engine.fs).toMatchObject({
+      apps: {
+        demo: {
+          'start.py': expect.stringContaining('from sibling import SIBLING'),
+          'sibling.py': 'SIBLING = "nested"',
+        },
+      },
+      'root_helper.py': 'ROOT = "root"',
+    })
+    expect(engine.fs['main.py']).toBe([
+      'import os as __web_ide_os',
+      'import runpy as __web_ide_runpy',
+      'import sys as __web_ide_sys',
+      '__web_ide_entrypoint = "/apps/demo/start.py"',
+      '__web_ide_entrypoint_dir = __web_ide_os.path.dirname(__web_ide_entrypoint) or "/"',
+      'if __web_ide_entrypoint_dir in __web_ide_sys.path:',
+      '    __web_ide_sys.path.remove(__web_ide_entrypoint_dir)',
+      '__web_ide_sys.path.insert(0, __web_ide_entrypoint_dir)',
+      'if "/" not in __web_ide_sys.path:',
+      '    __web_ide_sys.path.insert(1, "/")',
+      '__web_ide_runpy.run_path(__web_ide_entrypoint, run_name="__main__")',
+    ].join('\n'))
+    expect(Object.getPrototypeOf(engine.fs.apps)).toBeNull()
+    expect(Object.getPrototypeOf((engine.fs.apps as Record<string, unknown>).demo)).toBeNull()
+
+    engine.complete()
+    await running
+  })
+
   it('rejects traversal and file-directory collisions before loading the engine', async () => {
     const session = createSession(pythonRuntimeProvider)
 
@@ -277,6 +339,24 @@ describe('built-in runtime providers', () => {
     })).resolves.toMatchObject({
       success: false,
       errors: [expect.stringContaining('both a file and directory')],
+    })
+    expect(engineCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects cross-plane files that flatten to the same engine path', async () => {
+    const session = createSession(pythonRuntimeProvider)
+
+    await expect(session.prepare({
+      files: {
+        '/workspace/lib/support.py': 'student content',
+        '/sysroot/lib/support.py': 'execution-only content',
+      },
+      mode: 'run',
+    })).resolves.toEqual({
+      success: false,
+      errors: [
+        'Runtime file paths "/sysroot/lib/support.py" and "/workspace/lib/support.py" both flatten to "lib/support.py"',
+      ],
     })
     expect(engineCreate).not.toHaveBeenCalled()
   })

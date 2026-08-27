@@ -5,6 +5,11 @@ import { EventEmitter } from '@/lib/event-emitter';
 // 8.6 MB wasm asset, and materialises the worker blob URL — all before
 // the user has even pressed Run. Deferring keeps page-open cost flat.
 import type { DirNode, Engine as EngineType, Lang } from 'debugger-sh';
+import {
+    assertNoFlattenedRuntimePathCollisions,
+    canonicalWorkspaceFilePath,
+    runtimeRelativeFilePath,
+} from '@/web-ide/core/workspace-path';
 import type {
     DebugPauseState,
     DrawCommand,
@@ -12,13 +17,17 @@ import type {
     StackFrame,
     HeapAllocation,
     RuntimeExecutionPlan,
+    RuntimeBreakpointMap,
     RuntimePreparationResult,
+    RuntimeOutcome,
     RuntimeSession,
     RuntimeStartRequest,
 } from '@/web-ide/contracts/runtime';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
+type EngineRunResult = Awaited<ReturnType<EngineType['run']>>;
+type RuntimeErrorOutcome = Extract<RuntimeOutcome, { type: 'error' }>;
 
 interface DapResponse {
     type?: string;
@@ -41,6 +50,22 @@ interface DebugConfigurationState {
     timeoutTimer?: ScheduledTask;
 }
 
+interface RuntimeSettlementState {
+    readonly session: number;
+    readonly promise: Promise<RuntimeOutcome>;
+    resolve(outcome: RuntimeOutcome): void;
+    requestedOutcome?: RuntimeOutcome;
+    stopRequested: boolean;
+    settled: boolean;
+    exitPublished: boolean;
+}
+
+interface BreakpointConfigurationChange {
+    readonly file: string;
+    readonly previousLines: number[];
+    readonly nextLines: number[];
+}
+
 interface BrowserRuntimeSessionProfile {
     readonly id: string;
     readonly languageIds: readonly string[];
@@ -48,31 +73,51 @@ interface BrowserRuntimeSessionProfile {
     readonly capabilities: RuntimeSession['capabilities'];
     readonly filterInternals?: boolean;
     readonly defaultEntrypoint?: string;
+    /** Builds the engine's fixed entrypoint without rewriting the selected source. */
+    readonly createEntrypointLauncher?: (runtimePath: string) => string;
     readonly preparationErrorPattern?: RegExp;
     readonly debugFallbackPath?: string;
+    /** Keep only frames backed by files in the prepared host workspace. */
+    readonly workspaceOnlyStackFrames?: boolean;
+    /** Some adapters acknowledge resume commands without emitting `continued`. */
+    readonly emitResumeOnCommand?: boolean;
+    /** Queue breakpoint changes until the adapter next reaches a paused state. */
+    readonly deferBreakpointUpdatesWhileRunning?: boolean;
+    /** Whether breakpoint responses identify authoritative bound source lines. */
+    readonly trustBreakpointValidation?: boolean;
+    /** Reject breakpoint edits until the current debug run has stopped. */
+    readonly breakpointChangesRequireRestart?: boolean;
+    /** Recreate the adapter after a clear so its private source map cannot grow forever. */
+    readonly resetAdapterAfterBreakpointClear?: boolean;
+    /** Guard adapters whose resume transport has a bounded breakpoint payload. */
+    readonly maxBreakpointConfigurationBytes?: number;
 }
 
 function emptyDirectory(): DirNode {
     return Object.create(null) as DirNode;
 }
 
-function runtimeRelativePath(path: string): string {
-    if (path === '/workspace' || path === '/sysroot') {
-        throw new TypeError(`Runtime file path is not canonical: ${JSON.stringify(path)}`);
+function canonicalWorkspacePath(path: string): string {
+    if (path.startsWith('/sysroot/')) {
+        return `/sysroot/${runtimeRelativeFilePath(path)}`;
     }
+    return `/workspace/${runtimeRelativeFilePath(path)}`;
+}
+
+function runtimeSourceKey(path: unknown): string | null {
+    if (typeof path !== 'string' || path.length === 0) return null;
     let relative = path;
-    if (path.startsWith('/workspace/')) relative = path.slice('/workspace/'.length);
-    else if (path.startsWith('/sysroot/')) relative = path.slice('/sysroot/'.length);
-    else if (path.startsWith('/')) relative = path.slice(1);
+    if (relative.startsWith('file://')) relative = relative.slice('file://'.length);
+    if (relative.startsWith('/workspace/')) relative = relative.slice('/workspace/'.length);
+    else if (relative.startsWith('/sysroot/')) relative = relative.slice('/sysroot/'.length);
+    else if (relative.startsWith('/')) relative = relative.slice(1);
 
     const segments = relative.split('/');
     if (
         relative.length === 0
-        || path.includes('\0')
+        || relative.includes('\0')
         || segments.some((segment) => segment === '' || segment === '.' || segment === '..')
-    ) {
-        throw new TypeError(`Runtime file path is not canonical: ${JSON.stringify(path)}`);
-    }
+    ) return null;
     return segments.join('/');
 }
 
@@ -106,6 +151,47 @@ function buildRuntimeFileTree(files: Readonly<Record<string, string>>): DirNode 
     }
 
     return root;
+}
+
+function createRuntimeSettlement(session: number): RuntimeSettlementState {
+    let settlePromise!: (outcome: RuntimeOutcome) => void;
+    const state: RuntimeSettlementState = {
+        session,
+        promise: new Promise<RuntimeOutcome>((resolve) => {
+            settlePromise = resolve;
+        }),
+        resolve(outcome) {
+            if (state.settled) return;
+            state.settled = true;
+            settlePromise(outcome);
+        },
+        stopRequested: false,
+        settled: false,
+        exitPublished: false,
+    };
+    return state;
+}
+
+function runtimeErrorOutcome(
+    error: unknown,
+    fallbackType = 'RuntimeError',
+): RuntimeErrorOutcome {
+    if (error instanceof Error) {
+        return {
+            type: 'error',
+            error: {
+                type: error.name || fallbackType,
+                message: error.message,
+            },
+        };
+    }
+    return {
+        type: 'error',
+        error: {
+            type: fallbackType,
+            message: String(error),
+        },
+    };
 }
 
 export class BrowserRuntimeSession implements RuntimeSession {
@@ -155,14 +241,32 @@ export class BrowserRuntimeSession implements RuntimeSession {
     // across runs, a fresh run() must wait for any prior run's promise to
     // settle — Engine.run() short-circuits to the stale promise if its
     // internal `this.promise` field is still set.
-    private currentRun: Promise<unknown> | null = null;
+    private currentRun: Promise<EngineRunResult> | null = null;
+    private currentRunSettlement: RuntimeSettlementState | null = null;
+    private activeSettlement: RuntimeSettlementState | null = null;
+    private readonly idleSettlement = Promise.resolve<RuntimeOutcome>({ type: 'stopped' });
+    private disposalPromise: Promise<RuntimeOutcome> | null = null;
     private dapSeq = 1;
+    // Editor breakpoints stay separate from transient workflow overlays so
+    // adapter validation can never leak an overlay into the visible gutter.
     private activeBreakpoints: Record<string, number[]> = {};
+    private readonly breakpointOverlays = new Map<object, Record<string, number[]>>();
+    // A reused adapter must receive an explicit empty set for an overlay-only
+    // source after its owner clears. Profiles that reset their adapter discard
+    // these tombstones as soon as the reset completes.
+    private readonly breakpointClearTombstones = new Set<string>();
     private running = false;
+    private debugPaused = false;
+    private breakpointsDirty = false;
+    private breakpointAdapterResetPending = false;
     private fileMap = Object.create(null) as Record<string, string>;
+    private readonly runtimePathByWorkspacePath = new Map<string, string>();
+    private readonly workspacePathByRuntimePath = new Map<string, string>();
+    private readonly userRuntimePaths = new Set<string>();
     private runtimeFileTree: DirNode = emptyDirectory();
     private inputBuf = '';
     private currentIsDebug = false;
+    private activeThreadId = 1;
     private streamInterceptor: RuntimeExecutionPlan['streamInterceptor'];
     private readonly stdoutDecoder = new TextDecoder();
     private readonly stderrDecoder = new TextDecoder();
@@ -218,26 +322,48 @@ export class BrowserRuntimeSession implements RuntimeSession {
         );
 
         try {
+            assertNoFlattenedRuntimePathCollisions(files);
             this.fileMap = Object.create(null) as Record<string, string>;
+            this.runtimePathByWorkspacePath.clear();
+            this.workspacePathByRuntimePath.clear();
+            this.userRuntimePaths.clear();
             for (const [path, content] of Object.entries(files)) {
                 if (typeof content !== 'string') {
                     throw new TypeError(`Runtime file content must be a string: ${JSON.stringify(path)}`);
                 }
-                this.fileMap[runtimeRelativePath(path)] = content;
+                const relativePath = runtimeRelativeFilePath(path);
+                const workspacePath = canonicalWorkspacePath(path);
+                this.fileMap[relativePath] = content;
+                this.runtimePathByWorkspacePath.set(workspacePath, `/${relativePath}`);
+                this.workspacePathByRuntimePath.set(relativePath, workspacePath);
+                if (workspacePath.startsWith('/workspace/')) {
+                    this.userRuntimePaths.add(relativePath);
+                }
             }
 
             if (entrypoint && this.profile.defaultEntrypoint) {
-                const sourcePath = runtimeRelativePath(entrypoint);
+                const sourcePath = runtimeRelativeFilePath(entrypoint);
                 const source = this.fileMap[sourcePath];
                 if (source === undefined) {
                     throw new TypeError(`Runtime entrypoint "${entrypoint}" was not found in the workspace`);
                 }
-                this.fileMap[this.profile.defaultEntrypoint] = source;
+                if (sourcePath !== this.profile.defaultEntrypoint) {
+                    if (Object.hasOwn(this.fileMap, this.profile.defaultEntrypoint)) {
+                        throw new TypeError(
+                            `Runtime entrypoint "${entrypoint}" cannot be selected while the workspace also contains "${this.profile.defaultEntrypoint}"; stage the original file under an ephemeral path before selecting an alternate entrypoint`,
+                        );
+                    }
+                    this.fileMap[this.profile.defaultEntrypoint] =
+                        this.profile.createEntrypointLauncher?.(`/${sourcePath}`) ?? source;
+                }
             }
 
             this.runtimeFileTree = buildRuntimeFileTree(this.fileMap);
         } catch (error) {
             this.fileMap = Object.create(null) as Record<string, string>;
+            this.runtimePathByWorkspacePath.clear();
+            this.workspacePathByRuntimePath.clear();
+            this.userRuntimePaths.clear();
             this.runtimeFileTree = emptyDirectory();
             this.flushStreamInterceptor();
             return {
@@ -316,6 +442,27 @@ export class BrowserRuntimeSession implements RuntimeSession {
         this.onExit.emit(exitCode);
     }
 
+    private publishExit(settlement: RuntimeSettlementState, exitCode: number): void {
+        if (settlement.exitPublished) return;
+        settlement.exitPublished = true;
+        this.emitExit(exitCode);
+    }
+
+    private requestOutcome(
+        settlement: RuntimeSettlementState | null,
+        outcome: RuntimeOutcome,
+    ): void {
+        if (!settlement || settlement.settled || settlement.requestedOutcome) return;
+        settlement.requestedOutcome = outcome;
+    }
+
+    private settleRuntime(
+        settlement: RuntimeSettlementState,
+        outcome: RuntimeOutcome,
+    ): void {
+        settlement.resolve(settlement.requestedOutcome ?? outcome);
+    }
+
     private flushStreamDecoders(): void {
         const stdout = this.stdoutDecoder.decode();
         const stderr = this.stderrDecoder.decode();
@@ -327,6 +474,7 @@ export class BrowserRuntimeSession implements RuntimeSession {
         this.sessionGeneration += 1;
         this.cancelScheduledTasks();
         this.debugConfiguration = null;
+        this.debugPaused = false;
         return this.sessionGeneration;
     }
 
@@ -334,6 +482,7 @@ export class BrowserRuntimeSession implements RuntimeSession {
         this.sessionGeneration += 1;
         this.cancelScheduledTasks();
         this.debugConfiguration = null;
+        this.debugPaused = false;
     }
 
     private isSessionCurrent(session: number): boolean {
@@ -368,22 +517,36 @@ export class BrowserRuntimeSession implements RuntimeSession {
         this.scheduledTasks.clear();
     }
 
-    private finishSession(session: number, exitCode: number): void {
+    private finishSession(
+        session: number,
+        settlement: RuntimeSettlementState,
+        exitCode: number,
+    ): void {
         if (!this.isSessionActive(session)) return;
         this.running = false;
+        this.debugPaused = false;
         this.cancelScheduledTasks();
         this.debugConfiguration = null;
-        this.emitExit(exitCode);
+        this.resetBreakpointAdapterIfIdle();
+        this.publishExit(settlement, exitCode);
     }
 
     private failSession(session: number, message: string): void {
         if (!this.isSessionActive(session)) return;
         const engine = this.engine;
+        const settlement = this.activeSettlement;
+        this.requestOutcome(settlement, {
+            type: 'error',
+            error: { type: 'DebuggerConfigurationError', message },
+        });
+        if (settlement) settlement.stopRequested = true;
         this.emitStream('stderr', `${message}\r\n`);
         this.running = false;
+        this.debugPaused = false;
         this.invalidateSession();
         try { engine?.stop(); } catch { /* ignore */ }
-        this.emitExit(1);
+        if (settlement) this.publishExit(settlement, 1);
+        else this.emitExit(1);
     }
 
     private dapSend(command: string, args: Record<string, unknown> = {}): DapResponse | null {
@@ -417,14 +580,25 @@ export class BrowserRuntimeSession implements RuntimeSession {
         if (!this.engine) return;
         const engine = this.engine;
         const wasRunning = this.running;
+        const settlement = this.activeSettlement;
+        const message = 'Debugger crashed — session aborted. Press Debug to start over.';
+        this.requestOutcome(settlement, {
+            type: 'error',
+            error: { type: 'DebuggerError', message },
+        });
+        if (settlement) settlement.stopRequested = true;
         this.engine = null;
         this.engineInit = null;
         this.engineInitToken = null;
-        this.emitStream('stderr', 'Debugger crashed — session aborted. Press Debug to start over.\r\n');
+        this.emitStream('stderr', `${message}\r\n`);
         this.running = false;
+        this.debugPaused = false;
         this.invalidateSession();
         try { engine.stop(); } catch { /* ignore */ }
-        if (wasRunning) this.emitExit(1);
+        if (wasRunning) {
+            if (settlement) this.publishExit(settlement, 1);
+            else this.emitExit(1);
+        }
     }
 
     private async ensureEngine(): Promise<EngineType> {
@@ -511,7 +685,11 @@ export class BrowserRuntimeSession implements RuntimeSession {
                     this.scheduleStackTrace(session, m.body, 1, 0);
                     break;
                 case 'continued':
-                    this.onDebugResumed.emit();
+                    // Built-ins synthesize this after a successful command
+                    // because the current adapters do not emit `continued`.
+                    // Keep the event fallback for third-party profiles.
+                    this.debugPaused = false;
+                    if (!this.profile.emitResumeOnCommand) this.onDebugResumed.emit();
                     break;
                 case 'output':
                     if (m.body?.output) {
@@ -532,85 +710,130 @@ export class BrowserRuntimeSession implements RuntimeSession {
             throw new Error(`Runtime provider "${this.id}" does not support debugging`);
         }
         const isDebug = mode === 'debug';
-        const session = this.beginSession();
-        // Cancel any in-flight run on the shared engine, then await its
-        // settlement so Engine.run() doesn't short-circuit to the stale
-        // promise on its next call.
         const previousRun = this.currentRun;
         const previousEngine = this.engine;
-        if (previousRun) {
-            const wasRunning = this.running;
-            this.running = false;
-            try { previousEngine?.stop(); } catch { /* ignore */ }
-            if (wasRunning) this.emitExit(0);
-            try { await previousRun; } catch { /* ignore */ }
-            if (!this.isSessionCurrent(session)) return;
+        const previousSettlement = this.activeSettlement;
+        const previousRunSettlement = this.currentRunSettlement;
+        const session = this.beginSession();
+        const settlement = createRuntimeSettlement(session);
+        this.activeSettlement = settlement;
+        this.requestOutcome(previousSettlement, { type: 'stopped' });
+        if (
+            previousSettlement
+            && !previousSettlement.settled
+            && previousSettlement !== previousRunSettlement
+        ) {
+            previousSettlement.stopRequested = true;
         }
 
-        let engine: EngineType;
+        let runPromise: Promise<EngineRunResult> | null = null;
+        let outcome: RuntimeOutcome = { type: 'stopped' };
         try {
-            engine = await this.ensureEngine();
-        } catch (err) {
-            if (!this.isSessionCurrent(session)) return;
-            const msg = err instanceof Error ? err.message : String(err);
-            this.emitStream('stderr', `Failed to create engine: ${msg}\r\n`);
-            this.emitExit(1);
-            return;
-        }
-        if (!this.isSessionCurrent(session)) {
-            if (this.disposed) {
-                try { engine.stop(); } catch { /* ignore */ }
+            // Cancel any in-flight run on the shared engine, then await its
+            // settlement so Engine.run() doesn't short-circuit to the stale
+            // promise on its next call.
+            if (previousRun) {
+                const shouldStopEngine = !previousRunSettlement?.stopRequested;
+                const wasRunning = this.running;
+                this.requestOutcome(previousRunSettlement, { type: 'stopped' });
+                if (previousRunSettlement) previousRunSettlement.stopRequested = true;
+                this.running = false;
+                this.debugPaused = false;
+                if (shouldStopEngine) {
+                    try { previousEngine?.stop(); } catch { /* ignore */ }
+                }
+                if (wasRunning) {
+                    if (previousRunSettlement) this.publishExit(previousRunSettlement, 0);
+                    else this.emitExit(0);
+                }
+                try { await previousRun; } catch { /* ignore */ }
+                if (!this.isSessionCurrent(session)) return;
+                this.resetBreakpointAdapterIfIdle();
             }
-            return;
-        }
 
-        engine.fs = this.runtimeFileTree;
-        engine.debugger.enabled = isDebug;
-        this.currentIsDebug = isDebug;
-        this.running = true;
-        this.dapSeq = 1;
-        this.inputBuf = '';
-        this.inCompilePhase = true;
-        this.diagnosticEmitted = false;
-        this.stderrLineBuf = '';
-        if (isDebug) this.beginDebuggerConfiguration(session);
-
-        // debugger-sh attaches its DAP transport while run() starts. Sending
-        // initialize before run() can reach the Rust adapter before the fresh
-        // worker/source map exists; its first setBreakpoints request then
-        // traps. Match debugger-sh's reference integration: start the worker,
-        // then initialize, and finish configuration on `initialized`.
-        const runPromise = engine.run();
-        this.currentRun = runPromise;
-        if (isDebug) this.dapSend('initialize', {});
-        let exitCode = 0;
-        try {
-            const result = await runPromise;
-            if (!this.isSessionCurrent(session)) return;
-            if (result.type === 'completed') {
-                exitCode = result.exitCode;
-            } else if (result.type === 'error') {
-                exitCode = 1;
+            let engine: EngineType;
+            try {
+                engine = await this.ensureEngine();
+            } catch (error) {
+                if (!this.isSessionCurrent(session)) return;
+                const failure = runtimeErrorOutcome(error, 'EngineInitializationError');
+                outcome = failure;
                 this.emitStream(
                     'stderr',
-                    `Runtime error: ${result.error.type}: ${result.error.message}\r\n`,
+                    `Failed to create engine: ${failure.error.message}\r\n`,
                 );
+                this.publishExit(settlement, 1);
+                return;
             }
-        } catch (e) {
             if (!this.isSessionCurrent(session)) return;
-            exitCode = 1;
-            const msg = e instanceof Error ? e.message : String(e);
-            this.emitStream('stderr', `Runtime error: ${msg}\r\n`);
+
+            try {
+                engine.fs = this.runtimeFileTree;
+                engine.debugger.enabled = isDebug;
+                this.currentIsDebug = isDebug;
+                this.running = true;
+                this.debugPaused = false;
+                this.dapSeq = 1;
+                this.activeThreadId = 1;
+                this.inputBuf = '';
+                this.inCompilePhase = true;
+                this.diagnosticEmitted = false;
+                this.stderrLineBuf = '';
+                if (isDebug) this.beginDebuggerConfiguration(session);
+
+                // debugger-sh attaches its DAP transport while run() starts.
+                // Start the worker before initialize so its transport and
+                // source map are ready for the first breakpoint request.
+                runPromise = engine.run();
+                this.currentRun = runPromise;
+                this.currentRunSettlement = settlement;
+                if (isDebug) this.dapSend('initialize', {});
+
+                const result = await runPromise;
+                if (!this.isSessionCurrent(session)) return;
+                if (result.type === 'completed') {
+                    outcome = { type: 'completed', exitCode: result.exitCode };
+                } else if (result.type === 'error') {
+                    outcome = {
+                        type: 'error',
+                        error: {
+                            type: result.error.type,
+                            message: result.error.message,
+                        },
+                    };
+                    this.emitStream(
+                        'stderr',
+                        `Runtime error: ${result.error.type}: ${result.error.message}\r\n`,
+                    );
+                } else {
+                    outcome = { type: 'stopped' };
+                }
+            } catch (error) {
+                if (!this.isSessionCurrent(session)) return;
+                const failure = runtimeErrorOutcome(error);
+                outcome = failure;
+                this.emitStream('stderr', `Runtime error: ${failure.error.message}\r\n`);
+            }
         } finally {
-            if (this.currentRun === runPromise) this.currentRun = null;
+            if (runPromise && this.currentRun === runPromise) {
+                this.currentRun = null;
+                this.currentRunSettlement = null;
+            }
             if (this.isSessionActive(session)) {
                 // Drain any pending stderr line and close the compile-phase window.
                 if (this.inCompilePhase && this.stderrLineBuf.length > 0) {
                     this.scanForCompileError('\n');
                 }
                 this.inCompilePhase = false;
-                this.finishSession(session, exitCode);
+                const exitCode = outcome.type === 'completed'
+                    ? outcome.exitCode
+                    : outcome.type === 'error' ? 1 : 0;
+                this.finishSession(session, settlement, exitCode);
+            } else if (this.isSessionCurrent(session) && outcome.type === 'error') {
+                this.publishExit(settlement, 1);
             }
+            this.settleRuntime(settlement, outcome);
+            this.resetBreakpointAdapterIfIdle();
         }
     }
 
@@ -661,13 +884,47 @@ export class BrowserRuntimeSession implements RuntimeSession {
         }, delay);
     }
 
-    private configureDebugger(): boolean {
-        const filesWithBps = Object.keys(this.activeBreakpoints).filter(
-            (f) => this.activeBreakpoints[f].length > 0,
+    private mergedBreakpointConfiguration(
+        editorBreakpoints: Readonly<Record<string, readonly number[]>> = this.activeBreakpoints,
+        overlays: ReadonlyMap<object, Readonly<Record<string, readonly number[]>>> =
+            this.breakpointOverlays,
+        tombstones: ReadonlySet<string> = this.breakpointClearTombstones,
+    ): Record<string, number[]> {
+        const byRuntimePath = new Map<string, { file: string; lines: Set<number> }>();
+        const add = (file: string, lines: readonly number[]): void => {
+            const runtimePath = this.toRuntimePath(file);
+            let entry = byRuntimePath.get(runtimePath);
+            if (!entry) {
+                entry = { file, lines: new Set<number>() };
+                byRuntimePath.set(runtimePath, entry);
+            }
+            for (const line of lines) entry.lines.add(line);
+        };
+
+        // Add editor-owned entries first so their stable workspace spelling is
+        // retained for any breakpoint-validation event sent back to the UI.
+        for (const [file, lines] of Object.entries(editorBreakpoints)) add(file, lines);
+        for (const overlay of overlays.values()) {
+            for (const [file, lines] of Object.entries(overlay)) add(file, lines);
+        }
+        for (const file of tombstones) add(file, []);
+
+        return Object.fromEntries(
+            [...byRuntimePath.values()].map(({ file, lines }) => [
+                file,
+                [...lines].sort((a, b) => a - b),
+            ]),
         );
-        if (filesWithBps.length > 0) {
-            for (const file of filesWithBps) {
-                this.sendBreakpoints(file, this.activeBreakpoints[file]);
+    }
+
+    private configureDebugger(): boolean {
+        const breakpoints = this.mergedBreakpointConfiguration();
+        const configuredFiles = Object.keys(breakpoints);
+        if (configuredFiles.length > 0) {
+            // Empty sets matter: they remove breakpoints previously installed
+            // for that source in a reused adapter.
+            for (const file of configuredFiles) {
+                this.sendBreakpoints(file, breakpoints[file]);
             }
         } else {
             this.dapSend('setBreakpoints', {
@@ -676,7 +933,9 @@ export class BrowserRuntimeSession implements RuntimeSession {
             });
         }
         this.dapSend('setExceptionBreakpoints', { filters: [] });
-        return this.dapSend('configurationDone', {})?.success === true;
+        const configured = this.dapSend('configurationDone', {})?.success === true;
+        if (configured) this.breakpointsDirty = false;
+        return configured;
     }
 
     // Sends one file's breakpoints and reports back where the engine
@@ -690,20 +949,71 @@ export class BrowserRuntimeSession implements RuntimeSession {
             source: { path: this.toRuntimePath(file) },
             breakpoints: lines.map((l) => ({ line: l })),
         });
+        if (this.profile.trustBreakpointValidation === false) return;
         const results: Any[] = res?.body?.breakpoints ?? [];
         if (results.length !== lines.length) return;
-        const bound = lines.map((requested, i) => {
-            const r = results[i];
-            return r?.verified && typeof r.line === 'number' ? (r.line as number) : requested;
-        });
-        this.onBreakpointsValidated.emit({ file, lines: [...new Set(bound)] });
+        const runtimePath = this.toRuntimePath(file);
+
+        // Validate only editor-owned requests. Overlay lines are intentionally
+        // invisible to the gutter and host breakpoint event stream.
+        for (const [editorFile, editorLines] of Object.entries(this.activeBreakpoints)) {
+            if (editorLines.length === 0 || this.toRuntimePath(editorFile) !== runtimePath) continue;
+            const bound = editorLines.map((requested) => {
+                const index = lines.indexOf(requested);
+                if (index < 0) return requested;
+                const result = results[index];
+                return result?.verified && typeof result.line === 'number'
+                    ? (result.line as number)
+                    : requested;
+            });
+            const validated = [...new Set(bound)].sort((a, b) => a - b);
+            this.activeBreakpoints[editorFile] = validated;
+            this.onBreakpointsValidated.emit({ file: editorFile, lines: validated });
+        }
+    }
+
+    private flushPendingBreakpoints(): void {
+        if (!this.breakpointsDirty || !this.engine || !this.running) return;
+        for (const [file, lines] of Object.entries(this.mergedBreakpointConfiguration())) {
+            this.sendBreakpoints(file, lines);
+        }
+        if (this.running) this.breakpointsDirty = false;
+    }
+
+    private resetBreakpointAdapterIfIdle(): void {
+        if (
+            !this.breakpointAdapterResetPending
+            || this.running
+            || this.currentRun
+        ) return;
+        this.breakpointAdapterResetPending = false;
+        this.activeBreakpoints = Object.fromEntries(
+            Object.entries(this.activeBreakpoints).filter(([, lines]) => lines.length > 0),
+        );
+        this.breakpointClearTombstones.clear();
+        const engine = this.engine;
+        if (!engine) return;
+        this.engine = null;
+        this.engineInit = null;
+        this.engineInitToken = null;
+        try { engine.stop(); } catch { /* ignore */ }
     }
 
     private toRuntimePath(file: string): string {
+        const canonicalPath = canonicalWorkspacePath(file);
+        const mappedPath = this.runtimePathByWorkspacePath.get(canonicalPath);
+        if (mappedPath) return mappedPath;
+
         let path = file;
         if (path.startsWith('/workspace/')) path = '/' + path.substring('/workspace/'.length);
         else if (!path.startsWith('/')) path = '/' + path;
         return path;
+    }
+
+    private toWorkspacePath(path: unknown): string | null {
+        const key = runtimeSourceKey(path);
+        if (!key) return null;
+        return this.workspacePathByRuntimePath.get(key) ?? null;
     }
 
     // Ceiling on children fetched per variables request. Values like vector
@@ -715,23 +1025,40 @@ export class BrowserRuntimeSession implements RuntimeSession {
     // Struct-member recursion guard for the same reason: garbage memory can
     // produce arbitrarily deep member chains.
     private static readonly MAX_DEPTH = 8;
+    // A Python pause can expose thousands of eagerly snapshotted container
+    // nodes. Bound total synchronous DAP work across every frame and scope so
+    // one pause cannot monopolize the browser's main thread.
+    private static readonly MAX_VARIABLE_NODES_PER_PAUSE = 1_000;
+    private static readonly MAX_VARIABLE_REQUESTS_PER_PAUSE = 250;
+    private static readonly MAX_STACK_FRAMES_PER_PAUSE = 100;
 
-    private dapVariables(variablesReference: number): Any[] {
+    private dapVariables(
+        variablesReference: number,
+        budget: { nodes: number; requests: number },
+    ): Any[] {
+        const remaining = BrowserRuntimeSession.MAX_VARIABLE_NODES_PER_PAUSE - budget.nodes;
+        if (
+            remaining <= 0
+            || budget.requests >= BrowserRuntimeSession.MAX_VARIABLE_REQUESTS_PER_PAUSE
+        ) return [];
+        budget.requests += 1;
         const res = this.dapSend('variables', {
             variablesReference,
             start: 0,
-            count: BrowserRuntimeSession.MAX_CHILDREN,
+            count: Math.min(BrowserRuntimeSession.MAX_CHILDREN, remaining),
         });
-        return res?.body?.variables ?? [];
+        const variables: Any[] = res?.body?.variables ?? [];
+        const accepted = variables.slice(0, remaining);
+        budget.nodes += accepted.length;
+        return accepted;
     }
 
     // True when a stack-frame source path is one of the files the user can
     // see in the editor. Everything else (libc++ headers, the test runner)
     // is library code students shouldn't be stepping through.
     private isUserSource(path: unknown): boolean {
-        if (typeof path !== 'string' || path.length === 0) return false;
-        const p = path.startsWith('/') ? path.slice(1) : path;
-        return Object.hasOwn(this.fileMap, p);
+        const key = runtimeSourceKey(path);
+        return key !== null && this.userRuntimePaths.has(key);
     }
 
     private scheduleStackTrace(
@@ -760,29 +1087,34 @@ export class BrowserRuntimeSession implements RuntimeSession {
     private handleStopped(session: number, body: Any): boolean {
         if (!this.isSessionActive(session)) return true;
         const threadId = body?.threadId ?? 1;
+        this.activeThreadId = threadId;
         const stackRes = this.dapSend('stackTrace', { threadId });
         // The backend can emit stopped just before stack inspection is ready.
         // Never publish an empty synthetic pause from a failed response; the
         // caller gets one bounded retry while this exact session is active.
         if (stackRes?.success !== true) return false;
-        const frames: Any[] = stackRes?.body?.stackFrames ?? [];
+        this.debugPaused = true;
+        this.flushPendingBreakpoints();
+        if (!this.isSessionActive(session)) return true;
+        const rawFrames: Any[] = stackRes?.body?.stackFrames ?? [];
 
-        // "Just my code" stepping: -O0 compiles libc++ template code from
-        // headers straight into the user's object with full debug info, so a
-        // plain step at e.g. `std::cout << x` or the final `return` pauses
-        // inside <ostream> internals. Students should never land there —
-        // continue until execution is back in a workspace file, reaches the
-        // next user breakpoint, or exits.
-        if (frames.length > 0 && !this.isUserSource(frames[0]?.source?.path)) {
-            // Use continue rather than next to skip non-user frames. `next` does
-            // per-line DWARF lookups, which panics the Rust DAP adapter on the
-            // overlapping address ranges that wasm-ld produces when COMDAT inline
-            // functions (STL templates and other library helpers) are deduplicated
-            // across multiple TUs. `continue` just resumes the WASM worker — no
-            // DWARF walking — and runs to the next user breakpoint or program exit.
-            this.dapSend('continue', { threadId });
+        // "Just my code" stepping. C++ continues past linked library code to
+        // avoid unsafe DWARF `next` operations. Python steps out of a non-host
+        // frame because continuing could skip the caller's next source line.
+        if (rawFrames.length > 0 && !this.isUserSource(rawFrames[0]?.source?.path)) {
+            if (this.profile.workspaceOnlyStackFrames) {
+                this.sendResumeCommand('stepOut');
+            } else {
+                // C++ `next` performs per-line DWARF lookups that can panic on
+                // wasm-ld's overlapping COMDAT ranges. `continue` avoids that.
+                this.sendResumeCommand('continue');
+            }
             return true;
         }
+
+        const frames = (this.profile.workspaceOnlyStackFrames
+            ? rawFrames.filter((frame) => this.isUserSource(frame?.source?.path))
+            : rawFrames).slice(0, BrowserRuntimeSession.MAX_STACK_FRAMES_PER_PAUSE);
 
         const callStack: StackFrame[] = [];
         const heapAllocations = new Map<number, HeapAllocation>();
@@ -790,14 +1122,20 @@ export class BrowserRuntimeSession implements RuntimeSession {
         const stackAddrs = new Set<number>();
         const heapQueue: { ptr: number; typeStr: string; variablesReference: number; valueStr?: string }[] = [];
         const visitedRefs = new Set<number>();
+        const variableBudget = { nodes: 0, requests: 0 };
 
-        const parseAddr = (v: Any) => this.parseHexAddress(v.memoryReference);
+        const supportsMemoryVisualization =
+            this.capabilities.memoryVisualization === true;
+        const parseAddr = (v: Any) => supportsMemoryVisualization
+            ? this.parseHexAddress(v.memoryReference)
+            : 0;
 
         const processVariable = (v: Any, isHeap: boolean, depth = 0): VariableNode => {
             const addr = parseAddr(v);
             const typeStr: string = v.type ?? '';
             // Match pointer logic including references
-            const isPointer = typeStr.includes('*') || typeStr.includes('&');
+            const isPointer = supportsMemoryVisualization
+                && (typeStr.includes('*') || typeStr.includes('&'));
             const variablesReference = v.variablesReference ?? 0;
             const hasChildren = variablesReference > 0;
 
@@ -812,7 +1150,7 @@ export class BrowserRuntimeSession implements RuntimeSession {
                 if (hasChildren) {
                     // The engine returns the pointer's own storage address in `value`,
                     // not the target. Dereference through children to get the actual target.
-                    const dapVars = this.dapVariables(variablesReference);
+                    const dapVars = this.dapVariables(variablesReference, variableBudget);
                     if (dapVars.length > 0) {
                         pointsTo = parseAddr(dapVars[0]);
                     }
@@ -829,7 +1167,7 @@ export class BrowserRuntimeSession implements RuntimeSession {
                 }
             } else if (hasChildren && depth < BrowserRuntimeSession.MAX_DEPTH && !visitedRefs.has(variablesReference)) {
                 visitedRefs.add(variablesReference);
-                const dapVars = this.dapVariables(variablesReference);
+                const dapVars = this.dapVariables(variablesReference, variableBudget);
                 members = dapVars.map((child) => processVariable(child, isHeap, depth + 1));
             }
 
@@ -841,19 +1179,24 @@ export class BrowserRuntimeSession implements RuntimeSession {
                 displayValue = pointsTo && pointsTo > 0 ? `0x${pointsTo.toString(16)}` : '0x0';
             }
 
-            return {
+            const variable: VariableNode = {
                 name: v.name ?? '',
                 type: typeStr,
                 value: displayValue,
-                rawValue: pointsTo ?? addr,
-                address: addr,
-                size: 4,
-                isPointer,
-                pointsTo,
-                pointeeType: isPointer ? typeStr.replace(/[*&]\s*$/, '').trim() : typeStr,
                 isStruct: !isPointer && hasChildren,
                 members,
             };
+            if (supportsMemoryVisualization) {
+                variable.rawValue = pointsTo ?? addr;
+                variable.address = addr;
+                variable.size = 4;
+                variable.isPointer = isPointer;
+                variable.pointsTo = pointsTo;
+                variable.pointeeType = isPointer
+                    ? typeStr.replace(/[*&]\s*$/, '').trim()
+                    : typeStr;
+            }
+            return variable;
         };
 
         // Phase 1: Walk stack synchronously and gather actual memory footprints
@@ -863,19 +1206,21 @@ export class BrowserRuntimeSession implements RuntimeSession {
             const variables: VariableNode[] = [];
 
             for (const scope of scopesRes?.body?.scopes ?? []) {
-                for (const v of this.dapVariables(scope.variablesReference)) {
+                for (const v of this.dapVariables(scope.variablesReference, variableBudget)) {
                     variables.push(processVariable(v, false));
                 }
             }
 
-            callStack.push({
+            const frame: StackFrame = {
                 id: String(f.id),
                 funcName: f.name ?? 'unknown',
+                file: this.toWorkspacePath(f.source?.path) ?? undefined,
                 line: f.line ?? 0,
-                sp: 0,
                 variables,
                 isActive: i === 0,
-            });
+            };
+            if (supportsMemoryVisualization) frame.sp = 0;
+            callStack.push(frame);
         }
 
         // Phase 2: Walk the dynamic pointer relationships to generate objects!
@@ -900,14 +1245,14 @@ export class BrowserRuntimeSession implements RuntimeSession {
 
             heapNodeCount++;
 
-            let dapVars: Any[] = this.dapVariables(item.variablesReference);
+            let dapVars: Any[] = this.dapVariables(item.variablesReference, variableBudget);
 
             // Some DAP implementations return a single element named "*varname" when requesting variables of a pointer.
             // In this case we unwrap it so the properties are top-level on the heap node.
             if (dapVars.length === 1 && (dapVars[0].name?.startsWith('*') || (item.valueStr && item.valueStr.includes(dapVars[0].value)))) {
                 const derefVar = dapVars[0];
                 if (derefVar.variablesReference > 0) {
-                    const inner = this.dapVariables(derefVar.variablesReference);
+                    const inner = this.dapVariables(derefVar.variablesReference, variableBudget);
                     if (inner.length > 0) {
                         dapVars = inner;
                     }
@@ -926,10 +1271,7 @@ export class BrowserRuntimeSession implements RuntimeSession {
         }
 
         const topFrame = callStack[0];
-        let file: string | null = frames[0]?.source?.path ?? null;
-        if (file && !file.startsWith('/workspace/')) {
-            file = file.startsWith('/') ? `/workspace${file}` : `/workspace/${file}`;
-        }
+        const file = this.toWorkspacePath(frames[0]?.source?.path);
 
         if (!this.isSessionActive(session)) return true;
         this.onDebugPaused.emit({
@@ -937,10 +1279,12 @@ export class BrowserRuntimeSession implements RuntimeSession {
             func: topFrame?.funcName ?? null,
             file,
             callStack,
-            memorySnapshot: {
-                frames: callStack,
-                heapAllocations: Array.from(heapAllocations.values()),
-            },
+            memorySnapshot: supportsMemoryVisualization
+                ? {
+                    frames: callStack,
+                    heapAllocations: Array.from(heapAllocations.values()),
+                }
+                : null,
             nextKnownTypes: {},
         });
         return true;
@@ -958,53 +1302,361 @@ export class BrowserRuntimeSession implements RuntimeSession {
         return Number.isFinite(n) ? n : 0;
     }
 
+    private normalizeBreakpointOverlay(
+        breakpoints: RuntimeBreakpointMap,
+    ): Record<string, number[]> {
+        if (typeof breakpoints !== 'object' || breakpoints === null || Array.isArray(breakpoints)) {
+            throw new TypeError('Breakpoint overlay must be a source-path map');
+        }
+        const normalized = Object.create(null) as Record<string, number[]>;
+        for (const [file, lines] of Object.entries(breakpoints)) {
+            const canonicalFile = canonicalWorkspaceFilePath(file);
+            if (canonicalFile !== file) {
+                throw new TypeError(
+                    `Breakpoint overlay path must be canonical under /workspace: ${JSON.stringify(file)}`,
+                );
+            }
+            if (!Array.isArray(lines)) {
+                throw new TypeError(`Breakpoint overlay lines must be an array: ${JSON.stringify(file)}`);
+            }
+            if (lines.some((line) => !Number.isSafeInteger(line) || line < 1)) {
+                throw new TypeError(
+                    `Breakpoint overlay lines must be positive safe integers: ${JSON.stringify(file)}`,
+                );
+            }
+            const normalizedLines = [...new Set(lines)].sort((a, b) => a - b);
+            if (normalizedLines.length === 0) continue;
+            normalized[canonicalFile] = [
+                ...new Set([...(normalized[canonicalFile] ?? []), ...normalizedLines]),
+            ].sort((a, b) => a - b);
+        }
+        return normalized;
+    }
+
+    private breakpointMapsEqual(
+        left: Readonly<Record<string, readonly number[]>> | undefined,
+        right: Readonly<Record<string, readonly number[]>> | undefined,
+    ): boolean {
+        const leftEntries = Object.entries(left ?? {});
+        const rightEntries = Object.entries(right ?? {});
+        if (leftEntries.length !== rightEntries.length) return false;
+        return leftEntries.every(([file, lines]) => {
+            const rightLines = right?.[file];
+            return rightLines !== undefined
+                && lines.length === rightLines.length
+                && lines.every((line, index) => line === rightLines[index]);
+        });
+    }
+
+    private breakpointConfigurationChanges(
+        previous: Readonly<Record<string, readonly number[]>>,
+        next: Readonly<Record<string, readonly number[]>>,
+    ): BreakpointConfigurationChange[] {
+        const index = (configuration: Readonly<Record<string, readonly number[]>>) => {
+            const byRuntimePath = new Map<string, { file: string; lines: number[] }>();
+            for (const [file, lines] of Object.entries(configuration)) {
+                byRuntimePath.set(this.toRuntimePath(file), { file, lines: [...lines] });
+            }
+            return byRuntimePath;
+        };
+        const previousByPath = index(previous);
+        const nextByPath = index(next);
+        const runtimePaths = new Set([...previousByPath.keys(), ...nextByPath.keys()]);
+        const changes: BreakpointConfigurationChange[] = [];
+        for (const runtimePath of runtimePaths) {
+            const before = previousByPath.get(runtimePath);
+            const after = nextByPath.get(runtimePath);
+            const previousLines = before?.lines ?? [];
+            const nextLines = after?.lines ?? [];
+            if (
+                previousLines.length === nextLines.length
+                && previousLines.every((line, index) => line === nextLines[index])
+            ) continue;
+            changes.push({
+                file: after?.file ?? before!.file,
+                previousLines,
+                nextLines,
+            });
+        }
+        return changes;
+    }
+
+    private assertBreakpointConfigurationWithinLimit(
+        breakpoints: Readonly<Record<string, readonly number[]>>,
+        rejectedEditorChange?: { file: string; lines: number[] },
+    ): void {
+        const maxBytes = this.profile.maxBreakpointConfigurationBytes;
+        if (maxBytes === undefined) return;
+        const runtimeBreakpoints = Object.fromEntries(
+            Object.entries(breakpoints).map(([file, lines]) => [
+                this.toRuntimePath(file),
+                lines,
+            ]),
+        );
+        const size = new TextEncoder().encode(JSON.stringify(runtimeBreakpoints)).byteLength;
+        if (size <= maxBytes) return;
+
+        const message =
+            `Breakpoint configuration is ${size} bytes; this runtime accepts at most ${maxBytes}.`;
+        if (rejectedEditorChange) {
+            this.onBreakpointsValidated.emit({
+                file: rejectedEditorChange.file,
+                lines: [...rejectedEditorChange.lines],
+            });
+        }
+        this.onDiagnostic.emit({
+            message,
+            severity: 'error',
+            phase: 'preparation',
+            mode: 'debug',
+        });
+        this.emitStream('stderr', `${message}\r\n`);
+        throw new Error(message);
+    }
+
+    private assertBreakpointChangesAllowed(
+        changes: readonly BreakpointConfigurationChange[],
+        rejectedEditorChange?: { file: string; lines: number[] },
+    ): void {
+        if (
+            changes.length === 0
+            || !this.engine
+            || !this.running
+            || !this.currentIsDebug
+            || !this.profile.breakpointChangesRequireRestart
+        ) return;
+        const message =
+            'Stop the current debug session before changing breakpoints; this runtime cannot replace them while execution is active.';
+        if (rejectedEditorChange) {
+            this.onBreakpointsValidated.emit({
+                file: rejectedEditorChange.file,
+                lines: [...rejectedEditorChange.lines],
+            });
+        }
+        this.onDiagnostic.emit({
+            message,
+            severity: 'warning',
+            phase: 'execution',
+            mode: 'debug',
+        });
+        this.emitStream('stderr', `${message}\r\n`);
+        throw new Error(message);
+    }
+
+    private applyBreakpointConfigurationChanges(
+        changes: readonly BreakpointConfigurationChange[],
+    ): void {
+        if (
+            changes.some(({ previousLines, nextLines }) => (
+                previousLines.length > 0 && nextLines.length === 0
+            ))
+            && this.engine
+            && this.profile.resetAdapterAfterBreakpointClear
+        ) {
+            this.breakpointAdapterResetPending = true;
+        }
+        if (changes.length > 0 && this.engine && this.running && this.currentIsDebug) {
+            if (this.profile.deferBreakpointUpdatesWhileRunning) {
+                this.breakpointsDirty = true;
+                if (this.debugPaused) this.flushPendingBreakpoints();
+            } else {
+                for (const { file, nextLines } of changes) {
+                    this.sendBreakpoints(file, nextLines);
+                }
+            }
+        }
+        this.resetBreakpointAdapterIfIdle();
+    }
+
     async setBreakpoints(file: string, lines: number[]): Promise<void> {
         if (!this.capabilities.breakpoints) {
             throw new Error(`Runtime provider "${this.id}" does not support breakpoints`);
         }
-        this.activeBreakpoints[file] = lines;
-        if (this.engine && this.running) {
-            this.sendBreakpoints(file, lines);
+        const normalizedLines = [...new Set(lines)].sort((a, b) => a - b);
+        const currentLines = this.activeBreakpoints[file] ?? [];
+        if (
+            currentLines.length === normalizedLines.length
+            && currentLines.every((line, index) => line === normalizedLines[index])
+        ) return;
+        const nextBreakpoints = { ...this.activeBreakpoints };
+        if (normalizedLines.length === 0 && !this.engine) delete nextBreakpoints[file];
+        else nextBreakpoints[file] = normalizedLines;
+        const nextTombstones = new Set(this.breakpointClearTombstones);
+        if (normalizedLines.length > 0) nextTombstones.delete(canonicalWorkspacePath(file));
+        const previousConfiguration = this.mergedBreakpointConfiguration();
+        const nextConfiguration = this.mergedBreakpointConfiguration(
+            nextBreakpoints,
+            this.breakpointOverlays,
+            nextTombstones,
+        );
+        const changes = this.breakpointConfigurationChanges(
+            previousConfiguration,
+            nextConfiguration,
+        );
+        const rejectedEditorChange = { file, lines: [...currentLines] };
+        this.assertBreakpointChangesAllowed(changes, rejectedEditorChange);
+        this.assertBreakpointConfigurationWithinLimit(
+            nextConfiguration,
+            rejectedEditorChange,
+        );
+
+        this.activeBreakpoints = nextBreakpoints;
+        this.breakpointClearTombstones.clear();
+        for (const tombstone of nextTombstones) this.breakpointClearTombstones.add(tombstone);
+        this.applyBreakpointConfigurationChanges(changes);
+    }
+
+    async replaceBreakpointOverlay(
+        owner: object,
+        breakpoints: RuntimeBreakpointMap,
+    ): Promise<void> {
+        if (this.disposed) {
+            throw new Error('Cannot configure breakpoints on a disposed runtime session');
         }
+        if (!this.capabilities.breakpoints) {
+            throw new Error(`Runtime provider "${this.id}" does not support breakpoints`);
+        }
+        if (typeof owner !== 'object' || owner === null) {
+            throw new TypeError('Breakpoint overlay owner must be a non-null object token');
+        }
+        const normalized = this.normalizeBreakpointOverlay(breakpoints);
+        this.updateBreakpointOverlay(
+            owner,
+            Object.keys(normalized).length > 0 ? normalized : undefined,
+        );
+    }
+
+    async clearBreakpointOverlay(owner: object): Promise<void> {
+        if (this.disposed) {
+            throw new Error('Cannot configure breakpoints on a disposed runtime session');
+        }
+        if (!this.capabilities.breakpoints) {
+            throw new Error(`Runtime provider "${this.id}" does not support breakpoints`);
+        }
+        if (typeof owner !== 'object' || owner === null) {
+            throw new TypeError('Breakpoint overlay owner must be a non-null object token');
+        }
+        this.updateBreakpointOverlay(owner, undefined);
+    }
+
+    private updateBreakpointOverlay(
+        owner: object,
+        nextOverlay: Record<string, number[]> | undefined,
+    ): void {
+        const currentOverlay = this.breakpointOverlays.get(owner);
+        if (this.breakpointMapsEqual(currentOverlay, nextOverlay)) return;
+
+        const previousConfiguration = this.mergedBreakpointConfiguration();
+        const nextOverlays = new Map(this.breakpointOverlays);
+        if (nextOverlay) nextOverlays.set(owner, nextOverlay);
+        else nextOverlays.delete(owner);
+
+        const nextTombstones = new Set(this.breakpointClearTombstones);
+        for (const file of Object.keys(nextOverlay ?? {})) nextTombstones.delete(file);
+        let nextConfiguration = this.mergedBreakpointConfiguration(
+            this.activeBreakpoints,
+            nextOverlays,
+            nextTombstones,
+        );
+        if (this.engine) {
+            for (const { file, previousLines, nextLines } of this.breakpointConfigurationChanges(
+                previousConfiguration,
+                nextConfiguration,
+            )) {
+                if (previousLines.length > 0 && nextLines.length === 0) {
+                    nextTombstones.add(canonicalWorkspacePath(file));
+                }
+            }
+            nextConfiguration = this.mergedBreakpointConfiguration(
+                this.activeBreakpoints,
+                nextOverlays,
+                nextTombstones,
+            );
+        }
+        const changes = this.breakpointConfigurationChanges(
+            previousConfiguration,
+            nextConfiguration,
+        );
+        this.assertBreakpointChangesAllowed(changes);
+        this.assertBreakpointConfigurationWithinLimit(nextConfiguration);
+
+        this.breakpointOverlays.clear();
+        for (const [token, overlay] of nextOverlays) {
+            this.breakpointOverlays.set(token, overlay);
+        }
+        this.breakpointClearTombstones.clear();
+        for (const tombstone of nextTombstones) this.breakpointClearTombstones.add(tombstone);
+        this.applyBreakpointConfigurationChanges(changes);
     }
 
     async stepInto(): Promise<void> {
         this.assertDebuggingSupported();
         if (this.running && !this.disposed) {
-            this.dapSend('stepIn', { threadId: 1 });
+            this.sendResumeCommand('stepIn');
         }
     }
 
     async stepOver(): Promise<void> {
         this.assertDebuggingSupported();
         if (this.running && !this.disposed) {
-            this.dapSend('next', { threadId: 1 });
+            this.sendResumeCommand('next');
         }
     }
 
     async stepOut(): Promise<void> {
         this.assertDebuggingSupported();
         if (this.running && !this.disposed) {
-            this.dapSend('stepOut', { threadId: 1 });
+            this.sendResumeCommand('stepOut');
         }
     }
 
     async continueExecution(): Promise<void> {
         this.assertDebuggingSupported();
         if (this.running && !this.disposed) {
-            this.dapSend('continue', { threadId: 1 });
+            this.sendResumeCommand('continue');
         }
     }
 
-    stop(): void {
-        // Stop the in-flight run but keep the Engine so the next run() reuses
-        // the same Rust DapAdapter instead of allocating a new one.
-        const wasRunning = this.running;
-        const engine = this.engine;
+    private sendResumeCommand(command: 'continue' | 'next' | 'stepIn' | 'stepOut'): void {
+        if (!this.running || !this.debugPaused || this.disposed) return;
+        const response = this.dapSend(command, { threadId: this.activeThreadId });
+        if (response?.success === true) {
+            this.debugPaused = false;
+            if (this.profile.emitResumeOnCommand) this.onDebugResumed.emit();
+        }
+    }
+
+    private requestStop(): Promise<RuntimeOutcome> {
+        const settlement = this.activeSettlement;
+        if (!settlement) return this.idleSettlement;
+        if (settlement.settled || settlement.stopRequested) return settlement.promise;
+
+        settlement.stopRequested = true;
+        this.requestOutcome(settlement, { type: 'stopped' });
+        const ownsCurrentRun = this.currentRunSettlement === settlement;
+        const wasRunning = ownsCurrentRun && this.running;
         this.running = false;
+        this.debugPaused = false;
         this.invalidateSession();
-        try { engine?.stop(); } catch { /* ignore */ }
-        if (wasRunning) this.emitExit(0);
+        if (ownsCurrentRun) {
+            try { this.engine?.stop(); } catch { /* ignore */ }
+        }
+        if (wasRunning) this.publishExit(settlement, 0);
+        return settlement.promise;
+    }
+
+    waitForSettlement(): Promise<RuntimeOutcome> {
+        return this.activeSettlement?.promise ?? this.idleSettlement;
+    }
+
+    stop(): void {
+        // Preserve the 0.1 void API while new consumers can await the exact
+        // same per-start settlement through stopAndWait().
+        void this.requestStop();
+    }
+
+    stopAndWait(): Promise<RuntimeOutcome> {
+        return this.requestStop();
     }
 
     private assertDebuggingSupported(): void {
@@ -1014,12 +1666,37 @@ export class BrowserRuntimeSession implements RuntimeSession {
     }
 
     dispose(): void {
-        if (this.disposed) return;
+        void this.disposeAndWait();
+    }
+
+    disposeAndWait(): Promise<RuntimeOutcome> {
+        if (this.disposalPromise) return this.disposalPromise;
+
+        const hadUnsettledStart = Boolean(
+            this.activeSettlement && !this.activeSettlement.settled,
+        );
+        const initialization = this.engineInit;
         this.disposed = true;
-        this.stop();
-        this.engine = null;
-        this.engineInit = null;
-        this.engineInitToken = null;
+        this.breakpointOverlays.clear();
+        this.breakpointClearTombstones.clear();
+        const settlement = this.requestStop();
+        if (!hadUnsettledStart) {
+            try { this.engine?.stop(); } catch { /* ignore */ }
+        }
+
+        this.disposalPromise = (async () => {
+            const outcome = await settlement;
+            if (initialization) {
+                try { await initialization; } catch { /* disposal rejects adoption */ }
+            }
+            this.cancelScheduledTasks();
+            this.debugConfiguration = null;
+            this.engine = null;
+            this.engineInit = null;
+            this.engineInitToken = null;
+            return outcome;
+        })();
+        return this.disposalPromise;
     }
 
     // Line-buffered stdin. Mirrors debugger.sh upstream behavior so programs that

@@ -8,9 +8,13 @@ import type {
 } from '@/web-ide/contracts/runtime'
 import { placeStackFrames, placeHeapNodes, rowsToHeight, type Point } from './graph-layout'
 
+function variablePath(parentPath: string, index: number) {
+    return `${parentPath}.${index}`
+}
+
 // --- Recursive Table Row ---
-function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; depth?: number; nodeId: string }) {
-    const addrTooltip = variable.address > 0
+function VariableRow({ variable, depth = 0, path }: { variable: MemoryValue; depth?: number; path: string }) {
+    const addrTooltip = variable.address !== undefined && variable.address > 0
         ? `0x${variable.address.toString(16).padStart(8, '0')}`
         : undefined
 
@@ -37,20 +41,23 @@ function VariableRow({ variable, depth = 0, nodeId }: { variable: MemoryValue; d
                     </span>
 
                     {variable.isPointer && variable.pointsTo !== 0 && variable.pointsTo !== undefined && (
-                        <Handle type="source" position={Position.Right} id={`${nodeId}-${variable.name}`}
+                        <Handle type="source" position={Position.Right} id={path}
                             className="!w-2 !h-2 !bg-primary !border-0 !-right-1" />
                     )}
                 </div>
 
-                {variable.address > 0 && (
-                    <Handle type="target" position={Position.Left} id={`${nodeId}-${variable.name}-target`}
+                {variable.address !== undefined && variable.address > 0 && (
+                    <Handle type="target" position={Position.Left} id={`${path}-target`}
                         className="!w-1 !h-1 !bg-transparent !border-0 !left-0 !opacity-0" />
                 )}
             </div>
 
             {variable.isStruct && variable.members && (
                 <div className="flex flex-col w-full bg-background/40">
-                    {variable.members.map(m => <VariableRow key={m.name} variable={m} depth={depth + 1} nodeId={`${nodeId}-${variable.name}`} />)}
+                    {variable.members.map((member, index) => {
+                        const memberPath = variablePath(path, index)
+                        return <VariableRow key={memberPath} variable={member} depth={depth + 1} path={memberPath} />
+                    })}
                 </div>
             )}
         </div>
@@ -68,7 +75,10 @@ function StackFrameNode({ data }: { data: { id: string; label: string; isActive:
             <div className="flex flex-col w-full">
                 {data.variables.length === 0 ? (
                     <div className="p-2 text-xs text-muted-foreground italic text-center">No variables</div>
-                ) : data.variables.map(v => <VariableRow key={v.name} variable={v} nodeId={data.id} />)}
+                ) : data.variables.map((variable, index) => {
+                    const path = variablePath(data.id, index)
+                    return <VariableRow key={path} variable={variable} path={path} />
+                })}
             </div>
             <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
             <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
@@ -86,7 +96,10 @@ function HeapNode({ data }: { data: { id: string; label: string; ptr: number; me
             <div className="flex flex-col w-full">
                 {data.members.length === 0 ? (
                     <div className="p-2 text-xs text-muted-foreground italic text-center">Raw Data</div>
-                ) : data.members.map(m => <VariableRow key={m.name} variable={m} nodeId={data.id} />)}
+                ) : data.members.map((member, index) => {
+                    const path = variablePath(data.id, index)
+                    return <VariableRow key={path} variable={member} path={path} />
+                })}
             </div>
             <Handle type="target" position={Position.Left} id="target" className="!w-2 !h-2 !bg-primary !border-0 !-left-1 opacity-80" />
         </div>
@@ -208,13 +221,13 @@ export function MemoryVisualizer() {
         }
 
         const registerAddresses = (vars: MemoryValue[], parentPath: string, nodeIdentifier: string) => {
-            for (const v of vars) {
-                const handlePath = `${parentPath}-${v.name}`
-                if (v.address > 0 && !addressMap.has(v.address)) {
+            vars.forEach((v, index) => {
+                const handlePath = variablePath(parentPath, index)
+                if (v.address !== undefined && v.address > 0 && !addressMap.has(v.address)) {
                     addressMap.set(v.address, { nodeId: nodeIdentifier, handleId: `${handlePath}-target` })
                 }
                 if (v.isStruct && v.members) registerAddresses(v.members, handlePath, nodeIdentifier)
-            }
+            })
         }
 
         for (const frame of snapshot.frames) {
@@ -227,8 +240,8 @@ export function MemoryVisualizer() {
 
         // Drills recursively down generating edges directly from mapped physical addresses
         const extractEdges = (vars: MemoryValue[], parentId: string, nodeIdentifier: string, isActive: boolean, inactiveStroke: string) => {
-            for (const v of vars) {
-                const currentHandleId = `${parentId}-${v.name}`;
+            vars.forEach((v, index) => {
+                const currentHandleId = variablePath(parentId, index)
                 if (v.isPointer && v.pointsTo) {
                     const target = addressMap.get(v.pointsTo)
                     if (target) {
@@ -242,7 +255,7 @@ export function MemoryVisualizer() {
                     }
                 }
                 if (v.isStruct && v.members) extractEdges(v.members, currentHandleId, nodeIdentifier, isActive, inactiveStroke);
-            }
+            })
         }
 
         reversedFrames.forEach((frameData) => {

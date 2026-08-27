@@ -1,10 +1,8 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import wasm from 'vite-plugin-wasm'
-import topLevelAwait from 'vite-plugin-top-level-await'
 import tailwindcss from '@tailwindcss/vite'
-import path from 'path'
+import path from 'node:path'
 
 // COOP `same-origin` + COEP `require-corp` are needed for SharedArrayBuffer
 // (clangd LSP and the debugger worker both need crossOriginIsolated = true).
@@ -59,15 +57,14 @@ export default defineConfig({
     react(),
     tailwindcss(),
     wasm(),
-    topLevelAwait(),
-    nodePolyfills({
-      include: ['buffer', 'process', 'stream', 'path', 'events'],
-      globals: { Buffer: true, process: true },
-    }),
   ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      'node:buffer': 'buffer',
+      'node:events': 'events',
+      'node:path': 'path-browserify',
+      'node:stream': 'stream-browserify',
     },
     // Local Web IDE development uses a linked package. Dedupe its React peers
     // so tests and the browser share the host application's renderer instance.
@@ -75,7 +72,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
-    plugins: () => [wasm(), topLevelAwait()],
+    plugins: () => [wasm()],
   },
   optimizeDeps: {
     // debugger-sh is excluded because the optimizer copies its engine_bg.wasm

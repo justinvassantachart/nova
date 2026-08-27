@@ -4,11 +4,15 @@ Web IDE is an embeddable browser workbench extracted from Nova. It provides a
 Monaco editor, virtual workspace, terminal, debugging UI, contribution
 registries, typed runtime events, host persistence, and plugin lifecycle APIs.
 
-This repository is a local, private extraction. It has no remote and no
-publication license yet. The current built-in browser runtime providers support
-C/C++ execution and debugging plus Python execution. Python debugging and Rust
-are not claimed as supported here. The provider-neutral session contract does
-not expose the underlying engine package.
+This embedded package mirrors the MIT-licensed `0.3.1` reusable source from
+commit `ed271757daf80c3ded7ae2b4a67d74102ebf2435`. It remains
+`private: true` and is not published to npm. Hamilton separately consumes the
+verified immutable private-release tarball; Nova builds this relative workspace
+mirror so ordinary development and deployment do not depend on a private asset
+download or a developer-machine path. The current built-in browser runtime providers support
+C/C++ and Python execution and source-level debugging. Rust is not claimed as
+supported here. The provider-neutral session contract does not expose the
+underlying engine package.
 
 ## Quick start
 
@@ -56,7 +60,8 @@ createRoot(document.getElementById('root')!).render(
 )
 ```
 
-The runnable example is in `examples/basic`.
+The runnable example is maintained in the standalone Web IDE source repository
+under `examples/basic`; Nova itself is the production C++ consumer.
 
 The packaged browser runtime providers currently use Debugger.sh internally,
 but that implementation name is not part of the public provider/session API.
@@ -104,8 +109,9 @@ including the response headers required by the runtime.
   preference helpers. Core imports do not load the clangd worker integration.
 - `web-ide/styles.css` — compiled workbench styles and Codicon assets.
 
-Internal React contexts, registries, VFS modules, and Zustand stores are not
-package exports. Plugins receive public runtime/workspace/panel facades only.
+Internal React contexts, registries, VFS modules, Monaco objects, and Zustand
+stores are not package exports. Rendered plugin panels/activities receive only
+public runtime, execution, source-presentation, workspace, and panel facades.
 
 ## How the pieces fit
 
@@ -142,9 +148,72 @@ const configuration: WebIDEConfiguration = {
 }
 ```
 
-Python is run-only today, so the Debug command and Variables/Graph panels are
-automatically hidden by capability predicates. Monaco still supplies Python
-syntax support without a selected language-tooling backend.
+Python supports line breakpoints, Continue, Step Over, Step Into, Step Out,
+call stacks, and expandable variables. Its runtime does not expose the native
+address/heap model used by the C/C++ Graph panel, so Graph is hidden by a
+capability predicate while Variables remains available. Monaco supplies Python
+syntax support without requiring a separate language-tooling backend.
+
+## Initial workbench layout
+
+An embedding host may provide only the initial presentation it needs without
+importing workbench state:
+
+```tsx
+const configuration: WebIDEConfiguration = {
+  runtimeProvider: 'web-ide.runtime.python',
+  initialLayout: {
+    selectedActivityId: 'example.instructions',
+    selectedPanelId: 'example.preview',
+    panelColumnPercent: 50,
+    panelContentPercent: 85,
+  },
+  plugins,
+}
+```
+
+`selectedActivityId` must exactly name an installed activity and opens its
+sidebar on the first render, before later user selection takes over.
+`selectedPanelId` must exactly name an installed panel that is visible for the
+selected runtime. Unknown activities or unknown/initially unavailable panels
+reject the configuration; Web IDE does not silently choose another surface.
+The panel column accepts 15–57 percent so the existing editor/sidebar minimums remain
+possible, and panel content accepts 25–90 percent so both it and the terminal
+retain their existing minimums. Omitted fields preserve the established
+persisted sidebar choice, first visible panel, and 27/70 proportions. These are
+per-mount initial values only: later activity/tab selection and resizing remain
+local UI state; sidebar choices retain their established best-effort
+persistence.
+
+With the currently validated Python backend, breakpoint edits made while the
+program is freely running are queued and applied at the next pause before it
+resumes. The backend does not authoritatively relocate breakpoints from blank or
+non-executable lines, so Web IDE leaves those gutter markers at the requested
+line instead of claiming that they were bound.
+
+Generic runtime workflows that need temporary source stops can use the
+optional `RuntimeSession.replaceBreakpointOverlay(owner, breakpoints)` and
+`clearBreakpointOverlay(owner)` methods. `RuntimeBreakpointMap` contains
+canonical source paths and positive one-based lines. The owner must be a
+non-null object and is compared by identity within one session; replacing or
+clearing it cannot mutate another workflow's overlay or the editor's gutter
+breakpoints. The built-in browser sessions atomically merge the editor set and
+all owner overlays, reject the whole update if the provider's merged
+configuration quota would be exceeded, and never publish overlay-only lines as
+editor breakpoint-validation events. An empty replacement is a clear. The
+workflow should clear its owner during stop/unmount cleanup; session disposal
+also discards all remaining overlays.
+
+The validated C/C++ backend can add breakpoints during configuration but cannot
+replace or remove them safely inside an active debug run. Web IDE therefore
+rejects live C/C++ breakpoint edits and restores the existing gutter markers;
+stop the run, edit the breakpoints, and start Debug again.
+
+The built-in Python engine reserves runtime `/main.py`. A custom TestProvider
+that selects a different entrypoint while the workspace also contains
+`main.py` must copy that user file to an ephemeral execution-plan path first.
+The bundled unittest provider already performs this staging; host workspace
+files are not renamed or deleted.
 
 ## Bring your own runtime or plugin
 
@@ -178,9 +247,60 @@ export const myRuntimePlugin: IDEPlugin = {
 `MyPythonRuntimeSession` implements the exported `RuntimeSession` contract. A
 new instance receives a copied `RuntimeExecutionPlan` in `prepare`, starts the
 backend in `start`, publishes only the typed event channels, stops promptly,
-and releases workers/listeners in `dispose`. The session never receives React
-stores or host credentials. See `src/web-ide/contracts/runtime.ts` and the
-contract tests under `tests/contracts` for the exact lifecycle.
+and releases workers/listeners in `dispose`. Custom 0.1 providers remain valid
+with the void `stop`/`dispose` methods. Providers that support deterministic
+cleanup may additionally expose `waitForSettlement`, `stopAndWait`, and
+`disposeAndWait`; those methods resolve one `RuntimeOutcome` (`completed`,
+`stopped`, or `error`) per start without changing numeric exit events. The
+transient-breakpoint overlay methods are additive and optional too, so an
+integrating workflow must feature-detect them and fail clearly when they are a
+required capability. The session never receives React stores or host
+credentials. See
+`src/web-ide/contracts/runtime.ts` and the contract tests under
+`tests/contracts` for the exact lifecycle.
+
+Rendered panels and sidebar activities receive one `IDEExecutionController`
+using the same prepare/start/stop/restart path as toolbar commands. Its
+`stop()` return remains compatible with synchronous callers and is awaitable
+when the selected session supplies settled termination. The same component gets
+an owner-bound source facade. One mount-owned coordinator is shared by toolbar,
+panel, and hotkey controllers. Awaited stop/restart invalidate and drain any
+pending test-provider or runtime preparation, so a cancelled pipeline cannot
+start after it reports settlement:
+
+```tsx
+const activity: IDEActivityContribution = {
+  id: 'example.trace',
+  title: 'Trace',
+  icon: 'debug-alt-small',
+  component: ({ execution, source }) => (
+    <>
+      <button onClick={() => void execution.start('debug')}>Start</button>
+      <button onClick={() => void execution.stop()}>Stop</button>
+      <button onClick={() => {
+        const location = { path: '/workspace/main.py', line: 4 } as const
+        source.replaceDecorations([{ ...location, kind: 'historical' }])
+        source.reveal(location)
+      }}>
+        Show recorded line
+      </button>
+    </>
+  ),
+}
+```
+
+Source locations must be canonical visible `/workspace` files with valid
+one-based line/column bounds. Decorations use only the generic `current`,
+`historical`, and `error` meanings, replace atomically per owner, and are
+removed automatically when that rendered contribution unmounts. The facade
+never exposes editor models, arbitrary CSS/HTML, private debug history, or
+another owner's state.
+
+Generic debug variables do not need to invent native memory. `VariableNode`
+address/size/pointer fields and `StackFrame.sp` are optional; provide them only
+when they are real. Set `memoryVisualization: false` when a debugger cannot
+drive Graph. The field is additive for older custom providers: omitting it keeps
+the legacy debug-and-Graph composition.
 
 ## Testing providers
 
@@ -247,6 +367,12 @@ export const notesPlugin: IDEPlugin = {
     resources: [{
       id: 'my-app.notes.seed',
       files: { '/activity/readme.txt': 'Host-owned plugin resource' },
+    }, {
+      id: 'my-app.notes.runtime-support',
+      scope: 'execution-only',
+      files: () => ({
+        '/current-settings.json': JSON.stringify(readCurrentSettings()),
+      }),
     }],
   },
   activate(context) {
@@ -257,6 +383,40 @@ export const notesPlugin: IDEPlugin = {
 }
 ```
 
+An omitted resource scope keeps the existing editable `/workspace` seed
+behavior. `execution-only` files are copied under `/sysroot` for each runtime
+plan, do not enter the VFS, explorer, host snapshot, or persistence, and may use
+a synchronous callback that is evaluated exactly once per prepare. The runtime
+rejects unsafe paths, non-string bytes, exact execution-plan overlap, and any
+`/workspace`/`/sysroot` pair that would flatten to the same engine path. This is
+an ownership and presentation boundary, not a confidentiality boundary:
+executing browser code may still read or print support resources.
+
+## Awaited host workspace close
+
+Attach a ref when navigation must wait for persistence:
+
+```tsx
+import { createRef } from 'react'
+import type { WebIDEInstanceHandle } from 'web-ide'
+
+const ideRef = createRef<WebIDEInstanceHandle>()
+
+<WebIDE ref={ideRef} configuration={configuration} />
+
+// The host may offer this projection as an authorized local export.
+const files = ideRef.current?.persistedFiles()
+await ideRef.current?.flushWorkspace()
+await ideRef.current?.close()
+```
+
+`persistedFiles` returns only the copied `/workspace` plane. `flushWorkspace`
+saves that projection and waits for the host adapter. `close` saves, flushes,
+and only then disposes persistence. A save or flush failure rejects without
+disposing the adapter, so the host can keep navigation blocked and retry. A
+React unmount still performs best-effort legacy cleanup to avoid leaking an
+adapter when the host cannot await.
+
 Karel is deliberately not present in this repository. The separately
 maintained `@web-ide/karel` companion lives in the local sibling
 `../web-ide-karel` repository. It consumes this same public plugin API, owns its
@@ -266,7 +426,7 @@ Python runtime provider. Web IDE does not maintain a closed plugin catalog.
 
 ## Local development
 
-Requires Node 20.19 or newer.
+Requires Node `^20.19.0` or `>=22.12.0`, matching the supported Vite runtime.
 
 ```sh
 npm install
@@ -274,14 +434,22 @@ npm run validate
 npm run dev
 ```
 
-`npm run validate` checks lint, types, the unit/integration suite, the library
-and example builds, package contents, and a fresh consumer that installs the
-packed tarball without source aliases or sibling imports.
+From Nova's repository root, `npm --workspace web-ide run validate` checks
+lint, types, the unit/integration suite, the library build, package contents,
+and a fresh consumer that installs the packed tarball without Nova aliases or
+private source imports. Nova then runs its own application tests, typecheck,
+and production build. The production Playwright runtime matrix remains in the
+standalone Web IDE repository rather than being duplicated here. See
+[Testing](docs/testing.md) for the complete two-repository validation boundary.
 
 For a normal sibling Nova clone, use `"web-ide": "file:../web-ide"`, build Web
 IDE first, and add `resolve.dedupe: ['react', 'react-dom']` while locally linked.
 The isolated Codex worktree uses an absolute `file:` dependency only for local
 verification; that path is not a publishing strategy.
+
+The exact 0.3.1 source and immutable Hamilton release are complete; npm
+publication remains intentionally disabled. See
+[Distribution status](docs/publishing-readiness.md) for the current boundary.
 
 ## Browser and runtime requirements
 
@@ -298,7 +466,10 @@ Vite development and preview. The host is also responsible for compatible CSP,
 CORS/CORP, service-worker, authentication, and route policies.
 
 Monaco, Debugger.sh toolchains, and optional clangd assets are online runtime
-dependencies today. `VITE_CLANGD_WASM_URL` and `VITE_CLANGD_JS_URL` can point to
+dependencies today. Web IDE pins Monaco's loader runtime to `0.56.0` on
+jsDelivr, matching its reviewed editor API/types; production CSP and availability
+policy must admit or self-host that exact asset set. `VITE_CLANGD_WASM_URL` and
+`VITE_CLANGD_JS_URL` can point to
 host-owned, versioned clangd assets. The public upstream service is only a
 best-effort default.
 
@@ -308,14 +479,20 @@ best-effort default.
   plugin managers are mount-scoped; legacy workbench stores and VFS are not yet.
 - `workspace.readOnly` disables editing, explorer mutation, and selected
   language-tooling startup, but it is a UI policy rather than a security boundary.
-- Workspace resources seed a workspace. Version the workspace ID when a plugin
-  resource upgrade must replace browser-local cached content.
-- C++ run/debug and Python run are verified. The separate Karel companion has a
-  real-browser Python/nested-import regression, but is not included in this
-  package. Python debugging, Rust, and end-to-end graphics output remain future
+- Workspace-scoped resources seed a workspace. Version the workspace ID when a
+  plugin resource upgrade must replace browser-local cached content.
+- Execution-only resources are non-editable and non-persisted, but they are not
+  secret or trusted grading inputs; student code and browser tooling remain an
+  untrusted execution boundary.
+- C++ and Python run/debug are verified. Python debugging includes line
+  breakpoints, stepping, call stacks, and variables; Python does not provide the
+  C/C++ native-memory Graph. The separate Karel companion has its own browser
+  coverage but is not included in this package. Python unittest execution is
+  browser-tested; Rust and end-to-end graphics output remain future
   provider/plugin work.
 - The C++ clangd backend still ships in this package, isolated behind the
   opt-in `web-ide/language-tools` subpath rather than independently versioned.
 
-See [architecture](docs/architecture.md), [Nova migration](docs/nova-migration.md),
-and [publishing readiness](docs/publishing-readiness.md).
+See [Architecture](docs/architecture.md), [Testing](docs/testing.md),
+[Nova migration](docs/nova-migration.md), and
+[Publishing readiness](docs/publishing-readiness.md).

@@ -1,18 +1,27 @@
 {
   "name": "web-ide",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Embeddable browser IDE workbench with open host, runtime, and plugin contracts.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justinvassantachart/web-ide.git"
+  },
+  "homepage": "https://github.com/justinvassantachart/web-ide#readme",
+  "bugs": {
+    "url": "https://github.com/justinvassantachart/web-ide/issues"
+  },
   "engines": {
-    "node": ">=20.19.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "files": [
     "dist",
     "docs",
     "README.md",
     "LICENSE.md",
+    "THIRD_PARTY_LICENSES.txt",
     "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
@@ -62,7 +71,7 @@
     "react-dom": "^18.3.0 || ^19.0.0"
   },
   "dependencies": {
-    "debugger-sh": "^0.3.15"
+    "debugger-sh": "0.3.15"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -80,12 +89,13 @@
     "buffer": "6.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "events": "3.3.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "jsdom": "26.1.0",
     "lucide-react": "^0.575.0",
     "material-icon-theme": "^5.34.0",
     "memfs": "^4.56.10",
@@ -108,7 +118,7 @@
     "zustand": "^5.0.11"
   },
   "overrides": {
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "uuid": "^11.1.1"
   }
 }

@@ -14,11 +14,12 @@ import { useThemeStore } from '@/theme/theme-store'
 import { DebugToolbar } from '@/components/layout/DebugToolbar'
 import { useSafeMonaco } from '@/lib/use-monaco'
 import { monacoLanguageForPath } from '@/web-ide/core/monaco-language'
+import { useSourcePresentationState } from '@/web-ide/react/source-presentation-state'
 
 // Decorations are tracked per file URI so they survive model switching — when
 // the user flips between files we leave each model's gutter/line state intact
 // rather than re-running every effect against a stale, file-A-shaped set.
-type DecoIds = { bp: string[]; step: string[] }
+type DecoIds = { bp: string[]; step: string[]; source: string[] }
 
 export function Editor() {
     const { activeFile, activeFileContent, setActiveFileContent, setActiveFile } = useEditorStore()
@@ -29,9 +30,12 @@ export function Editor() {
     const host = useIDEHost()
     const readOnly = host?.workspace?.readOnly === true
     const languageTooling = useLanguageTooling()
+    const { snapshot: sourcePresentation, revealRequest } = useSourcePresentationState()
     const languageToolingRef = useRef(languageTooling)
     const lastEditEmit = useRef<Record<string, number>>({})
     const editTrailing = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+    const acceptedBreakpoints = useRef<Record<string, number[]>>({})
+    const breakpointSyncTokens = useRef<Record<string, number>>({})
 
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
     const decoIdsByPath = useRef<Map<string, DecoIds>>(new Map())
@@ -43,6 +47,7 @@ export function Editor() {
     }, [languageTooling])
 
     const lastDebugState = useRef({ file: null as string | null, line: null as number | null })
+    const lastSourceReveal = useRef(0)
 
     // Keep Monaco's per-URI model cache in sync with the editor store.
     // Monaco models are global state — when the workspace gets re-seeded
@@ -107,7 +112,7 @@ export function Editor() {
     const getDecoIds = (path: string): DecoIds => {
         let entry = decoIdsByPath.current.get(path)
         if (!entry) {
-            entry = { bp: [], step: [] }
+            entry = { bp: [], step: [], source: [] }
             decoIdsByPath.current.set(path, entry)
         }
         return entry
@@ -212,7 +217,22 @@ export function Editor() {
         }
 
         if (activeFile) {
-            engine.setBreakpoints(activeFile, breakpoints[activeFile] || []).catch(console.warn)
+            const file = activeFile
+            const requested = [...(breakpoints[file] ?? [])]
+            const token = (breakpointSyncTokens.current[file] ?? 0) + 1
+            breakpointSyncTokens.current[file] = token
+            engine.setBreakpoints(file, requested).then(() => {
+                if (breakpointSyncTokens.current[file] === token) {
+                    acceptedBreakpoints.current[file] = requested
+                }
+            }).catch((error: unknown) => {
+                console.warn(error)
+                if (breakpointSyncTokens.current[file] !== token) return
+                useDebugStore.getState().setFileBreakpoints(
+                    file,
+                    acceptedBreakpoints.current[file] ?? [],
+                )
+            })
         }
     }, [breakpoints, monaco, editorReady, activeFile, engine])
 
@@ -250,6 +270,91 @@ export function Editor() {
             }
         }
     }, [debugMode, currentLine, currentFile, activeFile, monaco, editorReady])
+
+    // Render owner-scoped plugin decorations without exposing Monaco or this
+    // per-file identifier map through the public contribution API.
+    useEffect(() => {
+        if (!monaco || !editorReady) return
+
+        const byPath = new Map<
+            string,
+            Array<(typeof sourcePresentation.decorations)[number]>
+        >()
+        for (const decoration of sourcePresentation.decorations) {
+            let existing = byPath.get(decoration.path)
+            if (!existing) {
+                existing = []
+                byPath.set(decoration.path, existing)
+            }
+            existing.push(decoration)
+        }
+        const paths = new Set([...decoIdsByPath.current.keys(), ...byPath.keys()])
+
+        for (const path of paths) {
+            const model = monaco.editor.getModel(monaco.Uri.parse(path))
+            if (!model) continue
+            const ids = getDecoIds(path)
+            const decorations = (byPath.get(path) ?? []).flatMap((decoration) => {
+                if (decoration.line > model.getLineCount()) return []
+                const maxColumn = model.getLineMaxColumn(decoration.line)
+                if (decoration.column !== undefined && decoration.column > maxColumn) return []
+                const column = decoration.column ?? 1
+                const classSuffix = `source-presentation-${decoration.kind}`
+                return [{
+                    range: new monaco.Range(
+                        decoration.line,
+                        column,
+                        decoration.line,
+                        column,
+                    ),
+                    options: {
+                        isWholeLine: true,
+                        className: `${classSuffix}-line`,
+                        glyphMarginClassName: `${classSuffix}-glyph`,
+                    },
+                }]
+            })
+            ids.source = model.deltaDecorations(ids.source, decorations)
+        }
+    }, [activeFile, editorReady, monaco, sourcePresentation])
+
+    useEffect(() => {
+        const decorations = decoIdsByPath.current
+        return () => {
+            if (!monaco) return
+            for (const [path, ids] of decorations.entries()) {
+                if (ids.source.length === 0) continue
+                const model = monaco.editor.getModel(monaco.Uri.parse(path))
+                if (model) ids.source = model.deltaDecorations(ids.source, [])
+                else ids.source = []
+            }
+        }
+    }, [monaco])
+
+    // A reveal request is distinct from a decoration update. Repeated reveals
+    // of the same location still move the caret and center that exact source.
+    useEffect(() => {
+        if (
+            !editorReady
+            || !revealRequest
+            || revealRequest.sequence === lastSourceReveal.current
+            || activeFile !== revealRequest.location.path
+        ) return
+
+        const editorInstance = editorRef.current
+        const model = editorInstance?.getModel()
+        if (!editorInstance || !model || model.uri.path !== revealRequest.location.path) return
+
+        const lineNumber = Math.min(revealRequest.location.line, model.getLineCount())
+        const column = Math.min(
+            revealRequest.location.column ?? 1,
+            model.getLineMaxColumn(lineNumber),
+        )
+        lastSourceReveal.current = revealRequest.sequence
+        editorInstance.setPosition({ lineNumber, column })
+        editorInstance.revealPositionInCenter({ lineNumber, column })
+        editorInstance.focus()
+    }, [activeFile, editorReady, revealRequest])
 
     const handleChange = useCallback((value: string | undefined) => {
         if (value === undefined || !activeFile) return
@@ -310,8 +415,11 @@ export function Editor() {
     return (
         <div className="h-full overflow-hidden bg-background flex flex-col">
             <EditorTabs />
-            {/* `path` makes Monaco keep one ITextModel per file (undo history,
-                scroll, cursor survive file switches via setModel). We pass
+            {/* `path` makes Monaco keep one ITextModel per file (including its
+                content and undo history). We disable the wrapper's module-global
+                path-keyed view-state cache: it crosses IDE instances and can
+                restore a canceled contribution while source playback switches
+                models. Explicit debug/source reveals own navigation instead. We pass
                 `defaultValue` for first-time model creation but deliberately
                 omit `value` — passing it would re-fire executeEdits on every
                 store update and wipe undo. The model is the source of truth. */}
@@ -320,13 +428,16 @@ export function Editor() {
                 <MonacoEditor
                     height="100%"
                     path={activeFile}
+                    saveViewState={false}
                     defaultValue={activeFileContent}
                     language={lang}
                     theme={theme === 'light' ? 'vs' : 'vs-dark'}
                     onChange={handleChange}
                     onMount={handleMount}
                     options={{
-                        glyphMargin: engine.capabilities.breakpoints,
+                        glyphMargin:
+                            engine.capabilities.breakpoints
+                            || sourcePresentation.decorations.length > 0,
                         fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                         fontSize: 14, lineHeight: 22,
                         minimap: { enabled: false },

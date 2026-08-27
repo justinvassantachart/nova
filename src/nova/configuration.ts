@@ -22,3 +22,12 @@ export const novaWebIDEConfiguration: WebIDEConfiguration = {
     testingPlugin,
   ],
 }
+
+/** Assignment mounts use Web IDE 0.3.1's public, mount-owned activity selection. */
+export const novaAssignmentWebIDEConfiguration: WebIDEConfiguration = {
+  ...novaWebIDEConfiguration,
+  initialLayout: {
+    ...novaWebIDEConfiguration.initialLayout,
+    selectedActivityId: 'nova.assignment',
+  },
+}

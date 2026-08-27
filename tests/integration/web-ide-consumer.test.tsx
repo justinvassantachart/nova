@@ -6,7 +6,10 @@ import { cppLanguageToolingPlugin } from 'web-ide/language-tools'
 import { WebIDEHostProvider, useWebIDEHost } from 'web-ide/host'
 import { canvasPlugin, coreWorkbenchPlugin } from 'web-ide/plugins'
 import { assignmentActivityPlugin } from '../../src/nova/assignment-activity-plugin'
-import { novaWebIDEConfiguration } from '../../src/nova/configuration'
+import {
+  novaAssignmentWebIDEConfiguration,
+  novaWebIDEConfiguration,
+} from '../../src/nova/configuration'
 
 function HostProbe() {
   return <output>{useWebIDEHost()?.workspace?.id ?? 'standalone'}</output>
@@ -44,6 +47,10 @@ describe('The deployed site consumes its Web IDE workspace package', () => {
       icon: 'checklist',
     })
     expect(novaWebIDEConfiguration.plugins.some(({ id }) => /karel/i.test(id))).toBe(false)
+    expect(novaWebIDEConfiguration.initialLayout?.selectedActivityId).toBeUndefined()
+    expect(novaAssignmentWebIDEConfiguration.initialLayout).toMatchObject({
+      selectedActivityId: 'nova.assignment',
+    })
   })
 
   it('keeps host workspace identity in the package-owned host provider', () => {

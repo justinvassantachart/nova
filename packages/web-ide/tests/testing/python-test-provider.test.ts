@@ -33,13 +33,20 @@ describe('Python unittest execution provider', () => {
     })
 
     expect(prepared.execution.mode).toBe('run')
+    expect(PYTHON_UNITTEST_RUNNER_PATH).toBe('/workspace/__web_ide/unittest_runner.py')
     expect(prepared.execution.entrypoint).toBe(PYTHON_UNITTEST_RUNNER_PATH)
     const runner = prepared.execution.files[PYTHON_UNITTEST_RUNNER_PATH]
     expect(runner).toContain('unittest.defaultTestLoader.discover')
     expect(runner).toContain('ProtocolResult')
     expect(runner).toContain('sys.modules["main"]')
+    expect(runner).toContain('USER_MAIN_SOURCE = "main.py"')
+    expect(runner).toContain('if os.path.basename(filename) == USER_MAIN:')
+    expect(runner).toMatch(
+      /"details": self\._exc_info_to_string\(error, test\)\.replace\(\s*USER_MAIN,\s*USER_MAIN_SOURCE,\s*\)/,
+    )
     expect(runner.toLowerCase()).not.toContain('karel')
     expect(prepared.execution.files[PYTHON_USER_MAIN_PATH]).toContain('def add')
+    expect(prepared.execution.files).not.toHaveProperty('/workspace/main.py')
     expect(prepared.parser).toBeDefined()
   })
 })

@@ -1,50 +1,44 @@
-# Publishing readiness
+# Distribution status
 
-The local repository is ready for review and a single initial commit, but it is
-not authorized or configured for public distribution.
+Nova embeds the MIT-licensed Web IDE `0.3.1` source as a relative npm
+workspace. The reusable source matches the immutable
+`web-ide-v0.3.1-source` checkpoint at
+`ed271757daf80c3ded7ae2b4a67d74102ebf2435`; Nova keeps only
+workspace-specific package scripts, consumer tooling, and documentation around
+that source.
 
-## Completed locally
+The package remains `private: true` and is not published to npm. Hamilton's
+separate distribution is the exact immutable private-release asset
+`web-ide-0.3.1.tgz`, with SHA-256
+`4397b6733d19b69941ce225e5d3cf98fa9fcdaf6b27f93f36b35ea8d3e3d37ae`.
+That release does not require Nova to fetch a private artifact during ordinary
+local development or deployment; Nova continues to build the reviewed relative
+workspace mirror recorded in its root lockfile.
 
-- Host-neutral package metadata, ESM export map, declarations, compiled CSS,
-  clangd worker emission, and raw C++ test resources.
-- Separate exports for host APIs, built-in plugins, browser runtime providers,
-  generic/language-specific testing providers, and optional C/C++ language
-  tooling.
-- Nova consuming only public package exports through a local file dependency.
-- Unit/integration tests in dedicated test folders.
-- Real example and packed-tarball consumer builds without a Nova alias.
-- Source/dist scans excluding LMS, Firebase, lessons, replay, Karel, absolute
-  developer paths, and unresolved `@/` aliases.
-- No copied compiler/sysroot archive, Stanford library, Firebase service worker,
-  deployment file, or local yowasp tarball.
-- The packed package consumer uses five exact browser shims instead of the
-  whole-stdlib polyfill plugin and its top-level-await transform. Production
-  dependency audit has no known vulnerabilities. Nova's repository-wide
-  development audit still includes the host application's separate polyfill
-  toolchain; reassess that root-only stack independently rather than adding it
-  back to the reusable package harness.
+## Current package boundary
 
-## Decisions required before publication
+- The export map, React peer ranges, and exact `debugger-sh@0.3.15` runtime
+  pin match Web IDE 0.3.1.
+- The reusable source is MIT licensed and includes its generated third-party
+  license inventory and notices.
+- Nova imports only the documented root, host, plugin, runtime, testing,
+  language-tooling, style, and package-metadata exports.
+- The packed-consumer gate installs a fresh tarball with lifecycle scripts
+  disabled, proves one React identity, audits production dependencies, and
+  builds without Nova aliases or private source imports.
+- Nova's final browser bundle uses exact narrow browser shims rather than a
+  whole-stdlib polyfill plugin.
 
-- Open-source license and confirmation of redistribution rights.
-- Final npm name/scope and semantic version.
-- GitHub organization/owner, visibility, branch protections, and CI policy.
-- npm, Git dependency, or release-tarball distribution strategy.
-- Whether Monaco, Debugger.sh, clangd, LLVM/WASI, and toolchain assets remain
-  externally hosted or become audited self-hosted release assets.
-- CSP, CORS/CORP, caching, uptime, version pinning, and privacy policy for those
-  runtime downloads.
+## Future distribution changes
 
-Until those decisions are made, keep `private: true`, `license: UNLICENSED`, no
-remote, and no releases.
+Switching Nova from its relative workspace to the private Hamilton artifact,
+a public release asset, Git dependency, or npm requires a separate reviewed
+migration. It must preserve exact artifact identity, reproducible
+authentication/bootstrap behavior where needed, public-export-only imports,
+React deduplication, runtime asset policy, production-browser evidence, and
+rollback. Do not introduce an absolute developer-machine `file:` dependency.
 
-## Pre-publish gate
-
-Run `npm ci && npm run validate`, inspect `npm pack --dry-run`, audit the actual
-tarball and third-party licenses, test it in a clean browser consumer, and repeat
-Nova's unit/build/browser regression pass. Publication should not claim Python
-debugging or end-to-end browser unittest execution, Rust, bundled Karel
-functionality, offline use, multiple simultaneous embeds, or working graphics
-output until each has the required browser-level tests. The separately
-maintained Karel companion has its own real Python browser coverage; that does
-not make Karel part of the Web IDE package.
+Publishing to npm still requires an explicit owner decision for the namespace,
+account controls, provenance, release workflow, and long-term artifact policy.
+The current source license and private GitHub release do not by themselves
+authorize npm publication.

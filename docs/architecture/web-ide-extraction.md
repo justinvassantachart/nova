@@ -2,7 +2,8 @@
 
 Status: the deployed product is Web IDE, and this repository is its first host.
 The reusable workbench is integrated as the relative npm workspace package at
-`packages/web-ide`.
+`packages/web-ide`. Its reusable source matches Web IDE `0.3.1` source commit
+`ed271757daf80c3ded7ae2b4a67d74102ebf2435`.
 
 ## Dependency direction
 
@@ -45,6 +46,13 @@ selects the current C++ composition:
 4. the core workbench and optional Canvas contribution;
 5. the host-created Assignment activity plugin.
 
+The shared configuration preserves Web IDE's ordinary Explorer/persisted
+sidebar default. Mounts wrapped in Nova's assignment context use a second
+static configuration whose public `initialLayout.selectedActivityId` is the
+installed `nova.assignment` contribution. Standalone and lesson mounts omit
+that field. Nova does not import the mount-owned layout controller, click DOM,
+or write Web IDE's sidebar preference.
+
 [`src/main.tsx`](../../src/main.tsx) remains the application shell. It owns the
 route table, authentication provider, service-worker gate, lesson pages, LMS
 pages, replay pages, and the standalone `/ide` route. The root site at
@@ -72,7 +80,9 @@ owns user identity and storage credentials; the package never receives them.
 
 `WebIDEInstanceHandle` is an intent-level embedding API. It exposes immutable
 snapshots, subscriptions, file-opening requests, and reset behavior without
-exposing React contexts or Zustand state.
+exposing React contexts or Zustand state. Web IDE 0.3.1 additionally exposes a
+persistable `/workspace` projection plus awaited flush and close operations;
+close keeps persistence retryable when save or flush fails.
 
 ### Runtime
 
@@ -90,8 +100,10 @@ or replaced.
 
 Runtime capabilities drive the UI. A run-only provider does not expose Debug,
 Variables, or Graph controls. The current production composition supports C++
-run and debug. Python run is optional; Python debugging and Rust execution are
-not claimed.
+run and debug. The optional Python provider also supports source debugging and
+unittest execution; Rust execution is not claimed. Additive settlement methods
+allow awaited stop/dispose while preserving older synchronous provider
+contracts and numeric exit events.
 
 ### Testing
 
@@ -125,6 +137,11 @@ Monaco syntax support and the rest of the editor usable.
 register activities, commands, panels, workspace resources, runtime providers,
 test providers, and language-tooling providers. Activation receives public
 facades and scoped disposal; it never receives private workbench stores.
+
+Panel and activity components receive only mount-scoped execution,
+owner-scoped source-presentation, immutable workspace, selected-runtime, and
+panel-reveal facades. Workspace resources are either ordinary editable seeds or
+execution-only `/sysroot` inputs excluded from VFS and host persistence.
 
 Built-in workbench, Canvas, and Tests contributions use this same mechanism.
 They are examples of composition, not a closed catalog.
@@ -173,13 +190,15 @@ Therefore local development, CI, and deployment never depend on a developer's
 absolute filesystem path. `npm install` links the in-repo package, and root
 build/validation scripts build it before the application.
 
-The workspace package is currently a maintained mirror of the standalone local
-review candidate at `/Users/justinvassantachart/Projects/web-ide`, with small
-workspace-specific package-script adjustments. That standalone candidate has
-not been published or connected to a remote. Until a package or Git
-distribution is authorized, changes must be synchronized intentionally and
-validated in both contexts; the deployed host must continue using the relative
-in-repo workspace.
+The workspace package is a maintained mirror of the public standalone Web IDE
+repository's immutable `web-ide-v0.3.1-source` checkpoint, with
+workspace-specific package scripts and consumer tooling. Web IDE is MIT
+licensed and Hamilton has independently verified an exact immutable private
+release asset, but it is not published to npm. Nova continues using the
+relative mirror because an exact private-asset dependency would require a
+portable authenticated bootstrap for local development, CI, and deployment.
+Changes must be synchronized intentionally and validated in both contexts; an
+absolute sibling `file:` dependency is prohibited.
 
 ## Browser and deployment requirements
 
@@ -196,13 +215,15 @@ service-worker, authentication, and route policy. This repository's
   lifecycles are mount-scoped, but several legacy UI stores and the VFS remain
   module singletons.
 - Read-only mode is a user-interface policy, not a security boundary.
-- Python debugging, Rust, and end-to-end graphics execution are not complete.
+- Rust and end-to-end graphics execution are not complete. Python run,
+  debugging, variables, and unittest execution are supported by the optional
+  provider.
 - Browser execution and clangd still use external WebAssembly/toolchain assets.
 - Authenticated Firebase/LMS browser coverage needs a configured test project;
   it is not part of an unauthenticated local package test.
-- The standalone package remains private and unlicensed. Repository ownership,
-  license, third-party redistribution, CI, asset hosting, and publication still
-  require maintainer decisions.
+- The package remains private and unpublished to npm. Replacing Nova's source
+  mirror with a remote artifact still requires explicit authentication,
+  provenance, cache, rollback, and deployment decisions.
 
 For consumer-facing package details, see
 [`packages/web-ide/README.md`](../../packages/web-ide/README.md) and its

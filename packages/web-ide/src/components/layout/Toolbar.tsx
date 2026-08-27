@@ -19,15 +19,17 @@ import type {
     IDECommandContext,
     IDEWorkbenchSnapshot,
 } from '@/web-ide/contracts/contributions'
+import { usePanelLayout } from '@/web-ide/react/panel-layout-context'
 
 export function Toolbar() {
     const configuration = useWebIDEConfiguration()
     const engine = useEngine()
     const host = useIDEHost()
-    const { isCompiling, isRunning, setIsRunning, setRightTab } = useExecutionStore()
+    const { isCompiling, isRunning, setIsRunning } = useExecutionStore()
+    const { controller: panelLayout } = usePanelLayout()
     const { cacheState, downloadProgress } = useCompilerStore()
     const { debugMode, pushHistoryState, setDebugMode } = useDebugStore()
-    const { run, stop, restart } = useRunPipeline()
+    const { execution } = useRunPipeline()
     const commands = useIDECommands()
     const testProvider = useSelectedTestProvider()
     const compilerReady = cacheState === 'ready'
@@ -66,13 +68,9 @@ export function Toolbar() {
         testingAvailable: testProvider !== undefined,
     }
     const commandContext: IDECommandContext = {
-        execution: {
-            start: async (kind) => run(kind === 'debug', kind === 'test'),
-            stop,
-            restart: async (kind) => restart(kind === 'debug'),
-        },
+        execution,
         workspace: { snapshot: getAllFiles },
-        panels: { reveal: setRightTab },
+        panels: { reveal: panelLayout.selectPanel },
     }
     const toolbarCommands = commands.filter((command) =>
         command.surface === 'toolbar' && (command.when?.(workbenchSnapshot) ?? true),

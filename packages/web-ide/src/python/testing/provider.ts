@@ -12,7 +12,7 @@ import type {
 import type { IDEPlugin } from '@/web-ide/contracts/plugin'
 import { BoundedLineProtocolParser } from '@/testing/bounded-line-protocol-parser'
 
-export const PYTHON_UNITTEST_RUNNER_PATH = '/workspace/__web_ide_unittest_runner__.py'
+export const PYTHON_UNITTEST_RUNNER_PATH = '/workspace/__web_ide/unittest_runner.py'
 export const PYTHON_USER_MAIN_PATH = '/workspace/__web_ide_user_main__.py'
 export const PYTHON_UNITTEST_MARKER = '###WEB_IDE_UNITTEST###'
 
@@ -149,7 +149,13 @@ export const pythonUnittestTestProvider: TestProvider = {
     const mainEntry = Object.entries(files).find(([path]) =>
       path === 'main.py' || path === '/main.py' || path === '/workspace/main.py',
     )
-    if (mainEntry) preparedFiles[PYTHON_USER_MAIN_PATH] = mainEntry[1]
+    if (mainEntry) {
+      preparedFiles[PYTHON_USER_MAIN_PATH] = mainEntry[1]
+      // The runtime owns /main.py as its fixed launcher. The runner preloads
+      // this preserved copy as module `main`, so keeping the original path in
+      // the execution plan would collide with the selected runner entrypoint.
+      delete preparedFiles[mainEntry[0]]
+    }
     preparedFiles[PYTHON_UNITTEST_RUNNER_PATH] = UNITTEST_RUNNER
 
     return {

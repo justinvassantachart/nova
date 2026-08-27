@@ -9,6 +9,12 @@ embeds. The two layers are kept separate so the workbench can later be released
 as its own package without moving the site's Firebase, course, or replay code
 with it.
 
+The embedded workspace now mirrors exact Web IDE `0.3.1` source commit
+`ed271757daf80c3ded7ae2b4a67d74102ebf2435`. Nova consumes only its public
+exports and keeps the exact `debugger-sh@0.3.15` C++ backend. Assignment-backed
+mounts use Web IDE's public host-selected activity contract; standalone and
+lesson mounts preserve the existing Explorer/default selection.
+
 ## What is included
 
 - Monaco editing with C/C++ syntax support and optional clangd completion,
@@ -61,7 +67,7 @@ the complete boundary.
 
 ## Local development
 
-Node.js 20.19 or newer is required.
+Node.js `^20.19.0` or `>=22.12.0` is required, matching the supported Vite runtime.
 
 ```sh
 npm install
@@ -146,6 +152,12 @@ integration belongs in a separate companion package that consumes the open
 plugin API and is composed by its host with a compatible Python runtime. Web
 IDE does not contain a closed plugin catalog.
 
+Nova's shared base configuration intentionally omits
+`initialLayout.selectedActivityId`. LMS assignment mounts select the installed
+`nova.assignment` activity through a second static configuration, while `/ide`
+and lessons retain Web IDE's ordinary default. No Nova code imports or mutates
+Web IDE's sidebar store, DOM, or persistence key.
+
 ## Firebase setup for the teaching features
 
 The standalone IDE and anonymous lessons run without Firebase configuration.
@@ -190,26 +202,29 @@ reproduce those policies, including the non-isolated landing/sign-in routes
 and the isolated IDE routes. Set the same `VITE_FIREBASE_*` variables in the
 hosting environment when deploying the teaching features.
 
-The in-repo package is currently mirrored from the separate local Web IDE
-review candidate at `/Users/justinvassantachart/Projects/web-ide`. The deployed
-site depends only on the relative workspace package at `packages/web-ide`; it
-does not depend on that machine-specific path. Publication, a package registry,
-or a separate remote has not yet been authorized.
+The in-repo package is a reviewed mirror of the public Web IDE 0.3.1 source tag.
+The deployed site depends only on the relative workspace package at
+`packages/web-ide`; it does not depend on the sibling checkout or an absolute
+machine path. Web IDE is MIT licensed and has an exact immutable private
+Hamilton release, but it remains unpublished to npm. Moving Nova to a remote
+artifact requires a separate portable authentication/bootstrap migration.
 
 ## Current limitations
 
 - One mounted Web IDE workbench per JavaScript realm is supported; some legacy
   workbench state and VFS services are still module-scoped.
-- C++ run/debug is the production path. Python run exists as an optional
-  provider, but Python debugging is not supported; Rust is not implemented.
+- C++ run/debug is the production path. The optional Python provider supports
+  run, source debugging, variables, and unittest execution; Rust is not
+  implemented.
 - The Canvas contribution is generic, but working end-to-end graphics output
   still requires a runtime or companion plugin that emits graphics events.
 - Browser runtime and clangd assets require network access and correct
   cross-origin isolation headers.
 - Authenticated Firebase/LMS browser checks require a configured non-production
   test project and account.
-- The reusable package remains `private: true` and `UNLICENSED` until ownership,
-  licensing, third-party redistribution, and publication decisions are made.
+- The reusable source is MIT licensed and remains `private: true`; it is not
+  published to npm. Nova still requires a reviewed migration before changing
+  its relative-workspace distribution model.
 
 More detail is available in [standalone repository readiness](docs/architecture/standalone-repository-readiness.md),
 [guided lessons](src/lessons/README.md), and [session replay](src/replay/README.md).

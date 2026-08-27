@@ -8,7 +8,10 @@ const isolationHeaders = {
 }
 
 export default defineConfig({
-  plugins: [react(), wasm()],
+  plugins: [
+    react(),
+    wasm(),
+  ],
   server: { headers: isolationHeaders },
   preview: { headers: isolationHeaders },
   resolve: {

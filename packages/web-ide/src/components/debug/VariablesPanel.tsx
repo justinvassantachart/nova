@@ -8,10 +8,10 @@ import type {
 import { VariableRow } from './VariableRow'
 
 export function VariablesPanel() {
-    const { debugMode, memorySnapshot } = useDebugStore()
+    const { callStack, debugMode, memorySnapshot } = useDebugStore()
     const frames: StackFrame[] = useMemo(
-        () => memorySnapshot?.frames ?? [],
-        [memorySnapshot],
+        () => callStack,
+        [callStack],
     )
     const heap = useMemo(
         () => memorySnapshot?.heapAllocations ?? [],
@@ -74,9 +74,9 @@ export function VariablesPanel() {
 
             <div className="flex-1 min-h-0 overflow-y-auto py-1">
                 <Scope title="Locals" empty="No variables in scope">
-                    {selectedFrame?.variables.map((v) => (
+                    {selectedFrame?.variables.map((v, index) => (
                         <VariableRow
-                            key={v.name}
+                            key={`${v.name}-${index}`}
                             variable={v}
                             depth={0}
                             resolvePointer={resolvePointer}
@@ -121,22 +121,33 @@ function CallStack({
                                 : 'border-transparent text-muted-foreground hover:bg-[var(--color-row-hover)] hover:text-foreground'
                         }`}
                     >
-                        <span className={selected ? 'font-semibold text-foreground' : ''}>
-                            {f.funcName}
-                        </span>
-                        {f.line != null && (
-                            <span className="ml-1 text-muted-foreground/70">:{f.line}</span>
-                        )}
-                        {f.isActive && (
-                            <span className="ml-2 text-[9px] uppercase tracking-wider text-primary/90">
-                                paused
+                        <span className="flex min-w-0 items-center">
+                            <span className={selected ? 'font-semibold text-foreground' : ''}>
+                                {f.funcName}
                             </span>
-                        )}
+                            {f.isActive && (
+                                <span className="ml-2 text-[9px] uppercase tracking-wider text-primary/90">
+                                    paused
+                                </span>
+                            )}
+                        </span>
+                        <span
+                            className="block truncate text-[10px] text-muted-foreground/70"
+                            title={f.file}
+                        >
+                            {formatFrameSource(f)}
+                        </span>
                     </button>
                 )
             })}
         </>
     )
+}
+
+function formatFrameSource(frame: StackFrame) {
+    const fileName = frame.file?.split('/').pop()
+    if (fileName) return `${fileName}:${frame.line}`
+    return `line ${frame.line}`
 }
 
 function Scope({

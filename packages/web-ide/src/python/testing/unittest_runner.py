@@ -12,6 +12,7 @@ import unittest
 
 MARKER = "###WEB_IDE_UNITTEST###"
 USER_MAIN = "__web_ide_user_main__.py"
+USER_MAIN_SOURCE = "main.py"
 
 
 def preload_user_main():
@@ -35,7 +36,10 @@ def location_from_error(error):
     if not frames:
         return None
     frame = frames[-1]
-    return {"file": frame.filename, "line": frame.lineno}
+    filename = frame.filename
+    if os.path.basename(filename) == USER_MAIN:
+        filename = USER_MAIN_SOURCE
+    return {"file": filename, "line": frame.lineno}
 
 
 class ProtocolResult(unittest.TextTestResult):
@@ -66,7 +70,10 @@ class ProtocolResult(unittest.TextTestResult):
         exception = error[1]
         diagnostic = {
             "message": str(exception) or exception.__class__.__name__,
-            "details": self._exc_info_to_string(error, test),
+            "details": self._exc_info_to_string(error, test).replace(
+                USER_MAIN,
+                USER_MAIN_SOURCE,
+            ),
         }
         location = location_from_error(error)
         if location is not None:
