@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import './landing.css'
 
-const repository = 'https://github.com/justinvassantachart/nova'
+const repository = 'https://github.com/justinvassantachart/web-ide'
 const desktopQuery = '(min-width: 701px)'
 const isDesktop = () => window.matchMedia(desktopQuery).matches
 const subscribeViewport = (onChange: () => void) => {
@@ -35,15 +35,12 @@ export default function LandingPage() {
                     </div>
                 </section>
 
-                <section className="landing-workbench" aria-labelledby="example-title">
+                <section className="landing-workbench" aria-label="Try the C++ IDE">
                     <div className="landing-workbench-heading">
-                        <div>
-                            <h2 id="example-title"><span className="landing-live-dot" aria-hidden="true" />{desktop ? 'A linked list, live.' : 'A linked list, visualized.'}</h2>
-                            {desktop && <p className="landing-debug-prompt">Click <strong>Debug</strong> to begin.</p>}
-                        </div>
                         <a href="/ide?example=linked-list">Open full screen <span aria-hidden="true">↗</span></a>
+                        {desktop && <p className="landing-debug-prompt">Click <strong>Debug</strong> to begin.</p>}
                     </div>
-                    {desktop ? <div className="landing-embed">
+                    {desktop ? <div className="landing-workspace">
                         <iframe src="/showcase" title="Live, editable C++ linked-list workspace" allow="cross-origin-isolated" />
                     </div> : <div className="landing-mobile-preview">
                         <a href="/ide?example=linked-list"><img src="/debugger-demo.png" width="1440" height="820" loading="lazy" alt="The C++ debugger paused on a linked list, with source code and a graph of pointers to three heap nodes." /></a>
@@ -78,11 +75,11 @@ export default function LandingPage() {
                     </div>
                     <div className="landing-teaching-body">
                         <p>Start with ten self-paced lessons, from Python to C++ and linked lists. Each one pairs a small program with a reason to reach for the debugger.</p>
-                        <p>Bring your own assignments, create a class, or host your own copy. The reusable React workbench also fits into an existing course site or LMS.</p>
+                        <p>Create a class and bring your own assignments, or import the IDE component into your own course site or LMS.</p>
                         <div className="landing-resource-links">
                             <a href={`${repository}/blob/main/docs/teaching.md`}>Instructor guide <span aria-hidden="true">↗</span></a>
                             <a href={`${repository}/blob/main/docs/self-hosting.md`}>Self-hosting <span aria-hidden="true">↗</span></a>
-                            <a href={`${repository}/tree/main/packages/web-ide#readme`}>Embed it <span aria-hidden="true">↗</span></a>
+                            <a href={`${repository}/blob/main/docs/import-ide-component.md`}>Import IDE component <span aria-hidden="true">↗</span></a>
                         </div>
                     </div>
                 </section>

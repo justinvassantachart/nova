@@ -5,11 +5,11 @@ step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
 This repository contains both the deployed site and the reusable workbench it
-embeds. The two layers are kept separate so the workbench can later be released
+imports. The two layers are kept separate so the workbench can later be released
 as its own package without moving the site's Firebase, course, or replay code
 with it.
 
-The embedded workbench is based on Web IDE `0.3.1` source commit
+The local workbench copy is based on Web IDE `0.3.1` source commit
 `ed271757daf80c3ded7ae2b4a67d74102ebf2435`, with local additions for C++
 precompiled-header inputs, clangd symbol renaming, and memory-graph layout fixes. It is no longer an exact
 mirror of that tag. The site consumes its public exports and pins the public
@@ -20,7 +20,7 @@ asset provenance, and regeneration instructions.
 Try the [editable linked list](https://webide.org/ide?example=linked-list),
 [ten lessons](https://webide.org/learn), or [guided debugger tour](https://webide.org/demo).
 For adoption, see the [instructor guide](docs/teaching.md),
-[self-hosting guide](docs/self-hosting.md), and
+[site operations](docs/site-operations.md), and
 [React workbench API](packages/web-ide/README.md).
 
 ## What is included
@@ -104,7 +104,7 @@ npm run build:web-ide            # package build only
 npm --workspace web-ide run validate
 ```
 
-## Embedding the workbench
+## Import the IDE component
 
 The site composes Web IDE using the same public API available to another host:
 
@@ -209,7 +209,7 @@ submission access. Do not deploy the LMS against an unrestricted database.
 `netlify.toml` supplies SPA routing, cache policy, and the cross-origin headers
 required by the browser runtime and clangd workers. A different host must
 reproduce those policies, including the non-isolated sign-in route and isolated
-landing/IDE routes. The landing page embeds a same-origin IDE; both documents
+landing/IDE routes. The landing page loads a same-origin IDE; both documents
 need isolation for SharedArrayBuffer. Set the same `VITE_FIREBASE_*` variables in the
 hosting environment when deploying the teaching features.
 

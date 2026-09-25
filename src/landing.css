@@ -29,12 +29,10 @@
 .landing-primary:hover { background: #223b27; }
 .landing-secondary { border: 1px solid #d3d9cf; background: transparent; }
 .landing-secondary:hover { background: #edf0e8; }
-.landing-workbench-heading { display: flex; justify-content: space-between; gap: 15px; align-items: center; padding: 13px 0; font-size: 11px; }
-.landing-workbench-heading h2 { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 500; }
-.landing-debug-prompt { margin-top: 4px; color: var(--landing-muted); font-size: 11px; }
-.landing-live-dot { width: 6px; height: 6px; background: #62795a; border-radius: 50%; }
-.landing-embed { border: 1px solid #cfd5cc; border-radius: 4px; overflow: hidden; background: white; }
-.landing-embed iframe { display: block; width: 100%; height: 650px; border: 0; }
+.landing-workbench-heading { display: flex; gap: 15px; align-items: center; min-height: 43px; padding: 10px 0; font-size: 11px; }
+.landing-debug-prompt { margin: 0 88px 0 auto; color: var(--landing-muted); font-size: 11px; white-space: nowrap; }
+.landing-workspace { border: 1px solid #cfd5cc; border-radius: 4px; overflow: hidden; background: white; }
+.landing-workspace iframe { display: block; width: 100%; height: 650px; border: 0; }
 .landing-mobile-preview { display: none; }
 .landing-workbench-caption { color: var(--landing-muted); font-size: 11px; line-height: 1.6; padding: 13px 1px; }
 .landing-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 55px; padding: 40px 0 52px; }
@@ -63,7 +61,8 @@
     .landing-hero { padding: 35px 0 26px; }
     .landing-hero h1 { font-size: 42px; }
     .landing-intro { font-size: 14px; }
-    .landing-embed { display: none; }
+    .landing-workbench-heading { justify-content: flex-end; }
+    .landing-workspace { display: none; }
     .landing-mobile-preview { display: block; border: 1px solid #cfd5cc; border-radius: 4px; overflow: hidden; }
     .landing-mobile-preview img { display: block; width: 100%; height: auto; }
     .landing-workbench-caption { font-size: 10px; }
