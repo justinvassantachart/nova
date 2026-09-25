@@ -63,6 +63,13 @@ createRoot(document.getElementById('root')!).render(
 The runnable example is maintained in the standalone Web IDE source repository
 under `examples/basic`; Nova itself is the production C++ consumer.
 
+To start a new workspace with a breakpoint, add
+`initialBreakpoints: { '/workspace/main.cpp': [1] }` beside `initialFiles`.
+Lines are 1-based and must exist in the seeded files. This opt-in also saves
+breakpoint edits per workspace, including removing the defaults. Existing
+workspaces without saved breakpoint state start empty; `localCache: 'memory'`
+applies defaults per mount without saving them.
+
 The packaged browser runtime providers currently use Debugger.sh internally,
 but that implementation name is not part of the public provider/session API.
 Because the consuming application performs the final bundle, configure

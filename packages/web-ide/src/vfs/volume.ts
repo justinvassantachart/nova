@@ -417,4 +417,5 @@ export async function initVFS(opts: InitVFSOptions = {}) {
     }
     const active = pickActive()
     if (active) useEditorStore.getState().setActiveFile(active, readFile(active))
+    return { seeded: workspaceEmpty }
 }

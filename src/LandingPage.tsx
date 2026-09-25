@@ -37,7 +37,10 @@ export default function LandingPage() {
 
                 <section className="landing-workbench" aria-labelledby="example-title">
                     <div className="landing-workbench-heading">
-                        <h2 id="example-title"><span className="landing-live-dot" aria-hidden="true" />{desktop ? 'A linked list, live.' : 'A linked list, visualized.'}</h2>
+                        <div>
+                            <h2 id="example-title"><span className="landing-live-dot" aria-hidden="true" />{desktop ? 'A linked list, live.' : 'A linked list, visualized.'}</h2>
+                            {desktop && <p className="landing-debug-prompt">Click <strong>Debug</strong> to begin.</p>}
+                        </div>
                         <a href="/ide?example=linked-list">Open full screen <span aria-hidden="true">↗</span></a>
                     </div>
                     {desktop ? <div className="landing-embed">
@@ -46,7 +49,7 @@ export default function LandingPage() {
                         <a href="/ide?example=linked-list"><img src="/debugger-demo.png" width="1440" height="820" loading="lazy" alt="The C++ debugger paused on a linked list, with source code and a graph of pointers to three heap nodes." /></a>
                     </div>}
                     <p className="landing-workbench-caption">{desktop
-                        ? 'Try it: set a breakpoint beside the while loop, then click Debug to see the linked list in memory.'
+                        ? 'Use Step Over to build the list and follow its pointers. Fit brings every node into view.'
                         : 'The linked-list debugger in action. Open the IDE to edit and run this example.'}</p>
                 </section>
 

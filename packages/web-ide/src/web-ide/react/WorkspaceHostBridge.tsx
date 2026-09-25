@@ -9,6 +9,7 @@ import {
 import type { IDEWorkspacePersistence } from '../contracts/host'
 import type { WebIDEInstanceController } from '../core/instance-handle'
 import { WorkspacePersistenceCoordinator } from '../core/workspace-persistence'
+import { bindWorkspaceBreakpoints } from '../core/workspace-breakpoints'
 import {
   mergeWorkspaceFiles,
   projectPersistedWorkspaceFiles,
@@ -38,18 +39,32 @@ export function WorkspaceHostBridge({
   const persistence = workspace?.persistence
   const initialFiles = mergeWorkspaceFiles(resources, workspace?.initialFiles)
   const seedFingerprint = workspaceFilesFingerprint(initialFiles)
+  const breakpointSeedFingerprint = workspace?.initialBreakpoints === undefined ? '' : JSON.stringify(
+    Object.entries(workspace.initialBreakpoints)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, lines]) => [path, [...lines].sort((a, b) => a - b)]),
+  )
   const persistenceBinding = useRef<PersistenceBinding | undefined>(undefined)
 
   useEffect(() => {
+    let cancelled = false
+    let unbindBreakpoints: (() => void) | undefined
     void initVFS({
       projectId: workspaceId ?? 'default-project',
       initialFiles,
       ephemeral: localCache === 'memory',
+    }).then((result) => {
+      if (cancelled || !result || !workspace) return
+      unbindBreakpoints = bindWorkspaceBreakpoints(workspace, result.seeded)
     })
+    return () => {
+      cancelled = true
+      unbindBreakpoints?.()
+    }
     // The fingerprint makes semantically identical inline file objects stable;
     // initVFS itself guards overlapping async hydrations by generation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localCache, seedFingerprint, workspaceId])
+  }, [breakpointSeedFingerprint, localCache, seedFingerprint, workspaceId])
 
   useLayoutEffect(() => {
     if (!workspaceId || !persistence) return

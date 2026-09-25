@@ -79,7 +79,7 @@ async function importVfs() {
 describe('VFS persistence', () => {
     it('persists empty files created in the explorer through a reload', async () => {
         const { initVFS, createFile } = await importVfs()
-        await initVFS({ projectId: 'test-empty-files' })
+        expect(await initVFS({ projectId: 'test-empty-files' })).toEqual({ seeded: true })
 
         createFile('/workspace/CandyShop.h', '')
         createFile('/workspace/CandyShop.cpp', '')
@@ -91,7 +91,7 @@ describe('VFS persistence', () => {
         // freshly empty, then re-init from the same OPFS project.
         vi.resetModules()
         const fresh = await importVfs()
-        await fresh.initVFS({ projectId: 'test-empty-files' })
+        expect(await fresh.initVFS({ projectId: 'test-empty-files' })).toEqual({ seeded: false })
 
         expect(fresh.fileExists('/workspace/CandyShop.h')).toBe(true)
         expect(fresh.fileExists('/workspace/CandyShop.cpp')).toBe(true)

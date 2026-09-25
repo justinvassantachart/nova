@@ -5,7 +5,7 @@ struct Node {
     int value;
     Node* next;
 };
-
+// Click Debug, then Step Over to watch the list grow.
 int main() {
     Node* head = new Node{10, nullptr};
     Node* middle = new Node{20, nullptr};
@@ -15,7 +15,6 @@ int main() {
 
     int total = 0;
     Node* current = head;
-    // Set a breakpoint on the next line, then click Debug.
     while (current != nullptr) {
         total += current->value;
         current = current->next;
@@ -28,3 +27,6 @@ int main() {
     return 0;
 }
 `
+
+export const linkedListEntryLine = linkedListExample.split('\n')
+    .findIndex(line => line.includes('Node* head = new Node')) + 1
