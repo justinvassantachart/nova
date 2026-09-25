@@ -9,7 +9,11 @@ SBOM.
 
 Notable retained dependencies and source provenance include:
 
-- Debugger.sh — MIT; dynamically loads its engine and language toolchain assets.
+- Debugger.sh — MIT; pinned to the public WebIDE fork release
+  `0.3.15-webide.0.5.0.2` from https://github.com/justinvassantachart/engine.
+  It embeds its engine WASM and LLVM exception runtime, and dynamically loads
+  its compiler and sysroot. The exception archive retains its own LLVM notices
+  and provenance; this site also serves them under `/third-party/debugger-sh/`.
 - Monaco Editor — MIT and its bundled third-party notices.
 - `@monaco-editor/react` — MIT.
 - VS Code Codicons — CC BY 4.0 for icons/font and MIT-licensed code files.
@@ -22,8 +26,9 @@ Notable retained dependencies and source provenance include:
 - VS Code light/dark theme values retained from the MIT-licensed theme defaults
   are covered by the generated source-attribution record and license text.
 
-Remote WebAssembly/toolchain artifacts used by Debugger.sh and optional clangd
-are not copied into this repository or tarball. Their exact reachable runtime
+The compiler/sysroot and optional clangd WebAssembly downloads are not copied
+into this repository or tarball. This site separately distributes generated
+standard-library PCH assets and their notices under `/compiler/`. Their exact reachable runtime
 receipts, reviewed source relationships, retained license texts, and known
 provenance limitations are recorded under `release/`. Those records support
 current remote loading; they do not establish complete binary notice/source

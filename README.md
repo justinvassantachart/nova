@@ -1,6 +1,6 @@
-# Web IDE
+# web-ide
 
-Web IDE is a browser-based C++ workspace with editing, compilation,
+web-ide is a browser-based C++ workspace with editing, compilation,
 step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
@@ -9,16 +9,24 @@ embeds. The two layers are kept separate so the workbench can later be released
 as its own package without moving the site's Firebase, course, or replay code
 with it.
 
-The embedded workspace now mirrors exact Web IDE `0.3.1` source commit
-`ed271757daf80c3ded7ae2b4a67d74102ebf2435`. Nova consumes only its public
-exports and keeps the exact `debugger-sh@0.3.15` C++ backend. Assignment-backed
-mounts use Web IDE's public host-selected activity contract; standalone and
-lesson mounts preserve the existing Explorer/default selection.
+The embedded workbench is based on Web IDE `0.3.1` source commit
+`ed271757daf80c3ded7ae2b4a67d74102ebf2435`, with local additions for C++
+precompiled-header inputs, clangd symbol renaming, and memory-graph layout fixes. It is no longer an exact
+mirror of that tag. The site consumes its public exports and pins the public
+`debugger-sh@0.3.15-webide.0.5.0.2` fork release. See
+[compiler performance](docs/compiler-performance.md) for measured behavior,
+asset provenance, and regeneration instructions.
+
+Try the [editable linked list](https://webide.org/ide?example=linked-list),
+[ten lessons](https://webide.org/learn), or [guided debugger tour](https://webide.org/demo).
+For adoption, see the [instructor guide](docs/teaching.md),
+[self-hosting guide](docs/self-hosting.md), and
+[React workbench API](packages/web-ide/README.md).
 
 ## What is included
 
 - Monaco editing with C/C++ syntax support and optional clangd completion,
-  hover, diagnostics, and navigation
+  hover, diagnostics, navigation, and multi-file symbol rename
 - in-browser C++ compilation and execution
 - breakpoints, step controls, call stacks, variables, and memory graphs
 - a virtual multi-file workspace that persists in the browser
@@ -37,7 +45,9 @@ registered through public contracts.
 
 | Route | Purpose | Sign-in |
 | --- | --- | --- |
-| `/` | Product landing page | No |
+| `/` | Product landing page with a live linked-list workspace | No |
+| `/showcase`, `/ide?example=linked-list` | Editable linked-list example; shared local workspace | No |
+| `/demo` | Short guided test-and-debug exercise | No |
 | `/ide` | Standalone Web IDE workspace | No |
 | `/learn` | Guided lesson catalog and lesson runner | No |
 | `/login` | Account sign-in | No |
@@ -70,7 +80,7 @@ the complete boundary.
 Node.js `^20.19.0` or `>=22.12.0` is required, matching the supported Vite runtime.
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
@@ -198,11 +208,13 @@ submission access. Do not deploy the LMS against an unrestricted database.
 `npm run build` produces the static site in `dist/`. The included
 `netlify.toml` supplies SPA routing, cache policy, and the cross-origin headers
 required by the browser runtime and clangd workers. A different host must
-reproduce those policies, including the non-isolated landing/sign-in routes
-and the isolated IDE routes. Set the same `VITE_FIREBASE_*` variables in the
+reproduce those policies, including the non-isolated sign-in route and isolated
+landing/IDE routes. The landing page embeds a same-origin IDE; both documents
+need isolation for SharedArrayBuffer. Set the same `VITE_FIREBASE_*` variables in the
 hosting environment when deploying the teaching features.
 
-The in-repo package is a reviewed mirror of the public Web IDE 0.3.1 source tag.
+The in-repo package is based on the public Web IDE 0.3.1 source tag with the
+local additions noted above.
 The deployed site depends only on the relative workspace package at
 `packages/web-ide`; it does not depend on the sibling checkout or an absolute
 machine path. Web IDE is MIT licensed and has an exact immutable private

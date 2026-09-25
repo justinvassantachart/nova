@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-24",
+  "browser": "Chromium headless 151.0.7922.34",
+  "pch": "iostream-5b8b3734b47d32bd.pch.bin",
+  "result": {
+    "type": "completed",
+    "exitCode": 0,
+    "timing": { "totalMs": 18189.355000000447, "buildMs": 13767.780001000001, "runMs": 1032.754999 }
+  },
+  "stdout": "7\n",
+  "stderr": "",
+  "stops": ["breakpoint", "step"],
+  "locations": [
+    { "name": "main", "path": "/main.cpp", "line": 4, "column": 16 },
+    { "name": "main", "path": "/main.cpp", "line": 5, "column": 3 }
+  ]
+}

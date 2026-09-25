@@ -1,9 +1,20 @@
 # Guided lessons (`/learn`)
 
 The lesson host provides a ten-part course from introductory Python concepts to
-C++ and linked lists inside Web IDE. Each lesson combines short explanations,
-starter files, a focused debugging exercise, tests, and observable completion
+C++ and linked lists inside Web IDE. The series combines short explanations,
+starter files, focused debugging exercises, tests, and observable completion
 checks. No account is required, and progress persists in `localStorage`.
+
+`/demo` is a separate, four-minute tour for paper readers. It starts with a
+failing linked-list test, pauses in the memory graph, steps forward and through
+recorded history, and verifies a one-line fix. `demo-lesson.ts` uses the same
+public host contract and completion checks, but is not an eleventh curriculum
+lesson. Its workspace and progress have their own stable ID.
+
+The landing page's `/showcase` embed and `/ide?example=linked-list` use
+`ShowcaseIDE.tsx`: a free-form IDE seeded with a correct three-node linked
+list. Both views share browser-local edits. The memory graph is selected on
+mount; execution starts only when the visitor uses Run or Debug.
 
 Lessons belong to the deployed site host, not to the reusable
 `packages/web-ide` package. They are a concrete example of an application
@@ -71,6 +82,8 @@ therefore do not require a lesson-system fork.
 | `LessonRunner.tsx` | `/learn/:slug` host layout and Web IDE embedding |
 | `LessonPanel.tsx` | Instructions, checklist, hints, navigation, and reset |
 | `LessonsHome.tsx` | `/learn` catalog |
+| `GuidedDemo.tsx`, `demo-lesson.ts` | `/demo` tour and its standalone lesson data |
+| `ShowcaseIDE.tsx`, `showcase-example.ts` | Free-form linked-list workspace for the landing-page embed |
 
 ## Workspace lifecycle
 

@@ -1,0 +1,42 @@
+{
+  "llvmRevision": "4434dabb69916856b824f68a64b029c67175e532",
+  "sourceBase": "https://raw.githubusercontent.com/llvm/llvm-project/4434dabb69916856b824f68a64b029c67175e532/",
+  "inputs": {
+    "compiler.wasm": {
+      "url": "https://fabioibanez.github.io/website/llvm.core.wasm",
+      "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5"
+    },
+    "sysroot.tar.gz": {
+      "url": "https://fabioibanez.github.io/website/llvm-resources.tar.gz",
+      "sha256": "8745c6af23fd841fa507d0c73f6b6b8e8da1b4ec216a6339739a28b38ff7227b"
+    },
+    "sdk-sysroot.tar.gz": {
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sysroot-33.0%2Bm.tar.gz",
+      "sha256": "063bc1b56582b9923e08ac9b89e58789618d851763f01530b3ff20b9e5df0ca3"
+    }
+  },
+  "sources": {
+    "libcxx/src/include/atomic_support.h": "c01d71b5a8fe48773f3670166030284b1050413e22f24bf21bb8c64637036f9e",
+    "libcxxabi/include/__cxxabi_config.h": "e2e4db49c80aeefef76c1fbd58b2f5e1b4f9fe0f6a215bc75621c768f51dc409",
+    "libcxxabi/include/cxxabi.h": "3c2ca8786f9419e1151a5fe92b8dbdcdadf0bde3011e7154d60b172b67ff4ebc",
+    "libcxxabi/src/cxa_exception.cpp": "1feb758c547d8ddc2f4f3a08fe9fde586bba55649dd30e13191659d807093e19",
+    "libcxxabi/src/cxa_exception.h": "f6867fd35fc8bafde2f9348a017a2ca9938f577d648d7258d9aef780064ddb52",
+    "libcxxabi/src/cxa_handlers.h": "2c87e313acb5a9e8a48374cd431da69c98fb2c9ad2c70be82fe7fbed122d00fe",
+    "libcxxabi/src/cxa_personality.cpp": "d9d82c76d99df2a9850125287fb0ad2f5e3eef04bb56314210875a6e7d619692",
+    "libcxxabi/src/fallback_malloc.h": "a9f725ecf2bfe34f482ead34e182b74013e48fc51902f55eba2a7e30866415b1",
+    "libcxxabi/src/private_typeinfo.h": "308dd443446dfa0e6972e897f575c4e379f50bbf3aee3f5126f955f44768c803",
+    "libunwind/include/__libunwind_config.h": "9c4d2213e9b6dd77da80d066e7a320ddbf3b62a8e511026e4c7a2e10ec9059f8",
+    "libunwind/include/unwind.h": "e4a58637fc8ca1d29cd600c3c4416aafed50085edf276fa076214c8d81c263f0",
+    "libunwind/include/unwind_itanium.h": "c8cc61d806e13a2e75e93f1c15afd432f93a99283d27d15f5a28a3ebee989cba"
+  },
+  "unwindInput": {
+    "member": "wasi-sysroot-33.0+m/lib/wasm32-wasip1/eh/libunwind.a",
+    "sha256": "6351f2983b7dd2972eceb538ac2acbe23894e31799f0ac286930e4f20a4ca647"
+  },
+  "outputs": {
+    "lib/wasm32-wasip1/cxa_exception.cpp.o": "3a7478a6c6c86d67ac9102eccbd1eb7b034993f4fd9ad2c87212d33b737bf50f",
+    "lib/wasm32-wasip1/cxa_personality.cpp.o": "ea90bead89f8ab297db905f48cb080f11a782851a3e9476073d65cd0c7e39ccf",
+    "lib/wasm32-wasip1/libunwind.a": "9c7b786ce347b57e699b1d7bb86a08852f5308ac8f96cefb613792d0956434f9"
+  },
+  "archiveSha256": "9818de9b53eb70c9e6c318112aaedc0144980321f7073a7c5a185690746ac284"
+}

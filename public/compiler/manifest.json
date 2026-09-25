@@ -1,0 +1,53 @@
+{
+  "engineVersion": "0.3.15-webide.0.5.0.2",
+  "compilerDigest": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+  "sysrootDigest": "8745c6af23fd841fa507d0c73f6b6b8e8da1b4ec216a6339739a28b38ff7227b",
+  "flags": [
+    "-cc1",
+    "-triple",
+    "wasm32-wasip1",
+    "-Werror",
+    "-disable-free",
+    "-isysroot",
+    "/",
+    "-internal-isystem",
+    "/include/c++/v1",
+    "-internal-isystem",
+    "/include",
+    "-internal-isystem",
+    "/include/wasm32-wasip1",
+    "-std=c++23",
+    "-fexceptions",
+    "-fcxx-exceptions",
+    "-exception-model=wasm",
+    "-target-feature",
+    "+exception-handling",
+    "-mllvm",
+    "-wasm-enable-eh",
+    "-mllvm",
+    "-wasm-use-legacy-eh=true"
+  ],
+  "profiles": [
+    {
+      "headers": [
+        "iostream"
+      ],
+      "prelude": "#include <iostream>\n",
+      "filename": "iostream-5b8b3734b47d32bd.pch.bin",
+      "sha256": "5b8b3734b47d32bd3182404707f3786a1376800b099aef4efa27d05701b8b649",
+      "bytes": 12686096,
+      "compressedBytes": 7287957
+    },
+    {
+      "headers": [
+        "iostream",
+        "vector"
+      ],
+      "prelude": "#include <iostream>\n#include <vector>\n",
+      "filename": "iostream-vector-893905b26e360426.pch.bin",
+      "sha256": "893905b26e3604265486b6f225c937e33d3e8a4361de8eb02c569eb67c46fd00",
+      "bytes": 13519304,
+      "compressedBytes": 7826845
+    }
+  ]
+}

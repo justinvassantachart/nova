@@ -28,6 +28,7 @@ import type {
 type Any = any;
 type EngineRunResult = Awaited<ReturnType<EngineType['run']>>;
 type RuntimeErrorOutcome = Extract<RuntimeOutcome, { type: 'error' }>;
+const pchRejectionPattern = /(?:fatal )?error:[^\r\n]*(?:precompiled header|PCH file|AST file)/i;
 
 interface DapResponse {
     type?: string;
@@ -264,6 +265,10 @@ export class BrowserRuntimeSession implements RuntimeSession {
     private readonly workspacePathByRuntimePath = new Map<string, string>();
     private readonly userRuntimePaths = new Set<string>();
     private runtimeFileTree: DirNode = emptyDirectory();
+    private runtimeBinaryFiles: Record<string, Uint8Array> = {};
+    private runtimeCppArtifacts: EngineType['cppArtifacts'];
+    private pchFallbackAllowed = false;
+    private pchCompilerOutput = '';
     private inputBuf = '';
     private currentIsDebug = false;
     private activeThreadId = 1;
@@ -303,6 +308,8 @@ export class BrowserRuntimeSession implements RuntimeSession {
         mode,
         entrypoint,
         streamInterceptor,
+        binaryFiles = {},
+        cppArtifacts,
     }: RuntimeExecutionPlan): Promise<RuntimePreparationResult> {
         if (this.disposed) {
             throw new Error('Cannot prepare a disposed runtime session');
@@ -359,12 +366,47 @@ export class BrowserRuntimeSession implements RuntimeSession {
             }
 
             this.runtimeFileTree = buildRuntimeFileTree(this.fileMap);
+            this.runtimeBinaryFiles = Object.create(null) as Record<string, Uint8Array>;
+            this.runtimeCppArtifacts = undefined;
+            this.pchFallbackAllowed = cppArtifacts?.fallbackToSource === true;
+            if ((cppArtifacts || Object.keys(binaryFiles).length) && this.profile.engineLanguage !== 'c') {
+                throw new TypeError('Binary build inputs require C/C++');
+            }
+            const artifactPath = (path: string) => `/${runtimeRelativeFilePath(path)}`;
+            for (const [path, bytes] of Object.entries(binaryFiles)) {
+                const relative = runtimeRelativeFilePath(path);
+                if (!(bytes instanceof Uint8Array)) throw new TypeError(`Binary input must be bytes: ${path}`);
+                if (Object.hasOwn(this.fileMap, relative) || Object.hasOwn(this.runtimeBinaryFiles, `/${relative}`)) {
+                    throw new TypeError(`Binary input collides with an execution file: ${path}`);
+                }
+                this.runtimeBinaryFiles[`/${relative}`] = bytes.slice();
+            }
+            buildRuntimeFileTree({ ...this.fileMap, ...Object.fromEntries(
+                Object.keys(this.runtimeBinaryFiles).map(path => [path.slice(1), '']),
+            ) });
+            if (cppArtifacts) {
+                this.runtimeCppArtifacts = {
+                    sources: cppArtifacts.sources?.map(artifactPath),
+                    archives: cppArtifacts.archives?.map(artifactPath),
+                    precompiledHeader: cppArtifacts.precompiledHeader === undefined
+                        ? undefined : artifactPath(cppArtifacts.precompiledHeader),
+                };
+                for (const path of [
+                    ...(this.runtimeCppArtifacts.archives ?? []),
+                    ...(this.runtimeCppArtifacts.precompiledHeader ? [this.runtimeCppArtifacts.precompiledHeader] : []),
+                ]) {
+                    if (!Object.hasOwn(this.runtimeBinaryFiles, path)) throw new TypeError(`Missing binary build input: ${path}`);
+                }
+            }
         } catch (error) {
             this.fileMap = Object.create(null) as Record<string, string>;
             this.runtimePathByWorkspacePath.clear();
             this.workspacePathByRuntimePath.clear();
             this.userRuntimePaths.clear();
             this.runtimeFileTree = emptyDirectory();
+            this.runtimeBinaryFiles = {};
+            this.runtimeCppArtifacts = undefined;
+            this.pchFallbackAllowed = false;
             this.flushStreamInterceptor();
             return {
                 success: false,
@@ -652,6 +694,9 @@ export class BrowserRuntimeSession implements RuntimeSession {
         engine.stderr.on('data', (chunk: Uint8Array) => {
             if (this.disposed || this.engine !== engine) return;
             const text = this.stderrDecoder.decode(chunk, { stream: true });
+            if (this.inCompilePhase && this.pchFallbackAllowed) {
+                this.pchCompilerOutput = (this.pchCompilerOutput + text).slice(-16_384);
+            }
             this.scanForCompileError(text);
             this.emitStream('stderr', text.replace(/\r?\n/g, '\r\n'));
         });
@@ -769,6 +814,8 @@ export class BrowserRuntimeSession implements RuntimeSession {
 
             try {
                 engine.fs = this.runtimeFileTree;
+                engine.binaryFiles = this.runtimeBinaryFiles;
+                engine.cppArtifacts = this.runtimeCppArtifacts;
                 engine.debugger.enabled = isDebug;
                 this.currentIsDebug = isDebug;
                 this.running = true;
@@ -779,6 +826,7 @@ export class BrowserRuntimeSession implements RuntimeSession {
                 this.inCompilePhase = true;
                 this.diagnosticEmitted = false;
                 this.stderrLineBuf = '';
+                this.pchCompilerOutput = '';
                 if (isDebug) this.beginDebuggerConfiguration(session);
 
                 // debugger-sh attaches its DAP transport while run() starts.
@@ -789,8 +837,32 @@ export class BrowserRuntimeSession implements RuntimeSession {
                 this.currentRunSettlement = settlement;
                 if (isDebug) this.dapSend('initialize', {});
 
-                const result = await runPromise;
+                let result = await runPromise;
                 if (!this.isSessionCurrent(session)) return;
+                // In Debug, DAP initialized is an authoritative compile-success
+                // boundary. Ordinary Run has no such event: timing values can
+                // round to zero, so never replay a possibly executed program.
+                if (
+                    isDebug && this.pchFallbackAllowed && engine.cppArtifacts?.precompiledHeader
+                    && this.inCompilePhase && result.type === 'completed'
+                    && result.exitCode !== 0
+                    && pchRejectionPattern.test(this.pchCompilerOutput)
+                ) {
+                    engine.cppArtifacts = { ...engine.cppArtifacts, precompiledHeader: undefined };
+                    this.runtimeCppArtifacts = engine.cppArtifacts;
+                    this.pchFallbackAllowed = false;
+                    this.pchCompilerOutput = '';
+                    this.diagnosticEmitted = false;
+                    this.stderrLineBuf = '';
+                    this.emitStream('stderr', 'Cached headers were rejected; recompiling from source.\r\n');
+                    if (!this.isSessionActive(session)) return;
+                    if (isDebug) this.beginDebuggerConfiguration(session);
+                    runPromise = engine.run();
+                    this.currentRun = runPromise;
+                    if (isDebug) this.dapSend('initialize', {});
+                    result = await runPromise;
+                    if (!this.isSessionCurrent(session)) return;
+                }
                 if (result.type === 'completed') {
                     outcome = { type: 'completed', exitCode: result.exitCode };
                 } else if (result.type === 'error') {
@@ -838,6 +910,8 @@ export class BrowserRuntimeSession implements RuntimeSession {
     }
 
     private beginDebuggerConfiguration(session: number): void {
+        this.cancelScheduledTask(this.debugConfiguration?.retryTimer);
+        this.cancelScheduledTask(this.debugConfiguration?.timeoutTimer);
         const state: DebugConfigurationState = {
             session,
             completed: false,

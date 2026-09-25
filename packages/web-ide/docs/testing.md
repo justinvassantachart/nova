@@ -85,7 +85,11 @@ Web IDE migration.
 - Record exact commands, browser/version, workflows, skipped checks, audit
   results, limitations, and whether any commit/remote/deployment changed.
 
-The browser providers are certified against exactly `debugger-sh@0.3.15`.
+The original Web IDE 0.3.1 browser providers were certified against exactly `debugger-sh@0.3.15`.
+This demo now pins fork `0.3.15-webide.0.5.0.2` for precompiled C++ inputs; its
+focused validation and browser measurements are recorded in
+[compiler performance](../../../docs/compiler-performance.md). This is not a
+new certification of the historical standalone package artifact.
 Keep that dependency pinned until a broader compatibility matrix passes. An
 upgrade requires upstream protocol/asset review, focused contract tests,
 standalone `validate:production`, a three-repeat browser run, then the complete

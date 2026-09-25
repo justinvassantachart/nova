@@ -17,8 +17,10 @@ workspace mirror recorded in its root lockfile.
 
 ## Current package boundary
 
-- The export map, React peer ranges, and exact `debugger-sh@0.3.15` runtime
-  pin match Web IDE 0.3.1.
+- The export map and React peer ranges retain the Web IDE 0.3.1 boundary.
+  This site now pins the public `debugger-sh@0.3.15-webide.0.5.0.2` fork for
+  precompiled C++ inputs; it therefore differs from the historical private
+  release artifact described above. See the site compiler-performance notes.
 - The reusable source is MIT licensed and includes its generated third-party
   license inventory and notices.
 - Nova imports only the documented root, host, plugin, runtime, testing,

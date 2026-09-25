@@ -35,7 +35,8 @@ int main() {
 }
 `
 
-const TESTS_CPP = `#include "nova_test.h"
+const TESTS_CPP = `#include <iostream>
+#include "nova_test.h"
 
 // Defined in main.cpp.
 void awardBonus(int* scorePtr);

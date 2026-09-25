@@ -38,7 +38,8 @@ int main() {
 }
 `
 
-const TESTS_CPP = `#include <vector>
+const TESTS_CPP = `#include <iostream>
+#include <vector>
 #include "nova_test.h"
 
 // The function under test lives in main.cpp. This declaration is

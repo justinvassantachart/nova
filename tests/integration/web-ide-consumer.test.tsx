@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { cppRuntimePlugin } from 'web-ide/runtimes'
 import { cppTestingPlugin, testingPlugin } from 'web-ide/testing'
 import { cppLanguageToolingPlugin } from 'web-ide/language-tools'
 import { WebIDEHostProvider, useWebIDEHost } from 'web-ide/host'
 import { canvasPlugin, coreWorkbenchPlugin } from 'web-ide/plugins'
 import { assignmentActivityPlugin } from '../../src/nova/assignment-activity-plugin'
+import { precompiledCppRuntimePlugin } from '../../src/nova/precompiled-runtime'
 import {
   novaAssignmentWebIDEConfiguration,
   novaWebIDEConfiguration,
@@ -16,17 +16,17 @@ function HostProbe() {
 }
 
 describe('The deployed site consumes its Web IDE workspace package', () => {
-  it('composes only public package exports plus host-owned assignment UI', () => {
+  it('composes public package exports plus host-owned runtime and assignment UI', () => {
     expect(novaWebIDEConfiguration).toMatchObject({
       runtimeProvider: 'web-ide.runtime.cpp',
       languageToolingProvider: 'web-ide.language-tooling.cpp',
       testProvider: 'web-ide.testing.cpp',
-      brand: 'WEB IDE',
-      terminalName: 'Web IDE Terminal',
+      brand: 'web-ide',
+      terminalName: 'web-ide terminal',
       reloadWhenNotIsolated: true,
     })
     expect(novaWebIDEConfiguration.plugins).toEqual([
-      cppRuntimePlugin,
+      precompiledCppRuntimePlugin,
       cppLanguageToolingPlugin,
       cppTestingPlugin,
       assignmentActivityPlugin,

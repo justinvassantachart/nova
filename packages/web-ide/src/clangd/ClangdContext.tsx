@@ -14,7 +14,7 @@ import {
     useState,
 } from 'react'
 
-import { getAllFiles, subscribeWorkspaceChange } from '@/vfs/volume'
+import { getAllFiles, subscribeWorkspaceChange, writeFile } from '@/vfs/volume'
 import { useSafeMonaco } from '@/lib/use-monaco'
 import type { IDisposable } from 'monaco-editor'
 import type {
@@ -98,7 +98,10 @@ export function ClangdProvider({
 
     useEffect(() => {
         if (!client || !monaco) return
-        const disposable: IDisposable = registerClangdProviders(monaco, client)
+        const disposable: IDisposable = registerClangdProviders(monaco, client, {
+            languages: ['cpp', 'c'],
+            workspace: { snapshot: getAllFiles, write: writeFile },
+        })
         return () => {
             disposable.dispose()
             clearClangdMarkers(monaco)

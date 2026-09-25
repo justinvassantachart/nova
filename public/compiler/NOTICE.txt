@@ -1,0 +1,26 @@
+web-ide standard-library precompiled headers
+
+These assets are generated from the unchanged headers in the debugger-sh
+C++ sysroot, SHA-256:
+8745c6af23fd841fa507d0c73f6b6b8e8da1b4ec216a6339739a28b38ff7227b
+https://fabioibanez.github.io/website/llvm-resources.tar.gz
+
+The generated files are gzip-compressed PCH data (.pch.bin). They are built
+with the exact compiler and options recorded in manifest.json. The source
+recipe is tools/compiler/build-pch.mjs in the nova repository. No Stanford
+library source or course PCH is included in these files.
+
+LLVM libc++ headers: Apache-2.0 WITH LLVM-exception.
+LLVM compiler/sysroot family: YoWASP llvm-project
+9560ae0f2cc440e4fc891fddbc119da6f56daa59 (LLVM 22.1.0).
+https://codeberg.org/YoWASP/llvm-project
+See licenses/LLVM-LICENSE.txt.
+
+WASI libc headers retain the licenses documented in
+licenses/wasi-libc-LICENSE.txt and its accompanying license/copyright files.
+Their upstream source is https://github.com/WebAssembly/wasi-libc,
+revision 2fc32bc (the sysroot provenance recorded by the original project).
+
+The engine fork includes its own exception runtime. Its unmodified notices,
+licenses and build provenance are served under
+/third-party/debugger-sh/share/licenses/cpp-exceptions/.

@@ -17,8 +17,9 @@ import { useStepCheck } from './use-step-check'
 import { MarkdownLite } from './markdown'
 import type { LessonRuntime } from './runtime'
 
-export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
+export function LessonPanel({ lesson, demo = false, runtime, report, getIDEInstance }: {
     lesson: Lesson
+    demo?: boolean
     runtime: LessonRuntime
     // Telemetry channel (see LessonRunner): lesson-level events join the
     // same recorded trace as the IDE's debugger/editor events.
@@ -35,7 +36,7 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
     const step = lesson.steps[stepIndex]
     const isLast = stepIndex === lesson.steps.length - 1
     const lessonNumber = LESSONS.findIndex((l) => l.id === lesson.id) + 1
-    const following = nextLesson(lesson)
+    const following = demo ? undefined : nextLesson(lesson)
 
     const result = useStepCheck(step.check, lesson, runtime, getIDEInstance)
     const stickyDone = progress.completedSteps.includes(step.id)
@@ -74,7 +75,7 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
     }
 
     const handleReset = () => {
-        if (!window.confirm('Reset this lesson? Your code edits and step progress will be cleared.')) return
+        if (!window.confirm(`Reset this ${demo ? 'demo' : 'lesson'}? Your code edits and step progress will be cleared.`)) return
         report('lesson_reset', { lessonId: lesson.id })
         // Fresh OPFS namespace (via resetNonce in the host's assignmentId),
         // fresh debugger state, fresh runtime counters.
@@ -94,16 +95,13 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
             {/* Header */}
             <div className="px-4 pt-3 pb-2 border-b border-border bg-[var(--color-chrome)]">
                 <div className="flex items-center justify-between">
-                    <Link
-                        to="/learn"
-                        className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
-                    >
-                        <Codicon name="arrow-left" size={11} />
+                    <a href="/" className="text-xs font-semibold tracking-tight hover:underline">web-ide</a>
+                    <Link to="/learn" className="ml-auto mr-3 text-[11px] text-muted-foreground hover:text-foreground">
                         All lessons
                     </Link>
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon-xs" onClick={handleReset} aria-label="Reset lesson">
+                            <Button variant="ghost" size="icon-xs" onClick={handleReset} aria-label={demo ? 'Reset demo' : 'Reset lesson'}>
                                 <Codicon name="discard" size={12} />
                             </Button>
                         </TooltipTrigger>
@@ -111,7 +109,7 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
                     </Tooltip>
                 </div>
                 <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Lesson {lessonNumber} of {LESSONS.length}
+                    {demo ? `Guided demo · About ${lesson.minutes} minutes` : `Lesson ${lessonNumber} of ${LESSONS.length}`}
                 </div>
                 <h1 className="text-sm font-semibold text-foreground leading-snug">{lesson.title}</h1>
 
@@ -235,7 +233,7 @@ export function LessonPanel({ lesson, runtime, report, getIDEInstance }: {
                     className="gap-1"
                 >
                     {isLast
-                        ? following ? `Next lesson` : 'Finish'
+                        ? demo ? 'Explore lessons' : following ? 'Next lesson' : 'Finish'
                         : 'Next'}
                     <Codicon name="chevron-right" size={12} />
                 </Button>

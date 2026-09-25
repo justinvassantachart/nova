@@ -21,7 +21,7 @@ import path from 'node:path'
 //
 // Done via middleware instead of `server.headers` because Vite's global
 // headers run late in the pipeline and overwrite per-route overrides.
-const NON_ISOLATED_PATHS = new Set(['/', '/login'])
+const NON_ISOLATED_PATHS = new Set(['/login'])
 function novaSecurityHeaders(): Plugin {
   const middleware = (
     req: { url?: string },

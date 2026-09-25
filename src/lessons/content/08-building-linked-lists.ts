@@ -56,7 +56,8 @@ int main() {
 }
 `
 
-const TESTS_CPP = `#include "nova_test.h"
+const TESTS_CPP = `#include <iostream>
+#include "nova_test.h"
 
 // Contracts for the code under test (defined in main.cpp). Tests
 // never touch a Node's insides, so a bare "struct Node;" -- the
@@ -169,8 +170,8 @@ export const buildingLinkedLists: Lesson = {
                 + '```\nNode* curr = head;\nwhile (curr != nullptr) {\n'
                 + '    std::cout << curr->value << " -> ";\n    curr = curr->next;\n}\n```\n'
                 + 'This is the standard pattern: start a cursor at the head, process the '
-                + 'current node, hop the arrow, stop at `nullptr`. Python\'s '
-                + '`for x in lst` was doing exactly this for you, invisibly.\n\n'
+                + 'current node, hop the arrow, stop at `nullptr`. Unlike Python\'s '
+                + '`for x in lst`, this loop explicitly follows links between nodes.\n\n'
                 + 'The guard `while (curr != nullptr)` means "**while there is a '
                 + 'node**".\n\n'
                 + 'Press **Continue** (`F5`) and let the program finish. Compare the '

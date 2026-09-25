@@ -36,8 +36,9 @@
 [[headers]]
   for = "/"
   [headers.values]
-    Cross-Origin-Opener-Policy = "unsafe-none"
-    Cross-Origin-Embedder-Policy = "unsafe-none"
+    # The live, same-origin IDE embed needs an isolated ancestor document.
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
     Cache-Control = "no-cache"
 
 # Vite fingerprints production assets, so these may be cached permanently.
@@ -45,6 +46,12 @@
 # names and must continue to revalidate when they change.
 [[headers]]
   for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Precompiled headers have content hashes in their filenames.
+[[headers]]
+  for = "/compiler/*.pch.bin"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 

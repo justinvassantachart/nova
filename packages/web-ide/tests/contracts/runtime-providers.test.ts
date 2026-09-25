@@ -59,6 +59,8 @@ type RunResult =
 
 class FakeEngine {
   fs: Record<string, unknown> = {}
+  binaryFiles: Record<string, Uint8Array> = {}
+  cppArtifacts?: { precompiledHeader?: string }
   readonly stdout = new FakeDataStream()
   readonly stderr = new FakeDataStream()
   readonly stdin = { write: vi.fn(() => Promise.resolve()) }
@@ -94,6 +96,41 @@ afterEach(() => {
 })
 
 describe('built-in runtime providers', () => {
+  it('snapshots binary inputs, normalizes their paths, and clears them on the next prepare', async () => {
+    const engine = new FakeEngine()
+    engineCreate.mockResolvedValueOnce(engine)
+    const session = createSession(cppRuntimeProvider)
+    const bytes = new Uint8Array([1, 2, 3])
+    expect(await session.prepare({
+      files: { '/workspace/main.cpp': 'int main() {}' }, mode: 'run',
+      binaryFiles: { '/sysroot/cache/headers.pch': bytes },
+      cppArtifacts: { precompiledHeader: '/sysroot/cache/headers.pch' },
+    })).toEqual({ success: true, errors: [] })
+    bytes[0] = 99
+    const running = session.start({ mode: 'run' })
+    await vi.waitFor(() => expect(engine.run).toHaveBeenCalledTimes(1))
+    expect(engine.binaryFiles).toEqual({ '/cache/headers.pch': new Uint8Array([1, 2, 3]) })
+    expect(engine.cppArtifacts?.precompiledHeader).toBe('/cache/headers.pch')
+    engine.complete()
+    await running
+    await session.prepare({ files: { '/workspace/main.cpp': 'int main() {}' }, mode: 'run' })
+    await session.start({ mode: 'run' })
+    expect(engine.binaryFiles).toEqual({})
+    expect(engine.cppArtifacts).toBeUndefined()
+  })
+
+  it('rejects binary path collisions and missing PCH inputs before creating an engine', async () => {
+    const session = createSession(cppRuntimeProvider)
+    const files = { '/workspace/main.cpp': 'int main() {}' }
+    const collisions: Record<string, Uint8Array>[] = [
+      { '/sysroot/main.cpp': new Uint8Array([1]) },
+      { '/sysroot/main.cpp/child': new Uint8Array([1]) },
+    ]
+    for (const binaryFiles of collisions) expect((await session.prepare({ files, mode: 'run', binaryFiles })).success).toBe(false)
+    expect((await session.prepare({ files, mode: 'run', cppArtifacts: { precompiledHeader: '/sysroot/missing.pch' } })).success).toBe(false)
+    expect(engineCreate).not.toHaveBeenCalled()
+  })
+
   it('publish provider-neutral metadata without loading the engine dependency', () => {
     expect(cppRuntimeProvider).toMatchObject({
       id: 'web-ide.runtime.cpp',

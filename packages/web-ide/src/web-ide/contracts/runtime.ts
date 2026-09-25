@@ -78,6 +78,15 @@ export interface RuntimeStreamInterceptor {
 export interface RuntimeExecutionPlan {
   files: WorkspaceFiles
   mode: RuntimeExecutionMode
+  /** Immutable binary inputs built with the provider's exact C++ toolchain. */
+  binaryFiles?: Readonly<Record<string, Uint8Array>>
+  cppArtifacts?: {
+    sources?: readonly string[]
+    archives?: readonly string[]
+    precompiledHeader?: string
+    /** Allow a Debug retry before DAP initialization; sources must explicitly include the headers. */
+    fallbackToSource?: boolean
+  }
   /**
    * Workspace path to execute when the runtime needs an explicit entrypoint.
    * Providers with a fixed engine entrypoint may reject a collision during
