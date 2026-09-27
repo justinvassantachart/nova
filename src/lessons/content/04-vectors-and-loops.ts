@@ -39,14 +39,14 @@ int main() {
 `
 
 const TESTS_CPP = `#include <vector>
-#include "nova_test.h"
+#include "webide_test.h"
 
 // The function under test lives in main.cpp. This declaration is
 // its signature -- the contract that lets the tests call it.
 int highestScore(const std::vector<int>& scores);
 
 STUDENT_TEST("finds a maximum in the middle") {
-    EXPECT_EQUALS(highestScore({72, 95, 88, 64}), 95);
+    EXPECT_EQUAL(highestScore({72, 95, 88, 64}), 95);
 }
 `
 
@@ -152,7 +152,7 @@ export const vectorsAndLoops: Lesson = {
             body:
                 'Add a test to `tests.cpp` where the maximum sits **last**:\n'
                 + '```\nSTUDENT_TEST("finds a maximum at the END") {\n'
-                + '    EXPECT_EQUALS(highestScore({70, 80, 99}), 99);\n}\n```\n'
+                + '    EXPECT_EQUAL(highestScore({70, 80, 99}), 99);\n}\n```\n'
                 + 'Run **Tests**.',
             check: {
                 kind: 'all',
@@ -231,7 +231,7 @@ export const vectorsAndLoops: Lesson = {
             body:
                 'Add a test for a **single-element** vector.\n'
                 + '```\nSTUDENT_TEST("a one-element vector is its own maximum") {\n'
-                + '    EXPECT_EQUALS(highestScore({42}), 42);\n}\n```\n'
+                + '    EXPECT_EQUAL(highestScore({42}), 42);\n}\n```\n'
                 + 'Run **Tests** and confirm all three cases pass.',
             check: { kind: 'tests', minTotal: 3, allPass: true, label: 'Three tests, all passing' },
         },

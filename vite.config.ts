@@ -66,8 +66,7 @@ export default defineConfig({
       'node:path': 'path-browserify',
       'node:stream': 'stream-browserify',
     },
-    // Local Web IDE development uses a linked package. Dedupe its React peers
-    // so tests and the browser share the host application's renderer instance.
+    // The host and the published Web IDE package share one React renderer.
     dedupe: ['react', 'react-dom'],
   },
   worker: {

@@ -2,7 +2,7 @@ import type { Lesson } from '../types'
 
 const MAIN_CPP = `#include <iostream>
 #include <string>
-#include "nova_test.h"
+#include "webide_test.h"
 
 // ----------------------------------------------------------------
 //  WRITTEN BY AN AI ASSISTANT -- not yet reviewed by a human.
@@ -54,7 +54,7 @@ int main() {
 STUDENT_TEST("addPlay registers a play") {
     Song demo = {"Test Track", 90, 0};
     addPlay(demo);
-    EXPECT_EQUALS(demo.plays, 1);
+    EXPECT_EQUAL(demo.plays, 1);
 }
 `
 
@@ -207,7 +207,7 @@ export const structsLesson: Lesson = {
                 'Add a test for the zero-padding in `formatSong` (`[1:05]`, not `[1:5]`):\n'
                 + '```\nSTUDENT_TEST("formatSong zero-pads the seconds") {\n'
                 + '    Song jingle = {"Jingle", 65, 3};\n'
-                + '    EXPECT_EQUALS(formatSong(jingle), "Jingle [1:05] -- 3 plays");\n}\n```\n'
+                + '    EXPECT_EQUAL(formatSong(jingle), "Jingle [1:05] -- 3 plays");\n}\n```\n'
                 + 'Run **Tests** — two green.',
             check: { kind: 'tests', minTotal: 2, allPass: true, label: 'Two tests, all passing' },
         },
