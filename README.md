@@ -20,7 +20,7 @@ lesson mounts preserve their existing Explorer and panel defaults.
 - breakpoints, step controls, call stacks, variables, and memory graphs
 - a virtual multi-file workspace that persists in the browser
 - terminal input and output
-- `STUDENT_TEST`/`EXPECT_EQUALS` support with a generic Tests panel
+- `STUDENT_TEST`/`EXPECT_EQUAL` support with test discovery, selection, and debugging
 - an optional Canvas panel for runtimes or plugins that emit graphics events
 - guided C++ lessons at `/learn`
 - Firebase-backed classes, assignments, submissions, and teacher review
@@ -81,9 +81,10 @@ npm run validate                 # host lint, tests, types, and production build
 npm run test                     # host integration and lesson tests
 npm run typecheck                # host TypeScript checks
 npm run build                    # production host build
-npm run build:web-ide            # package build only
-npm --workspace web-ide run validate
 ```
+
+The reusable package is built and validated in the separate
+[web-ide repository](https://github.com/justinvassantachart/web-ide).
 
 ## Embedding the workbench
 
@@ -216,9 +217,8 @@ It delegates to the shared framework and never creates persisted student files.
   cross-origin isolation headers.
 - Authenticated Firebase/LMS browser checks require a configured non-production
   test project and account.
-- The reusable source is MIT licensed and remains `private: true`; it is not
-  published to npm. Nova still requires a reviewed migration before changing
-  its relative-workspace distribution model.
+- The reusable source is MIT licensed and remains `private: true`; it is
+  distributed through immutable GitHub release tarballs rather than npm.
 
 More detail is available in [standalone repository readiness](docs/architecture/standalone-repository-readiness.md),
 [guided lessons](src/lessons/README.md), and [session replay](src/replay/README.md).
