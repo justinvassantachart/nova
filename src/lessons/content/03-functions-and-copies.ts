@@ -1,7 +1,7 @@
 import type { Lesson } from '../types'
 
 const MAIN_CPP = `#include <iostream>
-#include "nova_test.h"
+#include "webide_test.h"
 
 // ----------------------------------------------------------------
 //  WRITTEN BY AN AI ASSISTANT -- not yet reviewed by a human.
@@ -37,14 +37,14 @@ int main() {
 
 // ---- Tests ---------------------------------------------------------
 // Press the beaker (Tests) button in the toolbar to run these.
-// STUDENT_TEST declares a test; EXPECT_EQUALS checks one fact.
+// STUDENT_TEST declares a test; EXPECT_EQUAL checks one fact.
 
 STUDENT_TEST("swapScores really swaps") {
     int x = 3;
     int y = 9;
     swapScores(x, y);
-    EXPECT_EQUALS(x, 9);
-    EXPECT_EQUALS(y, 3);
+    EXPECT_EQUAL(x, 9);
+    EXPECT_EQUAL(y, 3);
 }
 `
 
@@ -109,9 +109,9 @@ export const functionsAndCopies: Lesson = {
                 'Scroll to the bottom of `main.cpp`:\n'
                 + '```\nSTUDENT_TEST("swapScores really swaps") {\n'
                 + '    int x = 3;\n    int y = 9;\n    swapScores(x, y);\n'
-                + '    EXPECT_EQUALS(x, 9);\n    EXPECT_EQUALS(y, 3);\n}\n```\n'
+                + '    EXPECT_EQUAL(x, 9);\n    EXPECT_EQUAL(y, 3);\n}\n```\n'
                 + '- `STUDENT_TEST("name") { ... }` declares a test\n'
-                + '- `EXPECT_EQUALS(actual, expected)` checks one fact and records '
+                + '- `EXPECT_EQUAL(actual, expected)` checks one fact and records '
                 + 'pass/fail\n\n'
                 + 'The **Tests** button runs every '
                 + 'test instead, reporting results in the Tests panel. The test calls `swapScores(3, 9)` '
@@ -241,7 +241,7 @@ export const functionsAndCopies: Lesson = {
                 + 'say, swapping equal values:\n'
                 + '```\nSTUDENT_TEST("swapping equal values changes nothing") {\n'
                 + '    int p = 5;\n    int q = 5;\n    swapScores(p, q);\n'
-                + '    EXPECT_EQUALS(p, 5);\n    EXPECT_EQUALS(q, 5);\n}\n```\n'
+                + '    EXPECT_EQUAL(p, 5);\n    EXPECT_EQUAL(q, 5);\n}\n```\n'
                 + 'Run **Tests** and confirm both tests pass.',
             check: { kind: 'tests', minTotal: 2, allPass: true, label: 'Two tests, all passing' },
             hint: 'Paste the test after the first one, then click Tests again.',

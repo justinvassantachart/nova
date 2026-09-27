@@ -6,7 +6,7 @@ starter files, a focused debugging exercise, tests, and observable completion
 checks. No account is required, and progress persists in `localStorage`.
 
 Lessons belong to the deployed site host, not to the reusable
-`packages/web-ide` package. They are a concrete example of an application
+published `web-ide` package. They are a concrete example of an application
 embedding the workbench through its public API.
 
 ## Architecture: a host, not a workbench fork

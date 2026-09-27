@@ -1,8 +1,9 @@
 import type { WebIDEConfiguration } from 'web-ide'
 import { cppRuntimePlugin } from 'web-ide/runtimes'
-import { cppTestingPlugin, testingPlugin } from 'web-ide/testing'
+import { testingPlugin } from 'web-ide/testing'
 import { cppLanguageToolingPlugin } from 'web-ide/language-tools'
 import { canvasPlugin, coreWorkbenchPlugin } from 'web-ide/plugins'
+import { novaCppTestingPlugin } from './cpp-testing-plugin'
 import { assignmentActivityPlugin } from './assignment-activity-plugin'
 
 export const novaWebIDEConfiguration: WebIDEConfiguration = {
@@ -15,7 +16,7 @@ export const novaWebIDEConfiguration: WebIDEConfiguration = {
   plugins: [
     cppRuntimePlugin,
     cppLanguageToolingPlugin,
-    cppTestingPlugin,
+    novaCppTestingPlugin,
     assignmentActivityPlugin,
     coreWorkbenchPlugin,
     canvasPlugin,
@@ -23,7 +24,7 @@ export const novaWebIDEConfiguration: WebIDEConfiguration = {
   ],
 }
 
-/** Assignment mounts use Web IDE 0.3.1's public, mount-owned activity selection. */
+/** Assignment mounts select their host-owned activity through the public API. */
 export const novaAssignmentWebIDEConfiguration: WebIDEConfiguration = {
   ...novaWebIDEConfiguration,
   initialLayout: {

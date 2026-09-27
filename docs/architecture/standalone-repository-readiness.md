@@ -1,3 +1,9 @@
+# Historical extraction checkpoint
+
+This document records the earlier 0.3.1 workspace-mirror checkpoint. It is not
+the current dependency or deployment model. Nova now consumes the public 0.7.0
+release; see [the current architecture](web-ide-extraction.md).
+
 # Standalone repository and mirror status
 
 Status: Web IDE has a public standalone source repository and an immutable

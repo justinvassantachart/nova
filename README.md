@@ -4,16 +4,13 @@ Web IDE is a browser-based C++ workspace with editing, compilation,
 step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
-This repository contains both the deployed site and the reusable workbench it
-embeds. The two layers are kept separate so the workbench can later be released
-as its own package without moving the site's Firebase, course, or replay code
-with it.
+This repository contains the deployed Nova host. It installs the reusable
+WebIDE 0.7.0 workbench from its immutable public release and uses only public
+package exports. Firebase, courses, lessons, replay, and deployment remain
+host concerns.
 
-The embedded workspace now mirrors exact Web IDE `0.3.1` source commit
-`ed271757daf80c3ded7ae2b4a67d74102ebf2435`. Nova consumes only its public
-exports and keeps the exact `debugger-sh@0.3.15` C++ backend. Assignment-backed
-mounts use Web IDE's public host-selected activity contract; standalone and
-lesson mounts preserve the existing Explorer/default selection.
+Assignment mounts select the host-owned Assignment activity. Standalone and
+lesson mounts preserve their existing Explorer and panel defaults.
 
 ## What is included
 
@@ -51,12 +48,11 @@ src/                       deployed site host
   lessons/                 guided course and lesson host
   replay/                  session reconstruction and playback
   nova/                    legacy internal path for site composition
-packages/web-ide/          reusable Web IDE workspace package
 docs/architecture/         extraction and release-readiness notes
 ```
 
 The root application owns routing, authentication, Firebase persistence, LMS
-screens, lessons, replay, and deployment behavior. `packages/web-ide` owns the
+screens, lessons, replay, and deployment behavior. The published `web-ide` package owns the
 editor workbench, VFS, terminal, debugger surfaces, typed contracts, and
 optional providers. Root application code imports only the package's public
 exports (`web-ide`, `web-ide/host`, `web-ide/plugins`, `web-ide/runtimes`,
@@ -74,22 +70,17 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. The development command builds the Web IDE
-workspace package first and then starts the complete site. Changes to the site
-are handled by Vite; after changing package source, restart the root development
-command or run the package watcher in a second terminal:
-
-```sh
-npm --workspace web-ide run dev
-```
+Open <http://localhost:5173>. Vite runs the host against the installed public
+WebIDE package. To upgrade the workbench, update the immutable release URL and
+lockfile together, then validate the host integration.
 
 Useful checks:
 
 ```sh
-npm run validate                 # package + site lint, tests, types, and build
-npm run test                     # package and site tests
-npm run typecheck                # package and site TypeScript checks
-npm run build                    # production package and site build
+npm run validate                 # host lint, tests, types, and production build
+npm run test                     # host integration and lesson tests
+npm run typecheck                # host TypeScript checks
+npm run build                    # production host build
 npm run build:web-ide            # package build only
 npm --workspace web-ide run validate
 ```
@@ -128,8 +119,7 @@ export function Workspace() {
 
 An application that needs controlled workspace identity, seed files,
 persistence, read-only behavior, or event recording wraps the component with
-`WebIDEHostProvider` from `web-ide/host`. The package README at
-[packages/web-ide/README.md](packages/web-ide/README.md) documents the host,
+`WebIDEHostProvider` from `web-ide/host`. The [published package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.0-source/README.md) documents the host,
 runtime, testing, language-tooling, and plugin contracts in detail.
 
 ### Extension boundaries
@@ -202,17 +192,21 @@ reproduce those policies, including the non-isolated landing/sign-in routes
 and the isolated IDE routes. Set the same `VITE_FIREBASE_*` variables in the
 hosting environment when deploying the teaching features.
 
-The in-repo package is a reviewed mirror of the public Web IDE 0.3.1 source tag.
-The deployed site depends only on the relative workspace package at
-`packages/web-ide`; it does not depend on the sibling checkout or an absolute
-machine path. Web IDE is MIT licensed and has an exact immutable private
-Hamilton release, but it remains unpublished to npm. Moving Nova to a remote
-artifact requires a separate portable authentication/bootstrap migration.
+WebIDE 0.7.0 is installed from its immutable public GitHub release tarball,
+with integrity recorded in `package-lock.json`. No npm publication, private
+repository authentication, local workspace link, or sibling checkout is needed.
+The library's source, testing, and release validation live in its own repository;
+this repository validates Nova's host integration. The production build copies
+the package and engine license notices to `dist/licenses/`. Its `build-info.json`
+records the host commit and exact installed WebIDE version, URL, and integrity.
+
+New lessons use `webide_test.h` and `EXPECT_EQUAL`. A host-owned execution-only
+`nova_test.h` alias preserves saved lessons and replay source using `EXPECT_EQUALS`.
+It delegates to the shared framework and never creates persisted student files.
 
 ## Current limitations
 
-- One mounted Web IDE workbench per JavaScript realm is supported; some legacy
-  workbench state and VFS services are still module-scoped.
+- Each mounted Web IDE owns its workspace and execution state.
 - C++ run/debug is the production path. The optional Python provider supports
   run, source debugging, variables, and unittest execution; Rust is not
   implemented.
