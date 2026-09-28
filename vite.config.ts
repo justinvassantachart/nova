@@ -21,7 +21,7 @@ import path from 'node:path'
 //
 // Done via middleware instead of `server.headers` because Vite's global
 // headers run late in the pipeline and overwrite per-route overrides.
-const NON_ISOLATED_PATHS = new Set(['/', '/login'])
+const NON_ISOLATED_PATHS = new Set(['/login'])
 function novaSecurityHeaders(): Plugin {
   const middleware = (
     req: { url?: string },
@@ -66,7 +66,8 @@ export default defineConfig({
       'node:path': 'path-browserify',
       'node:stream': 'stream-browserify',
     },
-    // The host and the published Web IDE package share one React renderer.
+    // Local Web IDE development uses a linked package. Dedupe its React peers
+    // so tests and the browser share the host application's renderer instance.
     dedupe: ['react', 'react-dom'],
   },
   worker: {

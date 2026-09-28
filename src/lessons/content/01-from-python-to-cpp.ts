@@ -54,16 +54,16 @@ export const fromPythonToCpp: Lesson = {
             body:
                 'If you have written Python, you already know variables, `if` statements, loops, and '
                 + 'functions. C++ uses the same concepts with some different rules:\n'
-                + '- Python **runs** your file top to bottom. C++ **compiles** it first: a '
-                + 'program called the compiler translates your whole file into machine code '
-                + 'before anything runs.\n'
-                + '- Python finds many mistakes *while running*. The C++ compiler catches '
-                + 'them *before* the program ever starts.\n'
-                + '- Python guesses what kind of data a variable holds. C++ makes you say '
-                + 'it. (That\'s the next lesson.)\n\n'
+                + '- In C++, you **compile** your source before running the program. Here, '
+                + 'the compiler produces WebAssembly that runs in your browser.\n'
+                + '- Both languages catch syntax errors before execution. C++ also catches '
+                + 'many type errors during compilation.\n'
+                + '- Python variables can refer to values of different types. A C++ variable '
+                + 'has a fixed type that you usually write in its declaration. '
+                + 'The next lesson covers these types.\n\n'
                 + 'The **editor** on the left shows `main.cpp`, a cafe receipt '
                 + 'program written by an AI assistant. The **Run** and **Debug** buttons '
-                + 'are in the top-right toolbar, and the **terminal** at the bottom right shows '
+                + 'are in the top-right toolbar, and the **terminal** below the editor shows '
                 + 'output. Press **Next** to review the file.',
             check: { kind: 'manual' },
         },
@@ -90,11 +90,11 @@ export const fromPythonToCpp: Lesson = {
             title: 'Compile and run',
             body:
                 'Click **Run**. Two things happen behind that button:\n'
-                + '1. The **compiler** translates `main.cpp` into machine code. (The first '
+                + '1. The **compiler** translates `main.cpp` into WebAssembly. (The first '
                 + 'time, the compiler itself downloads into your browser — give it a '
                 + 'moment.)\n'
                 + '2. The compiled program runs, and its output lands in the terminal.\n\n'
-                + 'Python normally runs source code directly. C++ uses the compilation step to '
+                + 'C++ uses the compilation step to '
                 + 'produce the executable program and report many errors before it runs.',
             check: { kind: 'stdout', includes: 'Debug Cafe', label: 'Run the program (watch the terminal)' },
             hint: 'The green Run button is in the top-right toolbar. If it is greyed out, the compiler is still downloading.',
@@ -108,9 +108,8 @@ export const fromPythonToCpp: Lesson = {
                 + 'end of this line:\n'
                 + '```\ndouble muffinPrice = 3.25;\n```\n'
                 + 'Then press **Run** and read the message in the terminal. It names the '
-                + 'file, the line, and what it expected to find. In Python a typo like a '
-                + 'missing `:` may fail while the file is running; in C++ the program does not '
-                + 'start because compilation failed.',
+                + 'file, the line, and what it expected to find. Like a missing `:` in Python, '
+                + 'this syntax error prevents the program from starting.',
             check: { kind: 'event', event: 'compile_error', label: 'Run with the semicolon missing — read the compile error' },
             hint: 'Remove just the ; at the end of the muffinPrice line, then press Run again.',
             successNote: 'The error identifies the file, line, and expected syntax.',

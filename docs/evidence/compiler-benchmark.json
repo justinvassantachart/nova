@@ -1,0 +1,204 @@
+{
+  "environment": {
+    "browser": "Chromium headless 151.0.7922.34",
+    "node": "v26.3.1",
+    "platform": "macOS x64",
+    "cpu": "Intel Core i7-8850H @ 2.60GHz",
+    "date": "2026-09-24",
+    "note": "Local Vite server; live compiler/sysroot downloads. Concurrent development work caused variable CPU load. First iostream pair excluded from warm comparison. Engine.create/import time is outside these samples."
+  },
+  "samples": [
+    {
+      "program": "iostream",
+      "pch": false,
+      "elapsedMs": 34060,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 34045.48500000127,
+          "buildMs": 29389.66,
+          "runMs": 42.09
+        }
+      },
+      "stdout": "hello\n",
+      "stderr": ""
+    },
+    {
+      "program": "iostream",
+      "pch": true,
+      "elapsedMs": 11900,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 11445.090000001714,
+          "buildMs": 6539.275,
+          "runMs": 62.080000000000005
+        }
+      },
+      "stdout": "hello\n",
+      "stderr": ""
+    },
+    {
+      "program": "vector",
+      "pch": false,
+      "elapsedMs": 24087,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 24077.944999998435,
+          "buildMs": 22287.295000000002,
+          "runMs": 56.25
+        }
+      },
+      "stdout": "319\n",
+      "stderr": ""
+    },
+    {
+      "program": "vector",
+      "pch": true,
+      "elapsedMs": 11770,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 11185.044999999925,
+          "buildMs": 8714.849999,
+          "runMs": 31.044999999999998
+        }
+      },
+      "stdout": "319\n",
+      "stderr": ""
+    },
+    {
+      "program": "iostream",
+      "pch": false,
+      "elapsedMs": 23992,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 23981.71499999985,
+          "buildMs": 21947.649999999998,
+          "runMs": 46.15
+        }
+      },
+      "stdout": "hello\n",
+      "stderr": ""
+    },
+    {
+      "program": "iostream",
+      "pch": true,
+      "elapsedMs": 12510,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 11957.955000000075,
+          "buildMs": 8931.155001000001,
+          "runMs": 49.324999
+        }
+      },
+      "stdout": "hello\n",
+      "stderr": ""
+    },
+    {
+      "program": "vector",
+      "pch": false,
+      "elapsedMs": 23035,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 23009.55999999866,
+          "buildMs": 21104.835001000003,
+          "runMs": 33.209998999999996
+        }
+      },
+      "stdout": "319\n",
+      "stderr": ""
+    },
+    {
+      "program": "vector",
+      "pch": true,
+      "elapsedMs": 9298,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 8835.334999999031,
+          "buildMs": 5828.884999999999,
+          "runMs": 34.474999
+        }
+      },
+      "stdout": "319\n",
+      "stderr": ""
+    },
+    {
+      "program": "iostream",
+      "pch": false,
+      "elapsedMs": 12412,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 12408.519999999553,
+          "buildMs": 10737.940001,
+          "runMs": 34.789999
+        }
+      },
+      "stdout": "hello\n",
+      "stderr": ""
+    },
+    {
+      "program": "iostream",
+      "pch": true,
+      "elapsedMs": 6156,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 5748.434999998659,
+          "buildMs": 4094.52,
+          "runMs": 48.44
+        }
+      },
+      "stdout": "hello\n",
+      "stderr": ""
+    },
+    {
+      "program": "vector",
+      "pch": false,
+      "elapsedMs": 24993,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 24979.995000001043,
+          "buildMs": 22467.039999,
+          "runMs": 95.685001
+        }
+      },
+      "stdout": "319\n",
+      "stderr": ""
+    },
+    {
+      "program": "vector",
+      "pch": true,
+      "elapsedMs": 17926,
+      "result": {
+        "type": "completed",
+        "exitCode": 0,
+        "timing": {
+          "totalMs": 17478.65499999933,
+          "buildMs": 12351.43,
+          "runMs": 28.26
+        }
+      },
+      "stdout": "319\n",
+      "stderr": ""
+    }
+  ]
+}

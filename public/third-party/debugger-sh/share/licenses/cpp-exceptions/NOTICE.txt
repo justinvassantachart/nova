@@ -1,0 +1,7 @@
+LLVM libc++abi and libunwind, revision 4434dabb69916856b824f68a64b029c67175e532.
+The two unchanged ABI sources are compiled with the engine's existing LLVM 22.1.0
+compiler and original sysroot headers, using legacy WebAssembly exceptions.
+libunwind.a comes from WASI SDK 33; its debug sections were removed, with
+executable/data section bytes unchanged. Both upstream license texts are exact.
+provenance.json describes the original runtime-only archive, before these
+notices and provenance were packaged alongside its three unchanged payloads.

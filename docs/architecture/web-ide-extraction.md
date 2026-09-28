@@ -1,7 +1,7 @@
 # Web IDE host and package architecture
 
 Status: the deployed product is Web IDE, and this repository is its first host.
-The reusable workbench is installed from the immutable public WebIDE 0.7.0
+The reusable workbench is installed from the immutable public WebIDE 0.7.1
 release asset. `package-lock.json` binds its exact integrity; the host no longer
 builds or resolves a vendored workspace copy.
 
@@ -22,7 +22,7 @@ The dependency is one way. The package contains no router, Firebase SDK,
 authentication, LMS, assignment, lesson, replay, or deployment configuration.
 The root host does not import package source paths, private React contexts, VFS
 modules, or Zustand stores. It consumes only the exports declared by
-[the published package manifest](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.0-source/package.json):
+[the published package manifest](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source-r3/package.json):
 
 - `web-ide`
 - `web-ide/host`
@@ -179,7 +179,7 @@ The root manifest selects the immutable public GitHub release:
 ```json
 {
   "dependencies": {
-    "web-ide": "https://github.com/justinvassantachart/web-ide/releases/download/web-ide-v0.7.0/web-ide-0.7.0.tgz"
+    "web-ide": "https://github.com/justinvassantachart/web-ide/releases/download/web-ide-v0.7.1/web-ide-0.7.1.tgz"
   }
 }
 ```
@@ -213,5 +213,5 @@ service-worker, authentication, and route policy. This repository's
   published to npm.
 
 For consumer-facing package details, see
-[the package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.0-source/README.md) and its
-[architecture document](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.0-source/docs/architecture.md).
+[the package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source-r3/README.md) and its
+[architecture document](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source-r3/docs/architecture.md).

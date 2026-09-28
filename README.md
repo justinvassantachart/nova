@@ -1,26 +1,32 @@
-# Web IDE
+# web-ide
 
-Web IDE is a browser-based C++ workspace with editing, compilation,
+web-ide is a browser-based C++ workspace with editing, compilation,
 step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
-This repository contains the deployed Nova host. It installs the reusable
-WebIDE 0.7.0 workbench from its immutable public release and uses only public
-package exports. Firebase, courses, lessons, replay, and deployment remain
-host concerns.
+This repository contains the deployed site. It imports the independently
+released Web IDE 0.7 component from an immutable public GitHub package, with
+an exact integrity recorded in `package-lock.json`. The 0.7.1 patch retains
+Testing V2 and per-workspace isolation while adding the demo's default
+breakpoints, PCH fallback, symbol renaming, and graph layout fixes.
+See [compiler performance](docs/compiler-performance.md) for measurements,
+asset provenance, and regeneration instructions.
 
-Assignment mounts select the host-owned Assignment activity. Standalone and
-lesson mounts preserve their existing Explorer and panel defaults.
+Try the [editable linked list](https://webide.org/ide?example=linked-list),
+[ten lessons](https://webide.org/learn), or [guided debugger tour](https://webide.org/demo).
+For adoption, see the [instructor guide](docs/teaching.md),
+[site operations](docs/site-operations.md), and
+[React workbench API](https://github.com/justinvassantachart/web-ide).
 
 ## What is included
 
 - Monaco editing with C/C++ syntax support and optional clangd completion,
-  hover, diagnostics, and navigation
+  hover, diagnostics, navigation, and multi-file symbol rename
 - in-browser C++ compilation and execution
 - breakpoints, step controls, call stacks, variables, and memory graphs
 - a virtual multi-file workspace that persists in the browser
 - terminal input and output
-- `STUDENT_TEST`/`EXPECT_EQUAL` support with test discovery, selection, and debugging
+- `STUDENT_TEST`/`EXPECT_EQUAL` support with Testing V2 and selected-test debugging
 - an optional Canvas panel for runtimes or plugins that emit graphics events
 - guided C++ lessons at `/learn`
 - Firebase-backed classes, assignments, submissions, and teacher review
@@ -34,7 +40,9 @@ registered through public contracts.
 
 | Route | Purpose | Sign-in |
 | --- | --- | --- |
-| `/` | Product landing page | No |
+| `/` | Product landing page with a live linked-list workspace | No |
+| `/showcase`, `/ide?example=linked-list` | Editable linked-list example; shared local workspace | No |
+| `/demo` | Short guided test-and-debug exercise | No |
 | `/ide` | Standalone Web IDE workspace | No |
 | `/learn` | Guided lesson catalog and lesson runner | No |
 | `/login` | Account sign-in | No |
@@ -52,7 +60,7 @@ docs/architecture/         extraction and release-readiness notes
 ```
 
 The root application owns routing, authentication, Firebase persistence, LMS
-screens, lessons, replay, and deployment behavior. The published `web-ide` package owns the
+screens, lessons, replay, and deployment behavior. The public `web-ide` package owns the
 editor workbench, VFS, terminal, debugger surfaces, typed contracts, and
 optional providers. Root application code imports only the package's public
 exports (`web-ide`, `web-ide/host`, `web-ide/plugins`, `web-ide/runtimes`,
@@ -66,27 +74,23 @@ the complete boundary.
 Node.js `^20.19.0` or `>=22.12.0` is required, matching the supported Vite runtime.
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173>. Vite runs the host against the installed public
-WebIDE package. To upgrade the workbench, update the immutable release URL and
-lockfile together, then validate the host integration.
-
-Useful checks:
+Open <http://localhost:5173>. Vite serves the site using the installed package;
+there is no sibling checkout or vendored workbench build.
 
 ```sh
-npm run validate                 # host lint, tests, types, and production build
-npm run test                     # host integration and lesson tests
-npm run typecheck                # host TypeScript checks
-npm run build                    # production host build
+npm run validate      # site lint, tests, types, and production build
+npm run test
+npm run typecheck
+npm run build
 ```
 
-The reusable package is built and validated in the separate
-[web-ide repository](https://github.com/justinvassantachart/web-ide).
+The component's own checks run in its public source repository.
 
-## Embedding the workbench
+## Import the IDE component
 
 The site composes Web IDE using the same public API available to another host:
 
@@ -120,7 +124,8 @@ export function Workspace() {
 
 An application that needs controlled workspace identity, seed files,
 persistence, read-only behavior, or event recording wraps the component with
-`WebIDEHostProvider` from `web-ide/host`. The [published package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.0-source/README.md) documents the host,
+`WebIDEHostProvider` from `web-ide/host`. The package README at
+[the public web-ide repository](https://github.com/justinvassantachart/web-ide) documents the host,
 runtime, testing, language-tooling, and plugin contracts in detail.
 
 ### Extension boundaries
@@ -189,25 +194,18 @@ submission access. Do not deploy the LMS against an unrestricted database.
 `npm run build` produces the static site in `dist/`. The included
 `netlify.toml` supplies SPA routing, cache policy, and the cross-origin headers
 required by the browser runtime and clangd workers. A different host must
-reproduce those policies, including the non-isolated landing/sign-in routes
-and the isolated IDE routes. Set the same `VITE_FIREBASE_*` variables in the
+reproduce those policies, including the non-isolated sign-in route and isolated
+landing/IDE routes. The landing page loads a same-origin IDE; both documents
+need isolation for SharedArrayBuffer. Set the same `VITE_FIREBASE_*` variables in the
 hosting environment when deploying the teaching features.
 
-WebIDE 0.7.0 is installed from its immutable public GitHub release tarball,
-with integrity recorded in `package-lock.json`. No npm publication, private
-repository authentication, local workspace link, or sibling checkout is needed.
-The library's source, testing, and release validation live in its own repository;
-this repository validates Nova's host integration. The production build copies
-the package and engine license notices to `dist/licenses/`. Its `build-info.json`
-records the host commit and exact installed WebIDE version, URL, and integrity.
-
-New lessons use `webide_test.h` and `EXPECT_EQUAL`. A host-owned execution-only
-`nova_test.h` alias preserves saved lessons and replay source using `EXPECT_EQUALS`.
-It delegates to the shared framework and never creates persisted student files.
+The build publishes `/build-info.json` with the site commit, exact workbench
+package version and integrity, and pinned debugger engine. License notices are
+published under `/licenses/`. The package is MIT licensed and distributed through
+public GitHub releases; no private release authentication is needed.
 
 ## Current limitations
 
-- Each mounted Web IDE owns its workspace and execution state.
 - C++ run/debug is the production path. The optional Python provider supports
   run, source debugging, variables, and unittest execution; Rust is not
   implemented.
@@ -217,8 +215,8 @@ It delegates to the shared framework and never creates persisted student files.
   cross-origin isolation headers.
 - Authenticated Firebase/LMS browser checks require a configured non-production
   test project and account.
-- The reusable source is MIT licensed and remains `private: true`; it is
-  distributed through immutable GitHub release tarballs rather than npm.
+- The reusable source is MIT licensed and remains `private: true`; distribution
+  uses public GitHub release packages rather than npm publication.
 
 More detail is available in [standalone repository readiness](docs/architecture/standalone-repository-readiness.md),
 [guided lessons](src/lessons/README.md), and [session replay](src/replay/README.md).

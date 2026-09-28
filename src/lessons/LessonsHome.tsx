@@ -22,9 +22,12 @@ export default function LessonsHome() {
             <header className="border-b border-border">
                 <div className="mx-auto flex min-h-14 max-w-3xl items-center gap-4 px-6 py-3">
                     <a href="/" className="text-sm font-semibold tracking-tight">
-                        Lessons
+                        web-ide
                     </a>
                     <nav className="ml-auto flex items-center gap-4 text-sm" aria-label="Lesson navigation">
+                        <a href="/demo" className="text-muted-foreground hover:text-foreground">
+                            Guided demo
+                        </a>
                         <a href="/ide" className="text-muted-foreground hover:text-foreground">
                             Editor
                         </a>
@@ -40,12 +43,12 @@ export default function LessonsHome() {
             <main className="mx-auto max-w-3xl px-6 py-10 sm:py-12">
                 <section aria-labelledby="lessons-title">
                     <h1 id="lessons-title" className="text-2xl font-semibold tracking-tight">
-                        C++ lessons for Python students
+                        Ten lessons. Real C++.
                     </h1>
                     <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                        Ten lessons cover C++ syntax, types, functions, vectors, pointers,
-                        memory, structs, and linked lists. Each lesson includes a short
-                        exercise using the editor, debugger, or tests.
+                        A self-paced path from Python to C++, ending with linked lists.
+                        Set breakpoints, inspect memory, and test your fixes in the same
+                        editor used throughout this project.
                     </p>
                     <p className="mt-2 text-sm text-muted-foreground">
                         No account is required. Progress is stored in this browser.

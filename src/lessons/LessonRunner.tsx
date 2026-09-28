@@ -29,10 +29,10 @@ export default function LessonRunner() {
     const lesson = lessonBySlug(slug)
     if (!lesson) return <Navigate to="/learn" replace />
     // Key by lesson so switching lessons rebuilds the runtime + IDE host.
-    return <Runner key={lesson.id} lesson={lesson} />
+    return <LessonWorkspace key={lesson.id} lesson={lesson} />
 }
 
-function Runner({ lesson }: { lesson: Lesson }) {
+export function LessonWorkspace({ lesson, demo = false }: { lesson: Lesson; demo?: boolean }) {
     const { user } = useAuth()
     const runtime = useMemo(() => new LessonRuntime(), [])
     const ideRef = useRef<WebIDEInstanceHandle>(null)
@@ -134,6 +134,7 @@ function Runner({ lesson }: { lesson: Lesson }) {
                     <TooltipProvider delayDuration={300}>
                         <LessonPanel
                             lesson={lesson}
+                            demo={demo}
                             runtime={runtime}
                             report={report}
                             getIDEInstance={getIDEInstance}
@@ -141,7 +142,7 @@ function Runner({ lesson }: { lesson: Lesson }) {
                     </TooltipProvider>
                 </ResizablePanel>
                 <ResizableHandle withHandle />
-                <ResizablePanel id="ide" defaultSize="74" minSize="40">
+                <ResizablePanel id="ide" defaultSize="72" minSize="40">
                     <IDEHostProvider host={host}>
                         <App ref={ideRef} />
                     </IDEHostProvider>

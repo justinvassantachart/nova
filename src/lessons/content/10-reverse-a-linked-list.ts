@@ -79,7 +79,8 @@ int main() {
 }
 `
 
-const TESTS_CPP = `#include "webide_test.h"
+const TESTS_CPP = `#include <iostream>
+#include "webide_test.h"
 #include "list.h"
 
 STUDENT_TEST("reversing 10 -> 20 -> 30 yields 30 -> 20 -> 10") {

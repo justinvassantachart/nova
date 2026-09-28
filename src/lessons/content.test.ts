@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { LESSONS } from './content'
+import { demoLesson } from './demo-lesson'
 import type { CheckSpec, Lesson } from './types'
 import { workspacePath } from './types'
 
@@ -44,9 +45,14 @@ describe('lesson registry', () => {
         expect(LESSONS.filter((l) => l.tags.includes('linked lists')).length).toBeGreaterThanOrEqual(3)
         expect(LESSONS.some((l) => l.tags.includes('testing'))).toBe(true)
     })
+
+    it('keeps the short demo separate from the curriculum', () => {
+        expect(LESSONS.some((lesson) => lesson.id === demoLesson.id)).toBe(false)
+        expect(LESSONS.every((lesson) => lesson.steps[0].check.kind === 'manual')).toBe(true)
+    })
 })
 
-describe.each(LESSONS.map((l) => [l.title, l] as const))('%s', (_title, lesson) => {
+describe.each([...LESSONS, demoLesson].map((l) => [l.title, l] as const))('%s', (_title, lesson) => {
     it('has a primary file present in its starter files', () => {
         expect(lessonFile(lesson)).toBeDefined()
     })
@@ -55,10 +61,6 @@ describe.each(LESSONS.map((l) => [l.title, l] as const))('%s', (_title, lesson) 
         const ids = lesson.steps.map((s) => s.id)
         expect(new Set(ids).size).toBe(ids.length)
         expect(lesson.steps.length).toBeGreaterThanOrEqual(6)
-    })
-
-    it('starts with a manual orientation step', () => {
-        expect(lesson.steps[0].check.kind).toBe('manual')
     })
 
     it('resolves every anchor to exactly one line of the starter code', () => {

@@ -35,7 +35,8 @@ int main() {
 }
 `
 
-const TESTS_CPP = `#include "webide_test.h"
+const TESTS_CPP = `#include <iostream>
+#include "webide_test.h"
 
 // Defined in main.cpp.
 void awardBonus(int* scorePtr);
