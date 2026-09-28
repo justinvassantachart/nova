@@ -1,9 +1,10 @@
 import type { WebIDEConfiguration } from 'web-ide'
 import { precompiledCppRuntimePlugin } from './precompiled-runtime'
-import { cppTestingPlugin, testingPlugin } from 'web-ide/testing'
+import { testingPlugin } from 'web-ide/testing'
 import { cppLanguageToolingPlugin } from 'web-ide/language-tools'
 import { canvasPlugin, coreWorkbenchPlugin } from 'web-ide/plugins'
 import { assignmentActivityPlugin } from './assignment-activity-plugin'
+import { novaCppTestingPlugin } from './cpp-testing-plugin'
 
 export const novaWebIDEConfiguration: WebIDEConfiguration = {
   runtimeProvider: 'web-ide.runtime.cpp',
@@ -15,7 +16,7 @@ export const novaWebIDEConfiguration: WebIDEConfiguration = {
   plugins: [
     precompiledCppRuntimePlugin,
     cppLanguageToolingPlugin,
-    cppTestingPlugin,
+    novaCppTestingPlugin,
     assignmentActivityPlugin,
     coreWorkbenchPlugin,
     canvasPlugin,

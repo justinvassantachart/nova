@@ -60,6 +60,11 @@
   [headers.values]
     Cache-Control = "no-cache"
 
+[[headers]]
+  for = "/build-info.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+
 # This service worker participates in cross-origin isolation. Revalidate it
 # on every visit so a stale worker cannot outlive a compatibility or security
 # update.

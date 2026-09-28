@@ -2,8 +2,9 @@
 
 Status: the deployed product is Web IDE, and this repository is its first host.
 The reusable workbench is integrated as the relative npm workspace package at
-`packages/web-ide`. Its reusable source matches Web IDE `0.3.1` source commit
-`ed271757daf80c3ded7ae2b4a67d74102ebf2435`.
+`packages/web-ide`. Its reusable source is based on Web IDE `0.3.1` source commit
+`ed271757daf80c3ded7ae2b4a67d74102ebf2435`, with local debugger, graph, and
+language-tooling changes for the public demo.
 
 ## Dependency direction
 
@@ -190,13 +191,13 @@ Therefore local development, CI, and deployment never depend on a developer's
 absolute filesystem path. `npm install` links the in-repo package, and root
 build/validation scripts build it before the application.
 
-The workspace package is a maintained mirror of the public standalone Web IDE
+The workspace package is a customized copy based on the public standalone Web IDE
 repository's immutable `web-ide-v0.3.1-source` checkpoint, with
 workspace-specific package scripts and consumer tooling. Web IDE is MIT
-licensed and Hamilton has independently verified an exact immutable private
-release asset, but it is not published to npm. Nova continues using the
-relative mirror because an exact private-asset dependency would require a
-portable authenticated bootstrap for local development, CI, and deployment.
+licensed. The site retains this copy to preserve the public demo's initial
+breakpoints, PCH fallback, symbol renaming, and graph layout. It does not consume
+the separate public 0.7 release. See [site operations](../site-operations.md)
+for deployment identity and replacement checks.
 Changes must be synchronized intentionally and validated in both contexts; an
 absolute sibling `file:` dependency is prohibited.
 

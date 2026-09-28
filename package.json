@@ -13,7 +13,7 @@
   "scripts": {
     "build:web-ide": "npm --workspace web-ide run build",
     "dev": "npm run build:web-ide && vite",
-    "build": "npm run build:web-ide && tsc -b && vite build",
+    "build": "npm run build:web-ide && tsc -b && vite build && node tools/prepare-deployment.mjs",
     "typecheck": "npm --workspace web-ide run typecheck && npm run build:web-ide && tsc -b",
     "lint:app": "eslint src tests",
     "lint": "npm run lint:app && npm --workspace web-ide run lint",
@@ -26,7 +26,7 @@
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "fflate": "^0.8.2",
+    "fflate": "^0.8.3",
     "firebase": "^12.17.0",
     "lucide-react": "^0.575.0",
     "radix-ui": "^1.4.3",

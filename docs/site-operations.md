@@ -40,6 +40,13 @@ After deployment, open `/`, `/ide?example=linked-list`, `/learn`, and a direct
 `/learn/<lesson-slug>` URL. Run a program and pause at a breakpoint. Verify that
 the linked-list workspace on the landing page can also run.
 
+Check `/build-info.json` to identify the deployed Git commit and debugger engine.
+The site uses the customized workbench in `packages/web-ide`, based on 0.3.1;
+it does not currently use the separately published 0.7 component. The customized
+workbench supplies the landing demo's initial breakpoint, PCH rejection fallback,
+symbol renaming, and graph layout. Replacing it with a release package requires
+verifying these behaviors first. License notices are published under `/licenses/`.
+
 ## Other static hosts
 
 Reproduce the rules in `netlify.toml`:

@@ -1,21 +1,20 @@
 # Standalone repository and mirror status
 
-Status: Web IDE has a public standalone source repository and an immutable
-`0.3.1` source checkpoint. Nova continues to consume a reviewed relative
-workspace mirror so its local, CI, and deployment builds do not depend on an
-absolute developer path or an authenticated private-release download.
+Status: Web IDE has a public standalone source repository and public release
+packages. This site consumes a customized relative workspace based on the
+immutable `0.3.1` source checkpoint to preserve its demo's debugger behavior.
+It does not currently consume the separate 0.7 release. Builds do not depend on
+an absolute developer path or an authenticated private-release download.
 
 ## Current identities
 
 - The deployable Nova/Web IDE host application is the root of this repository.
 - The reusable package used by that application is `packages/web-ide`.
-- Reusable source matches tag `web-ide-v0.3.1-source` at
-  `ed271757daf80c3ded7ae2b4a67d74102ebf2435`.
+- Reusable source is based on tag `web-ide-v0.3.1-source` at
+  `ed271757daf80c3ded7ae2b4a67d74102ebf2435`, with local debugger, graph, and
+  language-tooling changes.
 - The workspace package is `web-ide@0.3.1`, MIT licensed, exact-pinned to
-  `debugger-sh@0.3.15`, `private: true`, and unpublished to npm.
-- Hamilton separately retains immutable private-release asset
-  `web-ide-0.3.1.tgz` with SHA-256
-  `4397b6733d19b69941ce225e5d3cf98fa9fcdaf6b27f93f36b35ea8d3e3d37ae`.
+  `debugger-sh@0.3.15-webide.0.5.0.2`, `private: true`, and unpublished to npm.
 - Karel remains a separate companion concern and is not part of Nova's C++
   composition.
 
