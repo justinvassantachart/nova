@@ -22,7 +22,7 @@ The dependency is one way. The package contains no router, Firebase SDK,
 authentication, LMS, assignment, lesson, replay, or deployment configuration.
 The root host does not import package source paths, private React contexts, VFS
 modules, or Zustand stores. It consumes only the exports declared by
-[the published package manifest](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source/package.json):
+[the published package manifest](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source-r2/package.json):
 
 - `web-ide`
 - `web-ide/host`
@@ -213,5 +213,5 @@ service-worker, authentication, and route policy. This repository's
   published to npm.
 
 For consumer-facing package details, see
-[the package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source/README.md) and its
-[architecture document](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source/docs/architecture.md).
+[the package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source-r2/README.md) and its
+[architecture document](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source-r2/docs/architecture.md).
