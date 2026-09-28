@@ -57,7 +57,7 @@ int main() {
 `
 
 const TESTS_CPP = `#include <iostream>
-#include "nova_test.h"
+#include "webide_test.h"
 
 // Contracts for the code under test (defined in main.cpp). Tests
 // never touch a Node's insides, so a bare "struct Node;" -- the
@@ -71,7 +71,7 @@ STUDENT_TEST("three pushes make a list of three") {
     head = pushFront(head, 14);
     head = pushFront(head, 8);
     head = pushFront(head, 23);
-    EXPECT_EQUALS(length(head), 3);
+    EXPECT_EQUAL(length(head), 3);
 }
 `
 
@@ -249,9 +249,9 @@ export const buildingLinkedLists: Lesson = {
             body:
                 'Lock in both boundaries with two more tests in `tests.cpp`:\n'
                 + '```\nSTUDENT_TEST("a single node has length 1") {\n'
-                + '    EXPECT_EQUALS(length(pushFront(nullptr, 42)), 1);\n}\n\n'
+                + '    EXPECT_EQUAL(length(pushFront(nullptr, 42)), 1);\n}\n\n'
                 + 'STUDENT_TEST("the empty list has length 0") {\n'
-                + '    EXPECT_EQUALS(length(nullptr), 0);\n}\n```\n'
+                + '    EXPECT_EQUAL(length(nullptr), 0);\n}\n```\n'
                 + 'Run **Tests** — three green. The empty-list test would have '
                 + 'crashed before the fix and now prevents that case from regressing.',
             check: { kind: 'tests', minTotal: 3, allPass: true, label: 'Three tests, all passing' },

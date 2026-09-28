@@ -99,7 +99,7 @@ export const newAndDelete: Lesson = {
             title: 'Inspect the allocation',
             body:
                 'Here\'s the problem with leaks: no output shows them, and no '
-                + '`EXPECT_EQUALS` can see them — tests check *answers*, and the answers '
+                + '`EXPECT_EQUAL` can see them — tests check *answers*, and the answers '
                 + 'are all correct. Use the **memory graph** to inspect allocations.\n\n'
                 + 'Set a **breakpoint** on the allocation line:\n'
                 + '```\ncurrent = makeScoreBox(round * 100);\n```\n'

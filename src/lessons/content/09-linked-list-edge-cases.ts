@@ -1,7 +1,7 @@
 import type { Lesson } from '../types'
 
 const MAIN_CPP = `#include <iostream>
-#include "nova_test.h"
+#include "webide_test.h"
 
 // ----------------------------------------------------------------
 //  WRITTEN BY AN AI ASSISTANT -- not yet reviewed by a human.
@@ -88,9 +88,9 @@ STUDENT_TEST("removes a middle value") {
     list = pushFront(list, 3);
     list = pushFront(list, 7);
     removeValue(list, 3);
-    EXPECT_EQUALS(length(list), 2);
-    EXPECT_EQUALS(list->value, 7);
-    EXPECT_EQUALS(list->next->value, 12);
+    EXPECT_EQUAL(length(list), 2);
+    EXPECT_EQUAL(list->value, 7);
+    EXPECT_EQUAL(list->next->value, 12);
 }
 `
 
@@ -186,8 +186,8 @@ export const linkedListEdgeCases: Lesson = {
                 + '    list = pushFront(list, 12);\n'
                 + '    list = pushFront(list, 7);\n'
                 + '    removeValue(list, 7);\n'
-                + '    EXPECT_EQUALS(length(list), 1);\n'
-                + '    EXPECT_EQUALS(list->value, 12);\n}\n```\n'
+                + '    EXPECT_EQUAL(length(list), 1);\n'
+                + '    EXPECT_EQUAL(list->value, 12);\n}\n```\n'
                 + 'Press **Tests**.',
             check: { kind: 'tests', minTotal: 2, minFailed: 1, label: 'Run Tests — the head case fails' },
             successNote: 'The length is still 2 and the head is still 7, confirming that the caller was not updated.',
@@ -275,11 +275,11 @@ export const linkedListEdgeCases: Lesson = {
                 + '    list = pushFront(list, 12);\n'
                 + '    list = pushFront(list, 7);\n'
                 + '    removeValue(list, 99);\n'
-                + '    EXPECT_EQUALS(length(list), 2);\n}\n\n'
+                + '    EXPECT_EQUAL(length(list), 2);\n}\n\n'
                 + 'STUDENT_TEST("removing from the empty list is safe") {\n'
                 + '    Node* list = nullptr;\n'
                 + '    removeValue(list, 5);\n'
-                + '    EXPECT_EQUALS(length(list), 0);\n}\n```\n'
+                + '    EXPECT_EQUAL(length(list), 0);\n}\n```\n'
                 + 'Press **Tests**. The four tests now cover the middle, head, '
                 + 'missing-value, and empty-list cases.',
             check: { kind: 'tests', minTotal: 4, allPass: true, label: 'Four tests, all passing' },

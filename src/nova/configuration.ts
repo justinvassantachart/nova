@@ -24,7 +24,7 @@ export const novaWebIDEConfiguration: WebIDEConfiguration = {
   ],
 }
 
-/** Assignment mounts use Web IDE 0.3.1's public, mount-owned activity selection. */
+/** Assignment mounts use the public, mount-owned activity selection. */
 export const novaAssignmentWebIDEConfiguration: WebIDEConfiguration = {
   ...novaWebIDEConfiguration,
   initialLayout: {

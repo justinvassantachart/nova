@@ -4,24 +4,19 @@ web-ide is a browser-based C++ workspace with editing, compilation,
 step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
-This repository contains both the deployed site and the reusable workbench it
-imports. The two layers are kept separate so the workbench can later be released
-as its own package without moving the site's Firebase, course, or replay code
-with it.
-
-The local workbench copy is based on Web IDE `0.3.1` source commit
-`ed271757daf80c3ded7ae2b4a67d74102ebf2435`, with local additions for C++
-precompiled-header inputs, clangd symbol renaming, and memory-graph layout fixes. It is no longer an exact
-mirror of that tag. The site consumes its public exports and pins the public
-`debugger-sh@0.3.15-webide.0.5.0.2` fork release. See
-[compiler performance](docs/compiler-performance.md) for measured behavior,
+This repository contains the deployed site. It imports the independently
+released Web IDE 0.7 component from an immutable public GitHub package, with
+an exact integrity recorded in `package-lock.json`. The 0.7.1 patch retains
+Testing V2 and per-workspace isolation while adding the demo's default
+breakpoints, PCH fallback, symbol renaming, and graph layout fixes.
+See [compiler performance](docs/compiler-performance.md) for measurements,
 asset provenance, and regeneration instructions.
 
 Try the [editable linked list](https://webide.org/ide?example=linked-list),
 [ten lessons](https://webide.org/learn), or [guided debugger tour](https://webide.org/demo).
 For adoption, see the [instructor guide](docs/teaching.md),
 [site operations](docs/site-operations.md), and
-[React workbench API](packages/web-ide/README.md).
+[React workbench API](https://github.com/justinvassantachart/web-ide).
 
 ## What is included
 
@@ -31,7 +26,7 @@ For adoption, see the [instructor guide](docs/teaching.md),
 - breakpoints, step controls, call stacks, variables, and memory graphs
 - a virtual multi-file workspace that persists in the browser
 - terminal input and output
-- `STUDENT_TEST`/`EXPECT_EQUALS` support with a generic Tests panel
+- `STUDENT_TEST`/`EXPECT_EQUAL` support with Testing V2 and selected-test debugging
 - an optional Canvas panel for runtimes or plugins that emit graphics events
 - guided C++ lessons at `/learn`
 - Firebase-backed classes, assignments, submissions, and teacher review
@@ -61,12 +56,11 @@ src/                       deployed site host
   lessons/                 guided course and lesson host
   replay/                  session reconstruction and playback
   nova/                    legacy internal path for site composition
-packages/web-ide/          reusable Web IDE workspace package
 docs/architecture/         extraction and release-readiness notes
 ```
 
 The root application owns routing, authentication, Firebase persistence, LMS
-screens, lessons, replay, and deployment behavior. `packages/web-ide` owns the
+screens, lessons, replay, and deployment behavior. The public `web-ide` package owns the
 editor workbench, VFS, terminal, debugger surfaces, typed contracts, and
 optional providers. Root application code imports only the package's public
 exports (`web-ide`, `web-ide/host`, `web-ide/plugins`, `web-ide/runtimes`,
@@ -84,25 +78,17 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173>. The development command builds the Web IDE
-workspace package first and then starts the complete site. Changes to the site
-are handled by Vite; after changing package source, restart the root development
-command or run the package watcher in a second terminal:
+Open <http://localhost:5173>. Vite serves the site using the installed package;
+there is no sibling checkout or vendored workbench build.
 
 ```sh
-npm --workspace web-ide run dev
+npm run validate      # site lint, tests, types, and production build
+npm run test
+npm run typecheck
+npm run build
 ```
 
-Useful checks:
-
-```sh
-npm run validate                 # package + site lint, tests, types, and build
-npm run test                     # package and site tests
-npm run typecheck                # package and site TypeScript checks
-npm run build                    # production package and site build
-npm run build:web-ide            # package build only
-npm --workspace web-ide run validate
-```
+The component's own checks run in its public source repository.
 
 ## Import the IDE component
 
@@ -139,7 +125,7 @@ export function Workspace() {
 An application that needs controlled workspace identity, seed files,
 persistence, read-only behavior, or event recording wraps the component with
 `WebIDEHostProvider` from `web-ide/host`. The package README at
-[packages/web-ide/README.md](packages/web-ide/README.md) documents the host,
+[the public web-ide repository](https://github.com/justinvassantachart/web-ide) documents the host,
 runtime, testing, language-tooling, and plugin contracts in detail.
 
 ### Extension boundaries
@@ -213,18 +199,13 @@ landing/IDE routes. The landing page loads a same-origin IDE; both documents
 need isolation for SharedArrayBuffer. Set the same `VITE_FIREBASE_*` variables in the
 hosting environment when deploying the teaching features.
 
-The in-repo package is based on the public Web IDE 0.3.1 source tag with the
-local additions noted above.
-The deployed site depends only on the relative workspace package at
-`packages/web-ide`; it does not depend on the sibling checkout or an absolute
-machine path. Web IDE is MIT licensed and has an exact immutable private
-Hamilton release, but it remains unpublished to npm. Moving Nova to a remote
-artifact requires a separate portable authentication/bootstrap migration.
+The build publishes `/build-info.json` with the site commit, exact workbench
+package version and integrity, and pinned debugger engine. License notices are
+published under `/licenses/`. The package is MIT licensed and distributed through
+public GitHub releases; no private release authentication is needed.
 
 ## Current limitations
 
-- One mounted Web IDE workbench per JavaScript realm is supported; some legacy
-  workbench state and VFS services are still module-scoped.
 - C++ run/debug is the production path. The optional Python provider supports
   run, source debugging, variables, and unittest execution; Rust is not
   implemented.
@@ -234,9 +215,8 @@ artifact requires a separate portable authentication/bootstrap migration.
   cross-origin isolation headers.
 - Authenticated Firebase/LMS browser checks require a configured non-production
   test project and account.
-- The reusable source is MIT licensed and remains `private: true`; it is not
-  published to npm. Nova still requires a reviewed migration before changing
-  its relative-workspace distribution model.
+- The reusable source is MIT licensed and remains `private: true`; distribution
+  uses public GitHub release packages rather than npm publication.
 
 More detail is available in [standalone repository readiness](docs/architecture/standalone-repository-readiness.md),
 [guided lessons](src/lessons/README.md), and [session replay](src/replay/README.md).

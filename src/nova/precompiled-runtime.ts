@@ -1,6 +1,7 @@
 import { gunzipSync } from 'fflate'
 import type { IDEPlugin, RuntimeExecutionPlan, RuntimeProvider } from 'web-ide'
 import { cppRuntimeProvider } from 'web-ide/runtimes'
+import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
 import { pchProfiles } from './generated/pch-profiles'
 
 type PchProfile = typeof pchProfiles[number]
@@ -30,7 +31,13 @@ export function selectPchProfile(files: RuntimeExecutionPlan['files']): PchProfi
   if (!sources.length) return undefined
   // Engine flattens /workspace and /sysroot into /. Never shadow user files.
   if (Object.keys(files).some(path => /(?:^|\/)__web_ide_pch(?:\.h|\.pch)(?:\/|$)/.test(path))) return undefined
-  const prefixes = sources.map(([, source]) => leadingStandardIncludes(source))
+  // Testing V2 adds its own fixed implementation to lesson Run/Debug plans.
+  // Its standard-only includes are compatible with these profiles. Exempt only
+  // the exact provider-owned bytes, never a similarly named workspace source.
+  const userSources = sources.filter(([path, source]) =>
+    path !== CPP_TEST_IMPL_PATH || source !== CPP_TEST_SUPPORT_FILES[CPP_TEST_IMPL_PATH])
+  if (!userSources.length) return undefined
+  const prefixes = userSources.map(([, source]) => leadingStandardIncludes(source))
   return [...pchProfiles].reverse().find(profile => prefixes.every(headers =>
     profile.headers.every((header, index) => headers[index] === header)))
 }

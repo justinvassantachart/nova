@@ -4,8 +4,9 @@ The site pins `debugger-sh` to the public fork release
 [`0.3.15-webide.0.5.0.2`](https://github.com/justinvassantachart/engine/releases/tag/debugger-sh-v0.3.15-webide.0.5.0.2).
 `package-lock.json` records the release archive's exact integrity. This is the
 same engine release selected by the CS106B course IDE, including its corrected
-stdin behavior. The embedded web-ide package keeps its existing public surface
-and adds the newer runtime's optional binary C++ build inputs.
+stdin behavior. The independently released Web IDE 0.7 component accepts the
+runtime's optional binary C++ build inputs; its 0.7.1 patch adds the explicit
+Debug rejection fallback used here.
 
 The CS106B course uses a shared precompiled Stanford support library. This site
 instead ships two smaller, standard-library-only PCH profiles: `<iostream>` and
@@ -16,14 +17,19 @@ compiler flags recorded in [the manifest](../public/compiler/manifest.json).
 ## When the optimization applies
 
 The demo runtime selects the longest supported leading include sequence shared
-by **every C++ translation unit**. Comments and whitespace may precede it.
+by **every user C++ translation unit**. Comments and whitespace may precede it.
 A macro, conditional, local include, unusual preprocessing syntax, or a source
 file lacking that prefix keeps the normal source compilation path. This keeps
 missing includes and source-local macros meaningful when readers edit demos.
 Files and source line numbers are unchanged; no additional headers are silently
 made available to a program. Four lesson test files now spell out the same
 standard includes as their main files so their ordinary runs can share a PCH.
-Generated test harnesses with different prefixes intentionally compile normally.
+The exact Testing V2 framework implementation supplied by the pinned package is
+allowed alongside those sources: its reviewed standard-library includes are
+compatible with both profiles. Modified or similarly named files do not get this
+exception. Generated test runners and transformed test sources with different
+prefixes intentionally compile normally. A legacy test-header bridge is added
+only when needed, so plain programs do not compile the testing framework.
 
 The PCH downloads only when a matching program is prepared to run or debug.
 The compressed assets are about 7.3 MB and 7.8 MB, respectively; they use

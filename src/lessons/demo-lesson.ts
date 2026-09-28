@@ -39,7 +39,7 @@ int main() {
 }
 `
 
-const TESTS_CPP = `#include "nova_test.h"
+const TESTS_CPP = `#include "webide_test.h"
 
 struct Node;
 Node* makeList();
@@ -50,7 +50,7 @@ STUDENT_TEST("the sum includes every node") {
     Node* head = makeList();
     int result = sum(head);
     deleteList(head);
-    EXPECT_EQUALS(result, 60);
+    EXPECT_EQUAL(result, 60);
 }
 `
 

@@ -41,11 +41,10 @@ After deployment, open `/`, `/ide?example=linked-list`, `/learn`, and a direct
 the linked-list workspace on the landing page can also run.
 
 Check `/build-info.json` to identify the deployed Git commit and debugger engine.
-The site uses the customized workbench in `packages/web-ide`, based on 0.3.1;
-it does not currently use the separately published 0.7 component. The customized
-workbench supplies the landing demo's initial breakpoint, PCH rejection fallback,
-symbol renaming, and graph layout. Replacing it with a release package requires
-verifying these behaviors first. License notices are published under `/licenses/`.
+The site consumes the immutable public Web IDE 0.7.1 package. This patch keeps
+0.7's Testing V2 and workspace isolation while supporting the demo's initial
+breakpoint, PCH rejection fallback, symbol renaming, and graph layout. Check these
+behaviors when upgrading the package. License notices are published under `/licenses/`.
 
 ## Other static hosts
 
@@ -95,5 +94,5 @@ want returning students to retain that local work. The showcase and its full-pag
 version deliberately share a workspace, while each lesson has its own workspace.
 
 To customize the UI or connect your own saving backend, start with the
-[React workbench guide](../packages/web-ide/README.md). Its host API supplies
+[React workbench guide](https://github.com/justinvassantachart/web-ide). Its host API supplies
 initial files and save/flush callbacks independently of Firebase.

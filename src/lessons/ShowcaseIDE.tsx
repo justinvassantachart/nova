@@ -24,7 +24,9 @@ const configuration: WebIDEConfiguration = {
     initialLayout: {
         selectedPanelId: 'graph',
         panelColumnPercent: 44,
-        panelContentPercent: 66,
+        // In 0.7 the terminal sits below the editor. Keep the list-building
+        // lines visible while leaving several lines of program output below.
+        panelContentPercent: 78,
     },
 }
 

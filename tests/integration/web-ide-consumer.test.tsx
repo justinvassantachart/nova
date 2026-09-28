@@ -16,7 +16,7 @@ function HostProbe() {
   return <output>{useWebIDEHost()?.workspace?.id ?? 'standalone'}</output>
 }
 
-describe('The deployed site consumes its Web IDE workspace package', () => {
+describe('The deployed site consumes the published Web IDE package', () => {
   it('composes public package exports plus host-owned runtime, test compatibility, and assignment UI', () => {
     expect(novaWebIDEConfiguration).toMatchObject({
       runtimeProvider: 'web-ide.runtime.cpp',

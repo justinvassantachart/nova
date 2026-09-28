@@ -1,10 +1,9 @@
 # Web IDE host and package architecture
 
 Status: the deployed product is Web IDE, and this repository is its first host.
-The reusable workbench is integrated as the relative npm workspace package at
-`packages/web-ide`. Its reusable source is based on Web IDE `0.3.1` source commit
-`ed271757daf80c3ded7ae2b4a67d74102ebf2435`, with local debugger, graph, and
-language-tooling changes for the public demo.
+The reusable workbench is installed from the immutable public WebIDE 0.7.1
+release asset. `package-lock.json` binds its exact integrity; the host no longer
+builds or resolves a vendored workspace copy.
 
 ## Dependency direction
 
@@ -23,7 +22,7 @@ The dependency is one way. The package contains no router, Firebase SDK,
 authentication, LMS, assignment, lesson, replay, or deployment configuration.
 The root host does not import package source paths, private React contexts, VFS
 modules, or Zustand stores. It consumes only the exports declared by
-[`packages/web-ide/package.json`](../../packages/web-ide/package.json):
+[the published package manifest](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source/package.json):
 
 - `web-ide`
 - `web-ide/host`
@@ -108,17 +107,17 @@ contracts and numeric exit events.
 
 ### Testing
 
-Testing is separate from runtime execution. A `TestProvider` owns framework
-support files, source transforms, the test runner plan, and a fresh output
-parser. It produces an ordinary runtime execution plan plus structured
-`TestEvent` values. The selected runtime executes the plan; the generic Tests
-panel renders the events without knowing the language or framework protocol.
+Testing is separate from runtime execution. A `TestProviderV2` supplies static
+discovery, frozen execution plans, and a decoder for authoritative runtime
+reports. The shared controller owns selection, cancellation, timeouts, and
+out-of-date results for both C++ and Python.
 
-The packaged C++ provider preserves `nova_test.h`, `STUDENT_TEST`, and
-`EXPECT_EQUALS` source compatibility. Its generated support files and hidden
-runner are ephemeral: they are not written into the user's VFS, explorer,
-local cache, snapshot, or host persistence. A Python standard-library
-`unittest` provider is also available for a Python composition.
+Nova's C++ plugin delegates to the public `cppTestProvider`. New lessons use
+`webide_test.h`, `STUDENT_TEST`, and `EXPECT_EQUAL`. An execution-only
+`/sysroot/nova_test.h` header aliases the old `EXPECT_EQUALS` spelling for saved
+lessons and replay source. Its editor-only declaration provides clangd support.
+The alias, framework implementation, and generated runner never enter student
+files or host persistence. Nova does not maintain a second test framework.
 
 ### Language tooling
 
@@ -151,7 +150,7 @@ They are examples of composition, not a closed catalog.
 
 | Concern | Owner |
 | --- | --- |
-| Editor, workbench layout, VFS, terminal, debug surfaces | `packages/web-ide` core |
+| Editor, workbench layout, VFS, terminal, debug surfaces | Published `web-ide` package |
 | C++/Python process execution and debug capabilities | Selected runtime provider |
 | C++ test framework or Python `unittest` preparation/parsing | Selected test provider |
 | Tests results presentation | Generic testing plugin |
@@ -162,8 +161,7 @@ They are examples of composition, not a closed catalog.
 
 ## Karel boundary
 
-Karel is not bundled in this repository, in `packages/web-ide`, or in the root
-teaching application. A Karel integration belongs in a separate companion
+Karel is not bundled in this repository or in the root teaching application. A Karel integration belongs in a separate companion
 package/repository that consumes the public plugin API. That companion would
 own its panel, world model, Python library, framed event protocol, workspace
 resources, and cleanup, while the host separately selects a compatible Python
@@ -176,30 +174,21 @@ omit it.
 
 ## Source and distribution model
 
-The root package manifest declares an npm workspace and a relative dependency:
+The root manifest selects the immutable public GitHub release:
 
 ```json
 {
-  "workspaces": ["packages/web-ide"],
   "dependencies": {
-    "web-ide": "file:packages/web-ide"
+    "web-ide": "https://github.com/justinvassantachart/web-ide/releases/download/web-ide-v0.7.1/web-ide-0.7.1.tgz"
   }
 }
 ```
 
-Therefore local development, CI, and deployment never depend on a developer's
-absolute filesystem path. `npm install` links the in-repo package, and root
-build/validation scripts build it before the application.
-
-The workspace package is a customized copy based on the public standalone Web IDE
-repository's immutable `web-ide-v0.3.1-source` checkpoint, with
-workspace-specific package scripts and consumer tooling. Web IDE is MIT
-licensed. The site retains this copy to preserve the public demo's initial
-breakpoints, PCH fallback, symbol renaming, and graph layout. It does not consume
-the separate public 0.7 release. See [site operations](../site-operations.md)
-for deployment identity and replacement checks.
-Changes must be synchronized intentionally and validated in both contexts; an
-absolute sibling `file:` dependency is prohibited.
+`npm ci` verifies the integrity from `package-lock.json`. Local development,
+CI, and Netlify consume the same published bytes without private credentials or
+absolute machine paths. The MIT library is released and validated in its own
+repository. Nova's build, tests, and browser validation cover its host integration;
+upgrades deliberately update this exact URL and the lock together.
 
 ## Browser and deployment requirements
 
@@ -212,9 +201,7 @@ service-worker, authentication, and route policy. This repository's
 
 ## Remaining limitations
 
-- One workbench mount per JavaScript realm is supported. Runtime/plugin
-  lifecycles are mount-scoped, but several legacy UI stores and the VFS remain
-  module singletons.
+- Workbench, workspace, runtime, and plugin lifecycles are mount-scoped.
 - Read-only mode is a user-interface policy, not a security boundary.
 - Rust and end-to-end graphics execution are not complete. Python run,
   debugging, variables, and unittest execution are supported by the optional
@@ -222,10 +209,9 @@ service-worker, authentication, and route policy. This repository's
 - Browser execution and clangd still use external WebAssembly/toolchain assets.
 - Authenticated Firebase/LMS browser coverage needs a configured test project;
   it is not part of an unauthenticated local package test.
-- The package remains private and unpublished to npm. Replacing Nova's source
-  mirror with a remote artifact still requires explicit authentication,
-  provenance, cache, rollback, and deployment decisions.
+- Distribution uses immutable public GitHub release assets; the package is not
+  published to npm.
 
 For consumer-facing package details, see
-[`packages/web-ide/README.md`](../../packages/web-ide/README.md) and its
-[`architecture document`](../../packages/web-ide/docs/architecture.md).
+[the package README](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source/README.md) and its
+[architecture document](https://github.com/justinvassantachart/web-ide/blob/web-ide-v0.7.1-source/docs/architecture.md).

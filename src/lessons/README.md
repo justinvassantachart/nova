@@ -17,7 +17,7 @@ list. Both views share browser-local edits. The memory graph is selected on
 mount; execution starts only when the visitor uses Run or Debug.
 
 Lessons belong to the deployed site host, not to the reusable
-`packages/web-ide` package. They are a concrete example of an application
+public `web-ide` package. They are a concrete example of an application
 embedding the workbench through its public API.
 
 ## Architecture: a host, not a workbench fork

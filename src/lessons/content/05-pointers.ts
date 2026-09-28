@@ -36,7 +36,7 @@ int main() {
 `
 
 const TESTS_CPP = `#include <iostream>
-#include "nova_test.h"
+#include "webide_test.h"
 
 // Defined in main.cpp.
 void awardBonus(int* scorePtr);
@@ -44,7 +44,7 @@ void awardBonus(int* scorePtr);
 STUDENT_TEST("awardBonus adds 50 through the pointer") {
     int score = 100;
     awardBonus(&score);
-    EXPECT_EQUALS(score, 150);
+    EXPECT_EQUAL(score, 150);
 }
 `
 

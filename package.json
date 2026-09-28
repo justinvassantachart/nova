@@ -7,21 +7,17 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "packageManager": "npm@11.6.2",
-  "workspaces": [
-    "packages/web-ide"
-  ],
   "scripts": {
-    "build:web-ide": "npm --workspace web-ide run build",
-    "dev": "npm run build:web-ide && vite",
-    "build": "npm run build:web-ide && tsc -b && vite build && node tools/prepare-deployment.mjs",
-    "typecheck": "npm --workspace web-ide run typecheck && npm run build:web-ide && tsc -b",
+    "dev": "vite",
+    "build": "tsc -b && vite build && node tools/prepare-deployment.mjs",
+    "typecheck": "tsc -b",
     "lint:app": "eslint src tests",
-    "lint": "npm run lint:app && npm --workspace web-ide run lint",
+    "lint": "npm run lint:app",
     "preview": "vite preview",
-    "test:app": "vitest run --exclude 'packages/web-ide/**'",
-    "test": "npm run test:app && npm --workspace web-ide run test",
-    "test:watch": "vitest --exclude 'packages/web-ide/**'",
-    "validate": "npm --workspace web-ide run validate && npm run lint:app && npm run test:app && npm run build"
+    "test:app": "vitest run",
+    "test": "npm run test:app",
+    "test:watch": "vitest",
+    "validate": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -35,7 +31,7 @@
     "react-resizable-panels": "^4.6.4",
     "react-router-dom": "^7.18.2",
     "tailwind-merge": "^3.5.0",
-    "web-ide": "file:packages/web-ide",
+    "web-ide": "https://github.com/justinvassantachart/web-ide/releases/download/web-ide-v0.7.1/web-ide-0.7.1.tgz",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
@@ -51,9 +47,9 @@
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "events": "3.3.0",
     "firebase-admin": "^13.10.0",
     "globals": "^16.5.0",
-    "events": "3.3.0",
     "monaco-editor": "^0.56.0",
     "path-browserify": "1.0.1",
     "process": "0.11.10",

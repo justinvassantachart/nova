@@ -1,4 +1,4 @@
-import { Engine } from '../../packages/web-ide/node_modules/debugger-sh/dist/debugger-sh.js'
+import { Engine } from 'debugger-sh'
 import { gunzipSync } from 'fflate'
 import { pchProfiles } from '../../src/nova/generated/pch-profiles'
 

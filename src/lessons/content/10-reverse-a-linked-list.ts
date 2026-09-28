@@ -80,7 +80,7 @@ int main() {
 `
 
 const TESTS_CPP = `#include <iostream>
-#include "nova_test.h"
+#include "webide_test.h"
 #include "list.h"
 
 STUDENT_TEST("reversing 10 -> 20 -> 30 yields 30 -> 20 -> 10") {
@@ -91,10 +91,10 @@ STUDENT_TEST("reversing 10 -> 20 -> 30 yields 30 -> 20 -> 10") {
 
     reverse(head);
 
-    EXPECT_EQUALS(length(head), 3);
-    EXPECT_EQUALS(head->value, 30);
-    EXPECT_EQUALS(head->next->value, 20);
-    EXPECT_EQUALS(head->next->next->value, 10);
+    EXPECT_EQUAL(length(head), 3);
+    EXPECT_EQUAL(head->value, 30);
+    EXPECT_EQUAL(head->next->value, 20);
+    EXPECT_EQUAL(head->next->next->value, 10);
 }
 `
 
@@ -258,12 +258,12 @@ export const reverseALinkedList: Lesson = {
                 + '```\nSTUDENT_TEST("reversing a single node keeps it") {\n'
                 + '    Node* head = pushFront(nullptr, 42);\n'
                 + '    reverse(head);\n'
-                + '    EXPECT_EQUALS(length(head), 1);\n'
-                + '    EXPECT_EQUALS(head->value, 42);\n}\n\n'
+                + '    EXPECT_EQUAL(length(head), 1);\n'
+                + '    EXPECT_EQUAL(head->value, 42);\n}\n\n'
                 + 'STUDENT_TEST("reversing the empty list is safe") {\n'
                 + '    Node* head = nullptr;\n'
                 + '    reverse(head);\n'
-                + '    EXPECT_EQUALS(length(head), 0);\n}\n```\n'
+                + '    EXPECT_EQUAL(length(head), 0);\n}\n```\n'
                 + 'Press **Tests** — three green.',
             check: { kind: 'tests', minTotal: 3, allPass: true, label: 'Three tests, all passing' },
         },

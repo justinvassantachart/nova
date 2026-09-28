@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
 
 const prepare = vi.hoisted(() => vi.fn(async () => ({ success: true, errors: [] })))
 vi.mock('web-ide/runtimes', () => ({
@@ -7,6 +8,16 @@ vi.mock('web-ide/runtimes', () => ({
 import { leadingStandardIncludes, selectPchProfile, precompiledCppRuntimeProvider } from './precompiled-runtime'
 
 describe('standard-library PCH selection', () => {
+  it('allows only the exact Testing V2 implementation beside eligible lesson sources', () => {
+    const files: Record<string, string> = {
+      '/workspace/main.cpp': '#include <iostream>\n#include "webide_test.h"\nint main() {}',
+      ...CPP_TEST_SUPPORT_FILES,
+    }
+    expect(selectPchProfile(files)?.headers).toEqual(['iostream'])
+    files[CPP_TEST_IMPL_PATH] += '\nint extra() { return 1; }'
+    expect(selectPchProfile(files)).toBeUndefined()
+    expect(selectPchProfile(CPP_TEST_SUPPORT_FILES)).toBeUndefined()
+  })
   it('chooses the longest available prefix shared by every translation unit', () => {
     const files = {
       '/workspace/main.cpp': '#include <iostream>\n#include <vector>\nint main() {}',

@@ -63,7 +63,7 @@ export const fromPythonToCpp: Lesson = {
                 + 'The next lesson covers these types.\n\n'
                 + 'The **editor** on the left shows `main.cpp`, a cafe receipt '
                 + 'program written by an AI assistant. The **Run** and **Debug** buttons '
-                + 'are in the top-right toolbar, and the **terminal** at the bottom right shows '
+                + 'are in the top-right toolbar, and the **terminal** below the editor shows '
                 + 'output. Press **Next** to review the file.',
             check: { kind: 'manual' },
         },
