@@ -4,14 +4,14 @@ import { WebIDEHostProvider, type WebIDEHost } from 'web-ide/host'
 import { canvasPlugin } from 'web-ide/plugins'
 import { novaWebIDEConfiguration } from '@/nova/configuration'
 import { assignmentActivityPlugin } from '@/nova/assignment-activity-plugin'
-import { linkedListEntryLine, linkedListExample } from './showcase-example'
+import { linkedListBreakpointLine, linkedListExample } from './showcase-example'
 
 const host: WebIDEHost = {
     workspace: {
         // The embedded and full-page views intentionally share local edits.
         id: 'web-ide:linked-list-showcase:v4',
         initialFiles: { '/workspace/main.cpp': linkedListExample },
-        initialBreakpoints: { '/workspace/main.cpp': [linkedListEntryLine] },
+        initialBreakpoints: { '/workspace/main.cpp': [linkedListBreakpointLine] },
     },
 }
 
