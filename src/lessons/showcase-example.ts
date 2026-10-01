@@ -28,5 +28,5 @@ int main() {
 }
 `
 
-export const linkedListEntryLine = linkedListExample.split('\n')
-    .findIndex(line => line.includes('Node* head = new Node')) + 1
+export const linkedListBreakpointLine = linkedListExample.split('\n')
+    .findIndex(line => line.includes('middle->next = tail;')) + 1
