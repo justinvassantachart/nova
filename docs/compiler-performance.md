@@ -1,10 +1,11 @@
 # C++ compilation and precompiled headers
 
-The site consumes Web IDE 0.10.0, which pins `debugger-sh` to the public fork
+The site consumes Web IDE 0.10.1, which pins `debugger-sh` to the public fork
 release [`0.3.15-webide.0.9.0.1`](https://github.com/justinvassantachart/engine/releases/tag/debugger-sh-v0.3.15-webide.0.9.0.1).
 `package-lock.json` records both release archives' exact integrity. Nova retains the legacy compiler profile and explicit PCH rejection
 fallback, while enabling scoped worker and compiled-module reuse. The
-course-specific object cache is not enabled here.
+course-specific object cache is not enabled here. The 0.10.1 graph and build
+progress updates retain the compiler-warming configuration measured below.
 
 The PCH profiles were regenerated for this engine. Its standard compiler flags,
 compiler SHA-256, and sysroot SHA-256 match the prior pin, so the generated PCH

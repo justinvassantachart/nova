@@ -5,10 +5,11 @@ step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
 This repository contains the deployed site. It imports the independently
-released Web IDE 0.10.0 component from an immutable public GitHub package, with
+released Web IDE 0.10.1 component from an immutable public GitHub package, with
 an exact integrity recorded in `package-lock.json`. This release updates the
-workbench themes, toolbar, panels, breakpoints, and terminal while retaining
-Testing V2, workspace isolation, and the public host/runtime contracts. The site
+build progress display and restores separate observed pointer targets in the
+memory graph while retaining Pretty/Raw formatters, Testing V2, workspace
+isolation, and the public host/runtime contracts. The site
 prepares the compiler once after opening an editable workspace and reuses its
 worker and compiled module for faster subsequent runs.
 See [compiler performance](docs/compiler-performance.md) for measurements,

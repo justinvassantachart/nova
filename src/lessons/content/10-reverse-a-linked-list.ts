@@ -202,11 +202,12 @@ export const reverseALinkedList: Lesson = {
                 + '2. `prev = curr;` — prev now points to `[10]`.\n'
                 + '3. `curr = curr->next;` — curr follows 10\'s next... **which is '
                 + 'now null**. The loop ends after one iteration.\n\n'
-                + '`[20]` and `[30]` still exist on the heap, but no pointer from a '
-                + 'stack frame reaches them. `head` becomes `prev`, which points only '
-                + 'to node 10.',
+                + 'No pointer from a stack frame reaches `[20]` or `[30]` now, so they '
+                + 'disappear from the referenced-object graph. That does not mean '
+                + 'they were freed: the code never deletes them. `head` becomes '
+                + '`prev`, which points only to node 10.',
             check: { kind: 'event', event: 'debug_step_over', count: 3, label: 'Step Over ×3 — watch curr fall off the flipped arrow' },
-            successNote: 'The debugger confirms that updating curr->next removed the only path to the remaining nodes.',
+            successNote: 'The changed next pointer explains why the remaining nodes are no longer reachable.',
         },
         {
             id: 'diagnose',

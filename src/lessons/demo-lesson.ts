@@ -96,11 +96,11 @@ export const demoLesson: Lesson = {
                 of: [
                     { kind: 'paused', anchor: 'total += current->value;', label: 'Pause at the addition in sum()' },
                     { kind: 'right-tab', tab: 'graph', label: 'Open the Graph tab' },
-                    { kind: 'heap', minAllocations: 3, label: 'Inspect all three heap nodes' },
+                    { kind: 'heap', minAllocations: 3, label: 'Inspect all three referenced nodes' },
                 ],
             },
             hint: 'Click the gutter beside the addition line, then Debug. A breakpoint pauses before executing its line.',
-            successNote: 'The graph shows actual stack and heap state from this execution.',
+            successNote: 'The graph shows captured variables and readable pointer targets at this pause.',
         },
         {
             id: 'step',
