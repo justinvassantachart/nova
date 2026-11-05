@@ -1,7 +1,8 @@
 import { gunzipSync } from 'fflate'
 import type { IDEPlugin, RuntimeExecutionPlan, RuntimeProvider } from 'web-ide'
-import { cppRuntimeProvider } from 'web-ide/runtimes'
+import { cppRuntimeProvider, createCppRuntimeProvider } from 'web-ide/runtimes'
 import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
+import { settleStartupStop } from './runtime-settlement'
 import { pchProfiles } from './generated/pch-profiles'
 
 type PchProfile = typeof pchProfiles[number]
@@ -73,22 +74,76 @@ async function loadProfile(profile: PchProfile): Promise<Artifacts | undefined> 
   return loading
 }
 
-export const precompiledCppRuntimeProvider: RuntimeProvider = {
-  ...cppRuntimeProvider,
-  createSession() {
-    const session = cppRuntimeProvider.createSession()
-    const prepare = session.prepare.bind(session)
-    session.prepare = async plan => {
-      if (plan.cppArtifacts || plan.binaryFiles) return prepare(plan)
-      const snapshot = { ...plan, files: { ...plan.files } }
-      const profile = selectPchProfile(snapshot.files)
-      const artifacts = profile ? await loadProfile(profile) : undefined
-      return prepare({ ...snapshot, ...artifacts })
-    }
-    return session
-  },
+/** Both foreground and background preparation use the same owned PCH plan. */
+export function withPrecompiledHeaders(provider: RuntimeProvider): RuntimeProvider {
+  return {
+    ...provider,
+    createSession() {
+      const session = settleStartupStop(provider.createSession())
+      let generation = 0
+      let warmupGeneration = 0
+      const fence = <A extends unknown[], R>(operation: (...args: A) => R) => (...args: A): R => {
+        generation++
+        warmupGeneration++
+        return operation(...args)
+      }
+      const cancelWarmup = session.cancelWarmupAndWait?.bind(session)
+      if (cancelWarmup) session.cancelWarmupAndWait = () => {
+        warmupGeneration++
+        return cancelWarmup()
+      }
+      if (session.stop) session.stop = fence(session.stop.bind(session))
+      if (session.stopAndWait) session.stopAndWait = fence(session.stopAndWait.bind(session))
+      if (session.dispose) session.dispose = fence(session.dispose.bind(session))
+      if (session.disposeAndWait) session.disposeAndWait = fence(session.disposeAndWait.bind(session))
+      if (session.suspendRuntime) session.suspendRuntime = fence(session.suspendRuntime.bind(session))
+      const prepare = session.prepare.bind(session)
+      const warmup = session.warmup?.bind(session)
+      async function transform(plan: RuntimeExecutionPlan): Promise<RuntimeExecutionPlan> {
+        if (plan.cppArtifacts || plan.binaryFiles) return plan
+        const snapshot = { ...plan, files: { ...plan.files } }
+        const profile = selectPchProfile(snapshot.files)
+        const artifacts = profile ? await loadProfile(profile) : undefined
+        return { ...snapshot, ...artifacts }
+      }
+      session.prepare = async plan => {
+        warmupGeneration++
+        const token = ++generation
+        const transformed = await transform(plan)
+        if (token !== generation) return { success: false, errors: ['Execution preparation was cancelled'] }
+        return prepare(transformed)
+      }
+      if (warmup) session.warmup = async (plan, options) => {
+        const token = warmupGeneration
+        const transformed = await transform(plan)
+        if (token !== warmupGeneration || options?.foregroundIntent?.aborted) return { status: 'cancelled', diagnostics: [] }
+        return warmup(transformed, options)
+      }
+      return session
+    },
+  }
 }
 
+export function createFastCppRuntimePlugin(scope: { projectId: string; accountId: string }): IDEPlugin {
+  return {
+    id: 'web-ide.runtime.cpp.plugin',
+    contributes: { runtimeProviders: [withPrecompiledHeaders(createCppRuntimeProvider({
+      cpp: {
+        scope,
+        // Nova's standard-library PCH uses the legacy toolchain. Object caching
+        // requires a separately certified profile; do not claim TU cache hits.
+        toolchainProfile: 'legacy',
+        objectCache: false,
+        cacheCompilerModule: true,
+        retainWorker: true,
+        idleTimeoutMs: 30_000,
+      },
+      preserveCompilerOnCancel: true,
+    }))] },
+  }
+}
+
+export const precompiledCppRuntimeProvider = withPrecompiledHeaders(cppRuntimeProvider)
 export const precompiledCppRuntimePlugin: IDEPlugin = {
   id: 'web-ide.runtime.cpp.plugin',
   contributes: { runtimeProviders: [precompiledCppRuntimeProvider] },

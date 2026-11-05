@@ -1,5 +1,6 @@
+import { FastWebIDE } from '@/nova/FastWebIDE'
 import { useEffect, useRef } from 'react'
-import { WebIDE, type WebIDEConfiguration, type WebIDEInstanceHandle } from 'web-ide'
+import { type WebIDEConfiguration, type WebIDEInstanceHandle } from 'web-ide'
 import { WebIDEHostProvider, type WebIDEHost } from 'web-ide/host'
 import { canvasPlugin } from 'web-ide/plugins'
 import { novaWebIDEConfiguration } from '@/nova/configuration'
@@ -48,7 +49,7 @@ export default function ShowcaseIDE() {
     return (
         <div className="h-full w-full overflow-hidden">
             <WebIDEHostProvider host={host}>
-                <WebIDE ref={ideRef} configuration={configuration} />
+                <FastWebIDE ref={ideRef} configuration={configuration} />
             </WebIDEHostProvider>
         </div>
     )

@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
 
-const prepare = vi.hoisted(() => vi.fn(async () => ({ success: true, errors: [] })))
+const { prepare, warmup, cancelWarmupAndWait } = vi.hoisted(() => ({
+  prepare: vi.fn(async () => ({ success: true, errors: [] })),
+  warmup: vi.fn(async () => ({ status: 'completed', diagnostics: [] })),
+  cancelWarmupAndWait: vi.fn(async () => {}),
+}))
 vi.mock('web-ide/runtimes', () => ({
-  cppRuntimeProvider: { createSession: () => ({ prepare }), id: 'cpp' },
+  cppRuntimeProvider: { createSession: () => ({ prepare, warmup, cancelWarmupAndWait, start: vi.fn(), events: { exit: { subscribe: vi.fn() } } }), id: 'cpp' },
 }))
 import { leadingStandardIncludes, selectPchProfile, precompiledCppRuntimeProvider } from './precompiled-runtime'
 
@@ -69,6 +73,39 @@ describe('standard-library PCH selection', () => {
     const plan = { files: { '/workspace/main.cpp': '#include <iostream>\nint main() {}' }, mode: 'debug' as const }
     await precompiledCppRuntimeProvider.createSession().prepare(plan)
     expect(prepare).toHaveBeenLastCalledWith(plan)
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('PCH warmup lifecycle', () => {
+  it('uses the same snapshot for warmup and foreground preparation', async () => {
+    const session = precompiledCppRuntimeProvider.createSession()
+    const plan = { files: { '/workspace/main.cpp': 'int main() {}' }, mode: 'run' as const }
+    await session.warmup!(plan)
+    await session.prepare(plan)
+    expect(warmup).toHaveBeenLastCalledWith(plan, undefined)
+    expect(prepare).toHaveBeenLastCalledWith(plan)
+  })
+  it('background cancellation does not cancel a foreground PCH transform', async () => {
+    let finish!: (value: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { finish = resolve })))
+    const session = precompiledCppRuntimeProvider.createSession()
+    const preparing = session.prepare({ files: { '/workspace/main.cpp': '#include <iostream>\nint main() {}' }, mode: 'run' })
+    await session.cancelWarmupAndWait!()
+    finish({ ok: false, status: 503 })
+    expect(await preparing).toMatchObject({ success: true })
+    vi.unstubAllGlobals()
+  })
+  it('fences a pending PCH transform when warmup is cancelled', async () => {
+    let finish!: (value: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { finish = resolve })))
+    warmup.mockClear()
+    const session = precompiledCppRuntimeProvider.createSession()
+    const warming = session.warmup!({ files: { '/workspace/main.cpp': '#include <iostream>\nint main() {}' }, mode: 'run' })
+    await session.cancelWarmupAndWait!()
+    finish({ ok: false, status: 503 })
+    expect(await warming).toMatchObject({ status: 'cancelled' })
+    expect(warmup).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
 })

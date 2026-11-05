@@ -1,0 +1,407 @@
+{
+  "environment": {
+    "browser": "151.0.7922.34",
+    "node": "v24.11.1",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1 Max"
+  },
+  "results": [
+    {
+      "faster": false,
+      "warm": false,
+      "warmupMs": 0,
+      "samples": [
+        {
+          "elapsedMs": 5740.02499999851,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          }
+        },
+        {
+          "elapsedMs": 2018.859999999404,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          }
+        },
+        {
+          "elapsedMs": 2096.2450000047684,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          }
+        }
+      ]
+    },
+    {
+      "faster": true,
+      "warm": false,
+      "warmupMs": 0,
+      "samples": [
+        {
+          "elapsedMs": 4564.984999999404,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          },
+          "statistics": {
+            "objectBytes": 0,
+            "metadataBytes": 0,
+            "entries": 0,
+            "stagingEntries": 0,
+            "stagingObjectBytes": 0,
+            "stagingMetadataBytes": 0,
+            "evictions": 0,
+            "oversized": 0,
+            "generation": 0,
+            "scopeEpoch": 0,
+            "operationId": 1,
+            "cacheEpoch": 0,
+            "toolchainProfile": "legacy",
+            "cacheEligible": false,
+            "toolchainIdentityBytes": 79775276,
+            "toolchainIngestions": 1,
+            "toolchainHashCount": 3,
+            "toolchainHashMs": 70.33000000566244,
+            "compilerModuleCloned": true,
+            "workerRetained": true,
+            "workerRetirements": 0,
+            "compilerModuleIdentityBytes": 75532134,
+            "latest": {
+              "operation": "run",
+              "workerReadyMs": 1164.3849999979138,
+              "workerReused": false,
+              "compilerModule": {
+                "type": "compiler_module_stats",
+                "hits": 2,
+                "misses": 0,
+                "bypasses": 0,
+                "hashMs": 0,
+                "compareMs": 0,
+                "compileMs": 0,
+                "instantiateMs": 22.655,
+                "identityBytes": 75532134,
+                "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+                "scopeEpoch": 0,
+                "operationId": 1,
+                "cacheEpoch": 0
+              }
+            }
+          }
+        },
+        {
+          "elapsedMs": 403.9049999937415,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          },
+          "statistics": {
+            "objectBytes": 0,
+            "metadataBytes": 0,
+            "entries": 0,
+            "stagingEntries": 0,
+            "stagingObjectBytes": 0,
+            "stagingMetadataBytes": 0,
+            "evictions": 0,
+            "oversized": 0,
+            "generation": 0,
+            "scopeEpoch": 0,
+            "operationId": 2,
+            "cacheEpoch": 0,
+            "toolchainProfile": "legacy",
+            "cacheEligible": false,
+            "toolchainIdentityBytes": 79775276,
+            "toolchainIngestions": 1,
+            "toolchainHashCount": 3,
+            "toolchainHashMs": 70.33000000566244,
+            "compilerModuleCloned": true,
+            "workerRetained": true,
+            "workerRetirements": 0,
+            "compilerModuleIdentityBytes": 75532134,
+            "latest": {
+              "operation": "run",
+              "workerReadyMs": 0.015000000596046448,
+              "workerReused": true,
+              "compilerModule": {
+                "type": "compiler_module_stats",
+                "hits": 2,
+                "misses": 0,
+                "bypasses": 0,
+                "hashMs": 0,
+                "compareMs": 0,
+                "compileMs": 0,
+                "instantiateMs": 10.895,
+                "identityBytes": 75532134,
+                "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+                "scopeEpoch": 0,
+                "operationId": 2,
+                "cacheEpoch": 0
+              }
+            }
+          }
+        },
+        {
+          "elapsedMs": 366.24000000208616,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          },
+          "statistics": {
+            "objectBytes": 0,
+            "metadataBytes": 0,
+            "entries": 0,
+            "stagingEntries": 0,
+            "stagingObjectBytes": 0,
+            "stagingMetadataBytes": 0,
+            "evictions": 0,
+            "oversized": 0,
+            "generation": 0,
+            "scopeEpoch": 0,
+            "operationId": 3,
+            "cacheEpoch": 0,
+            "toolchainProfile": "legacy",
+            "cacheEligible": false,
+            "toolchainIdentityBytes": 79775276,
+            "toolchainIngestions": 1,
+            "toolchainHashCount": 3,
+            "toolchainHashMs": 70.33000000566244,
+            "compilerModuleCloned": true,
+            "workerRetained": true,
+            "workerRetirements": 0,
+            "compilerModuleIdentityBytes": 75532134,
+            "latest": {
+              "operation": "run",
+              "workerReadyMs": 0.020000003278255463,
+              "workerReused": true,
+              "compilerModule": {
+                "type": "compiler_module_stats",
+                "hits": 2,
+                "misses": 0,
+                "bypasses": 0,
+                "hashMs": 0,
+                "compareMs": 0,
+                "compileMs": 0,
+                "instantiateMs": 9.3,
+                "identityBytes": 75532134,
+                "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+                "scopeEpoch": 0,
+                "operationId": 3,
+                "cacheEpoch": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "faster": true,
+      "warm": true,
+      "warmupMs": 3842.85000000149,
+      "warmup": {
+        "status": "completed",
+        "diagnostics": [],
+        "statistics": {
+          "objectBytes": 0,
+          "metadataBytes": 0,
+          "entries": 0,
+          "stagingEntries": 0,
+          "stagingObjectBytes": 0,
+          "stagingMetadataBytes": 0,
+          "evictions": 0,
+          "oversized": 0,
+          "generation": 0,
+          "scopeEpoch": 0,
+          "operationId": 1,
+          "cacheEpoch": 0,
+          "toolchainProfile": "legacy",
+          "cacheEligible": false,
+          "toolchainIdentityBytes": 79775276,
+          "toolchainIngestions": 1,
+          "toolchainHashCount": 3,
+          "toolchainHashMs": 79.92999999970198,
+          "compilerModuleCloned": true,
+          "workerRetained": true,
+          "workerRetirements": 0,
+          "compilerModuleIdentityBytes": 75532134,
+          "latest": {
+            "operation": "prepare_compiler",
+            "workerReadyMs": 1253.7999999970198,
+            "workerReused": false,
+            "compilerModule": {
+              "type": "compiler_module_stats",
+              "hits": 1,
+              "misses": 0,
+              "bypasses": 0,
+              "hashMs": 0,
+              "compareMs": 0,
+              "compileMs": 0,
+              "instantiateMs": 0,
+              "identityBytes": 75532134,
+              "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+              "scopeEpoch": 0,
+              "operationId": 1,
+              "cacheEpoch": 0
+            }
+          }
+        }
+      },
+      "samples": [
+        {
+          "elapsedMs": 869.7049999982119,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          },
+          "statistics": {
+            "objectBytes": 0,
+            "metadataBytes": 0,
+            "entries": 0,
+            "stagingEntries": 0,
+            "stagingObjectBytes": 0,
+            "stagingMetadataBytes": 0,
+            "evictions": 0,
+            "oversized": 0,
+            "generation": 0,
+            "scopeEpoch": 0,
+            "operationId": 2,
+            "cacheEpoch": 0,
+            "toolchainProfile": "legacy",
+            "cacheEligible": false,
+            "toolchainIdentityBytes": 79775276,
+            "toolchainIngestions": 1,
+            "toolchainHashCount": 3,
+            "toolchainHashMs": 79.92999999970198,
+            "compilerModuleCloned": true,
+            "workerRetained": true,
+            "workerRetirements": 0,
+            "compilerModuleIdentityBytes": 75532134,
+            "latest": {
+              "operation": "run",
+              "workerReadyMs": 0.020000003278255463,
+              "workerReused": true,
+              "compilerModule": {
+                "type": "compiler_module_stats",
+                "hits": 2,
+                "misses": 0,
+                "bypasses": 0,
+                "hashMs": 0,
+                "compareMs": 0,
+                "compileMs": 0,
+                "instantiateMs": 21.599998999999997,
+                "identityBytes": 75532134,
+                "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+                "scopeEpoch": 0,
+                "operationId": 2,
+                "cacheEpoch": 0
+              }
+            }
+          }
+        },
+        {
+          "elapsedMs": 351.2799999937415,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          },
+          "statistics": {
+            "objectBytes": 0,
+            "metadataBytes": 0,
+            "entries": 0,
+            "stagingEntries": 0,
+            "stagingObjectBytes": 0,
+            "stagingMetadataBytes": 0,
+            "evictions": 0,
+            "oversized": 0,
+            "generation": 0,
+            "scopeEpoch": 0,
+            "operationId": 3,
+            "cacheEpoch": 0,
+            "toolchainProfile": "legacy",
+            "cacheEligible": false,
+            "toolchainIdentityBytes": 79775276,
+            "toolchainIngestions": 1,
+            "toolchainHashCount": 3,
+            "toolchainHashMs": 79.92999999970198,
+            "compilerModuleCloned": true,
+            "workerRetained": true,
+            "workerRetirements": 0,
+            "compilerModuleIdentityBytes": 75532134,
+            "latest": {
+              "operation": "run",
+              "workerReadyMs": 0.020000003278255463,
+              "workerReused": true,
+              "compilerModule": {
+                "type": "compiler_module_stats",
+                "hits": 2,
+                "misses": 0,
+                "bypasses": 0,
+                "hashMs": 0,
+                "compareMs": 0,
+                "compileMs": 0,
+                "instantiateMs": 10.160001000000001,
+                "identityBytes": 75532134,
+                "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+                "scopeEpoch": 0,
+                "operationId": 3,
+                "cacheEpoch": 0
+              }
+            }
+          }
+        },
+        {
+          "elapsedMs": 341.38999999314547,
+          "outcome": {
+            "type": "completed",
+            "exitCode": 0
+          },
+          "statistics": {
+            "objectBytes": 0,
+            "metadataBytes": 0,
+            "entries": 0,
+            "stagingEntries": 0,
+            "stagingObjectBytes": 0,
+            "stagingMetadataBytes": 0,
+            "evictions": 0,
+            "oversized": 0,
+            "generation": 0,
+            "scopeEpoch": 0,
+            "operationId": 4,
+            "cacheEpoch": 0,
+            "toolchainProfile": "legacy",
+            "cacheEligible": false,
+            "toolchainIdentityBytes": 79775276,
+            "toolchainIngestions": 1,
+            "toolchainHashCount": 3,
+            "toolchainHashMs": 79.92999999970198,
+            "compilerModuleCloned": true,
+            "workerRetained": true,
+            "workerRetirements": 0,
+            "compilerModuleIdentityBytes": 75532134,
+            "latest": {
+              "operation": "run",
+              "workerReadyMs": 0.02499999850988388,
+              "workerReused": true,
+              "compilerModule": {
+                "type": "compiler_module_stats",
+                "hits": 2,
+                "misses": 0,
+                "bypasses": 0,
+                "hashMs": 0,
+                "compareMs": 0,
+                "compileMs": 0,
+                "instantiateMs": 9.280000000000001,
+                "identityBytes": 75532134,
+                "sha256": "24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5",
+                "scopeEpoch": 0,
+                "operationId": 4,
+                "cacheEpoch": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
