@@ -1,5 +1,6 @@
+import { FastWebIDE } from '@/nova/FastWebIDE'
 import { forwardRef } from 'react'
-import { WebIDE, type WebIDEInstanceHandle } from 'web-ide'
+import { type WebIDEInstanceHandle } from 'web-ide'
 import { useAssignmentInfo } from '@/components/sidebar/use-assignment-info'
 import {
   novaAssignmentWebIDEConfiguration,
@@ -13,5 +14,5 @@ export const NovaIDE = forwardRef<WebIDEInstanceHandle>(function NovaIDE(_props,
     ? novaAssignmentWebIDEConfiguration
     : novaWebIDEConfiguration
 
-  return <WebIDE ref={ref} configuration={configuration} />
+  return <FastWebIDE ref={ref} configuration={configuration} />
 })

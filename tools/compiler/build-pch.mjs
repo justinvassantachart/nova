@@ -10,7 +10,7 @@ const cache = join(root, 'node_modules/.cache/web-ide-toolchain')
 const sysroot = join(cache, 'sysroot')
 const output = join(root, 'public/compiler')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const engineVersion = '0.3.15-webide.0.5.0.2'
+const engineVersion = '0.3.15-webide.0.9.0.1'
 const compilerDigest = '24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5'
 const sysrootDigest = '8745c6af23fd841fa507d0c73f6b6b8e8da1b4ec216a6339739a28b38ff7227b'
 // Keep these in sync with this exact engine release's src/worker/mod.rs.

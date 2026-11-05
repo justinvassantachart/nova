@@ -1,18 +1,69 @@
 # C++ compilation and precompiled headers
 
-The site pins `debugger-sh` to the public fork release
-[`0.3.15-webide.0.5.0.2`](https://github.com/justinvassantachart/engine/releases/tag/debugger-sh-v0.3.15-webide.0.5.0.2).
-`package-lock.json` records the release archive's exact integrity. This is the
-same engine release selected by the CS106B course IDE, including its corrected
-stdin behavior. The independently released Web IDE 0.7 component accepts the
-runtime's optional binary C++ build inputs; its 0.7.1 patch adds the explicit
-Debug rejection fallback used here.
+The site consumes Web IDE 0.10.0, which pins `debugger-sh` to the public fork
+release [`0.3.15-webide.0.9.0.1`](https://github.com/justinvassantachart/engine/releases/tag/debugger-sh-v0.3.15-webide.0.9.0.1).
+`package-lock.json` records both release archives' exact integrity. Nova retains the legacy compiler profile and explicit PCH rejection
+fallback, while enabling scoped worker and compiled-module reuse. The
+course-specific object cache is not enabled here.
+
+The PCH profiles were regenerated for this engine. Its standard compiler flags,
+compiler SHA-256, and sysroot SHA-256 match the prior pin, so the generated PCH
+bytes and content-addressed filenames remain unchanged.
 
 The CS106B course uses a shared precompiled Stanford support library. This site
 instead ships two smaller, standard-library-only PCH profiles: `<iostream>` and
 `<iostream>` followed by `<vector>`. No Stanford support archive is needed.
 The assets are built with the exact compiler/sysroot SHA-256 identities and
 compiler flags recorded in [the manifest](../public/compiler/manifest.json).
+
+## Initial warming and repeat runs
+
+Every editable IDE mount (including the landing embed, standalone IDE, guided
+demo, lessons, and assignments) creates its own account/workspace-scoped C++
+provider. After the workspace has loaded, one low-priority callback prepares the
+compiler. It does not run student code, link a program, clear the terminal, or
+repeat on edits. An explicit Run/Debug/Tests request takes priority. Navigation
+and cancellation fence pending PCH downloads before they can submit engine work.
+Read-only views do not schedule preparation.
+
+The provider retains the compiler worker for up to 30 idle seconds and reuses
+its verified compiled WebAssembly module. Hidden tabs cancel background work
+and release idle compiler resources; unmount disposes the session. The public
+engine keeps every Run's program state fresh. Stop preserves only permitted
+compiler resources. Account/workspace changes create a fresh mount and engine.
+This retains roughly 148 MiB of compiler/toolchain identity buffers while active,
+in addition to browser-managed compiled code and worker memory.
+
+Nova's legacy standard-library PCH profile is not certified for translation-unit
+object caching. `objectCache` is explicitly disabled: every Run still compiles
+student sources and links a new executable. Warming shifts toolchain download,
+verification, and preparation ahead of the click; it does not eliminate cold
+network costs. After resource release, the next Run may need preparation again.
+
+To reproduce the comparison with the exact installed release:
+
+```sh
+npm run dev -- --host 127.0.0.1
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/compiler/warmup-benchmark.mjs
+```
+
+On 2026-11-05, Chromium 151.0.7922.34 on an Apple M1 Max measured the linked-list
+example in three isolated browser contexts. These are local development-harness
+measurements of prepare + Run + settlement, not universal production timings.
+All nine runs printed `10 + 20 + 30 = 60` and completed successfully.
+
+| Provider | Initial background preparation | First Run | Next two Runs |
+| --- | --- | --- | --- |
+| 0.10.0 default + existing PCH | none | 5.74 s | 2.02 s, 2.10 s |
+| Scoped compiler reuse + PCH | none | 4.56 s | 0.40 s, 0.37 s |
+| Scoped compiler reuse + PCH, warmed | 3.84 s | 0.87 s | 0.35 s, 0.34 s |
+
+The warmed result had successful compiler preparation; repeat runs reported
+`workerReused: true` and two immutable compiler-module hits with zero module
+compilation time. Object-cache entries remained zero. The retained provider's
+repeat runs were about five times faster than the default provider in this
+sample. First-visit background costs and browser/network variability remain.
+Raw results are in `docs/validation/compiler-warmup-0.10.0.json`.
 
 ## When the optimization applies
 
