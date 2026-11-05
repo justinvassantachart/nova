@@ -98,13 +98,16 @@ export const newAndDelete: Lesson = {
             id: 'stakeout',
             title: 'Inspect the allocation',
             body:
-                'Here\'s the problem with leaks: no output shows them, and no '
-                + '`EXPECT_EQUAL` can see them — tests check *answers*, and the answers '
-                + 'are all correct. Use the **memory graph** to inspect allocations.\n\n'
+                'The output checks the scores, but it does not tell us whether each '
+                + 'allocation was released. Use the **memory graph** to follow '
+                + '`current`, then review the `new` and `delete` calls to reason '
+                + 'about ownership. The graph shows readable referenced objects; '
+                + 'it cannot inventory unreachable allocations or prove liveness.\n\n'
                 + 'Set a **breakpoint** on the allocation line:\n'
                 + '```\ncurrent = makeScoreBox(round * 100);\n```\n'
                 + 'press **Debug**, and open the **Graph** tab. First pause, round 1: '
-                + 'stack frame on the left, and a **Heap** column — empty, for now.',
+                + '`current` is null in the stack frame, so there is no referenced '
+                + 'score box yet.',
             check: {
                 kind: 'all',
                 of: [
@@ -119,22 +122,23 @@ export const newAndDelete: Lesson = {
             title: 'Inspect repeated allocations',
             body:
                 'Press **Continue** (`F5`) three times — each lap allocates one box and '
-                + 'returns to your breakpoint. Watch the heap column:\n'
+                + 'returns to your breakpoint. Watch `current`\'s target:\n'
                 + '- after lap one: a box holding 100, `current`\'s arrow on it\n'
-                + '- after lap two: a box holding 200 with the arrow — and the **100 box '
-                + 'still there, with no arrow at all**\n'
-                + '- after lap three: three boxes, two of them unreachable\n\n'
+                + '- after lap two: a box holding 200\n'
+                + '- after lap three: a box holding 300\n\n'
+                + 'Earlier boxes disappear from this view when they are no longer '
+                + 'referenced. Their disappearance does **not** mean they were freed. '
                 + 'Every round re-aims `current` at a new box and loses access to the '
-                + 'previous one. Nothing points at those earlier allocations, so the '
-                + 'program can no longer delete them.',
+                + 'previous one without calling `delete`. That code is the evidence '
+                + 'of a leak: the program can no longer delete the earlier allocations.',
             check: {
                 kind: 'all',
                 of: [
                     { kind: 'event', event: 'debug_continue', count: 3, label: 'Continue three times (one lap per round)' },
-                    { kind: 'heap', minAllocations: 3, label: 'See 3+ boxes in the heap column' },
+                    { kind: 'heap', minAllocations: 1, label: 'Inspect the current referenced score box' },
                 ],
             },
-            successNote: 'The boxes with no inbound pointer remain allocated for the rest of the process.',
+            successNote: 'Reassigning current without delete loses access to the earlier allocations.',
         },
         {
             id: 'diagnose',
@@ -167,15 +171,16 @@ export const newAndDelete: Lesson = {
         },
         {
             id: 'verify',
-            title: 'Verify with the graph',
+            title: 'Review the cleanup and run again',
             body:
-                'Prove it: press **Debug** again (the breakpoint is still there) and '
-                + '**Continue** through a few rounds watching the heap column.\n\n'
-                + 'Now it\'s one box at a time — the old one is released before the '
-                + 'new one appears. Let it run to the end: the '
-                + 'output is *identical* to the leaky version. Only the graph knows the '
-                + 'difference, which is why output is not enough to verify memory management.',
-            check: { kind: 'stdout', includes: 'Final score: 500', label: 'Run to the end — same output, tidy memory' },
+                'Review the loop: `delete current` now runs before each new '
+                + 'allocation, and the final `delete` releases the last box.\n\n'
+                + 'Press **Debug** again and **Continue** through a few rounds. '
+                + 'The graph shows one referenced score box in both versions; '
+                + 'it cannot prove that an old allocation was released. Let it run '
+                + 'to the end: the output is *identical* to the leaky version. '
+                + 'Matching the `new` and `delete` calls explains the cleanup.',
+            check: { kind: 'stdout', includes: 'Final score: 500', label: 'Run to the end after reviewing the cleanup' },
             hint: 'Continue (F5) until the program exits, or remove the breakpoint and Run.',
         },
         {
@@ -186,7 +191,8 @@ export const newAndDelete: Lesson = {
                 + 'early** and using the box anyway:\n'
                 + '```\ndelete current;\nstd::cout << *current;   // dangling: the box is gone\n```\n'
                 + 'That might print garbage, might print the old value, might crash — '
-                + 'undefined behavior, so results can vary between runs.\n\n'
+                + 'undefined behavior, so results can vary between runs. A readable '
+                + 'debugger value is not proof that an object is still alive.\n\n'
                 + 'The ownership rule prevents both problems: every box '
                 + 'has exactly one owner, the owner deletes it exactly once, and nobody '
                 + 'touches it after. Modern C++ commonly automates ownership with '
@@ -203,8 +209,9 @@ export const newAndDelete: Lesson = {
                 + '- `new int(42)` returns an address; `delete p` frees the box; '
                 + '`delete nullptr` is safely nothing\n'
                 + '- **Every new: exactly one delete** — the ownership rule\n'
-                + '- Leaks are invisible to output *and* to tests; the **memory graph** '
-                + 'is your leak detector\n'
+                + '- The **memory graph** follows readable references; it does not '
+                + 'prove liveness or show unreachable allocations. Review `new` and '
+                + '`delete` to reason about leaks\n'
                 + '- Using a pointer after deletion is undefined behavior\n\n'
                 + 'The next lesson introduces structs, which will later be combined '
                 + 'with pointers and heap allocation to build a linked list.',

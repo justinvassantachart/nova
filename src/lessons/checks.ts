@@ -151,10 +151,14 @@ function evaluateLeaf(spec: CheckSpec, ctx: CheckContext): CheckPart {
         }
 
         case 'heap': {
-            const n = ctx.debug.memorySnapshot?.heapAllocations.length ?? 0
+            const snapshot = ctx.debug.memorySnapshot
+            const addresses = new Set([
+                ...(snapshot?.observedReferencedObjects ?? []).map((object) => object.address),
+                ...(snapshot?.heapAllocations ?? []).map((allocation) => allocation.ptr),
+            ])
             return {
-                label: spec.label ?? `See ${spec.minAllocations} allocations on the heap`,
-                passed: n >= spec.minAllocations,
+                label: spec.label ?? `Observe ${spec.minAllocations} referenced objects`,
+                passed: ctx.debug.debugMode === 'paused' && addresses.size >= spec.minAllocations,
             }
         }
 

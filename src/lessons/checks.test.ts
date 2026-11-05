@@ -180,10 +180,10 @@ describe('evaluateCheck leaves', () => {
         expect(evaluateCheck({ kind: 'right-tab', tab: 'graph' }, ctx({ rightTab: 'graph' })).passed).toBe(true)
     })
 
-    it('heap counts allocations from the paused snapshot', () => {
+    it('heap counts distinct observed objects and legacy entries only while paused', () => {
         const c = ctx()
         c.debug = {
-            ...c.debug,
+            ...c.debug, debugMode: 'paused',
             memorySnapshot: {
                 frames: [],
                 heapAllocations: [
@@ -194,6 +194,19 @@ describe('evaluateCheck leaves', () => {
         }
         expect(evaluateCheck({ kind: 'heap', minAllocations: 2 }, c).passed).toBe(true)
         expect(evaluateCheck({ kind: 'heap', minAllocations: 3 }, c).passed).toBe(false)
+        c.debug.memorySnapshot!.observedReferencedObjects = [
+            { address: 2, value: variable('*alias', 20) },
+            { address: 3, value: variable('*head', 30) },
+            { address: 3, value: variable('*current', 30) },
+        ]
+        expect(evaluateCheck({ kind: 'heap', minAllocations: 3 }, c).passed).toBe(true)
+        expect(evaluateCheck({ kind: 'heap', minAllocations: 4 }, c).passed).toBe(false)
+        c.debug.memorySnapshot!.heapAllocations = []
+        expect(evaluateCheck({ kind: 'heap', minAllocations: 2 }, c).passed).toBe(true)
+        c.debug = { ...c.debug, debugMode: 'running' }
+        expect(evaluateCheck({ kind: 'heap', minAllocations: 1 }, c).passed).toBe(false)
+        c.debug = { ...c.debug, debugMode: 'idle' }
+        expect(evaluateCheck({ kind: 'heap', minAllocations: 1 }, c).passed).toBe(false)
     })
 })
 

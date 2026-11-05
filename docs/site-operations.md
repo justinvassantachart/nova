@@ -41,9 +41,11 @@ After deployment, open `/`, `/ide?example=linked-list`, `/learn`, and a direct
 the linked-list workspace on the landing page can also run.
 
 Check `/build-info.json` to identify the deployed Git commit and debugger engine.
-The site consumes the immutable public Web IDE 0.10.0 package with debugger-sh
+The site consumes the immutable public Web IDE 0.10.1 package with debugger-sh
 0.3.15-webide.0.9.0.1. Verify the landing embed, linked-list Run/Debug, guided
 demo tests and initial breakpoint, lessons, and PCH fallback when upgrading.
+The graph shows observed referenced objects; it does not establish allocation
+ownership, size, or liveness. Check both Pretty and Raw after linking the nodes.
 License notices are published under `/licenses/`.
 
 ## Other static hosts

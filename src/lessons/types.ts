@@ -36,7 +36,9 @@ export type CheckSpec =
     | { kind: 'variable'; name: string; equals?: string; contains?: string; func?: string; label?: string }
     // The call stack holds at least `minCount` frames of `func`.
     | { kind: 'call-stack'; func: string; minCount: number; label?: string }
-    // The heap holds at least `minAllocations` live allocations (paused).
+    // At least `minAllocations` distinct referenced objects or legacy heap
+    // entries are captured while paused. Historical field names remain for
+    // serialized lesson compatibility; this does not establish liveness.
     | { kind: 'heap'; minAllocations: number; label?: string }
     // The current run's terminal output contains `includes`, or matches
     // `matches` (a regex source string; `flags` defaults to 'm').
