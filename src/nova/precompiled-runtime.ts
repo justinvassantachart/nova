@@ -2,6 +2,7 @@ import { gunzipSync } from 'fflate'
 import type { IDEPlugin, RuntimeExecutionPlan, RuntimeProvider } from 'web-ide'
 import { cppRuntimeProvider, createCppRuntimeProvider } from 'web-ide/runtimes'
 import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
+import { settleStartupStop } from './runtime-settlement'
 import { pchProfiles } from './generated/pch-profiles'
 
 type PchProfile = typeof pchProfiles[number]
@@ -78,7 +79,7 @@ export function withPrecompiledHeaders(provider: RuntimeProvider): RuntimeProvid
   return {
     ...provider,
     createSession() {
-      const session = provider.createSession()
+      const session = settleStartupStop(provider.createSession())
       let generation = 0
       let warmupGeneration = 0
       const fence = <A extends unknown[], R>(operation: (...args: A) => R) => (...args: A): R => {

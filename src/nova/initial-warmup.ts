@@ -9,6 +9,7 @@ export function scheduleInitialWarmup(instance: WebIDEInstanceHandle): () => voi
     timer = undefined
   }
   const inspect = () => {
+    if (attempted) return
     const snapshot = instance.snapshot()
     if (snapshot.debug.debugMode !== 'idle') {
       attempted = true

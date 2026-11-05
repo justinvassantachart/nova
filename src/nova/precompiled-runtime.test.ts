@@ -7,7 +7,7 @@ const { prepare, warmup, cancelWarmupAndWait } = vi.hoisted(() => ({
   cancelWarmupAndWait: vi.fn(async () => {}),
 }))
 vi.mock('web-ide/runtimes', () => ({
-  cppRuntimeProvider: { createSession: () => ({ prepare, warmup, cancelWarmupAndWait }), id: 'cpp' },
+  cppRuntimeProvider: { createSession: () => ({ prepare, warmup, cancelWarmupAndWait, start: vi.fn(), events: { exit: { subscribe: vi.fn() } } }), id: 'cpp' },
 }))
 import { leadingStandardIncludes, selectPchProfile, precompiledCppRuntimeProvider } from './precompiled-runtime'
 

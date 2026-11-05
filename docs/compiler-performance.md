@@ -24,6 +24,9 @@ provider. After the workspace has loaded, one low-priority callback prepares the
 compiler. It does not run student code, link a program, clear the terminal, or
 repeat on edits. An explicit Run/Debug/Tests request takes priority. Navigation
 and cancellation fence pending PCH downloads before they can submit engine work.
+A host runtime adapter supplies a missing exit notification when Web IDE 0.10.0
+settles Stop during engine initialization, so the toolbar can run again. Actual
+engine exits are forwarded unchanged and are never duplicated.
 Read-only views do not schedule preparation.
 
 The provider retains the compiler worker for up to 30 idle seconds and reuses
