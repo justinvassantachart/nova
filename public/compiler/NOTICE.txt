@@ -1,6 +1,6 @@
 web-ide standard-library precompiled headers
 
-These assets are generated from the unchanged headers in the debugger-sh
+The legacy assets in this directory are generated from the unchanged headers in the debugger-sh
 C++ sysroot, SHA-256:
 8745c6af23fd841fa507d0c73f6b6b8e8da1b4ec216a6339739a28b38ff7227b
 https://fabioibanez.github.io/website/llvm-resources.tar.gz
@@ -24,3 +24,13 @@ revision 2fc32bc (the sysroot provenance recorded by the original project).
 The engine fork includes its own exception runtime. Its unmodified notices,
 licenses and build provenance are served under
 /third-party/debugger-sh/share/licenses/cpp-exceptions/.
+
+The separately generated upstream/ assets use unchanged libc++ headers from
+the sysroot with SHA-256:
+c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b
+Their LLVM source revision is 392dfff97d29b59d77e5cac6d4b6ef2585fe7117
+from https://github.com/llvm/llvm-project (Apache-2.0 WITH LLVM-exception).
+The debugger-sh LLVM release and checksum-addressed compiler/sysroot URLs,
+complete build flags, and required runtime tuple are recorded in
+upstream/manifest.json. The upstream exception libraries are included in the
+verified sysroot, not supplied by the legacy exception overlay.

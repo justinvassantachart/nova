@@ -1,0 +1,101 @@
+{
+  "engineVersion": "0.3.16-upstream.e7a53c8d02e7",
+  "compilerDigest": "8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6",
+  "sysrootDigest": "c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b",
+  "flags": [
+    "-cc1",
+    "-triple",
+    "wasm32-wasip1",
+    "-Werror",
+    "-disable-free",
+    "-isysroot",
+    "/",
+    "-internal-isystem",
+    "/include/c++/v1",
+    "-internal-isystem",
+    "/include",
+    "-internal-isystem",
+    "/include/wasm32-wasip1",
+    "-I/",
+    "-std=c++23",
+    "-O0",
+    "-fexceptions",
+    "-fcxx-exceptions",
+    "-exception-model=wasm",
+    "-target-feature",
+    "+exception-handling",
+    "-mllvm",
+    "-wasm-enable-eh",
+    "-mllvm",
+    "-wasm-use-legacy-eh=true"
+  ],
+  "profiles": [
+    {
+      "headers": [
+        "iostream"
+      ],
+      "prelude": "#include <iostream>\n",
+      "filename": "iostream-8c0063131aa752f8.pch.bin",
+      "sha256": "8c0063131aa752f8886b25f6649ae2a165309d02fc37fc3386ee5e5766d17883",
+      "bytes": 11481868,
+      "compressedBytes": 6585805,
+      "compressedSha256": "472484c7e027d30f9fee7ff9117d69e36e1508fe8117cc15b505157de7615596"
+    },
+    {
+      "headers": [
+        "iostream",
+        "vector"
+      ],
+      "prelude": "#include <iostream>\n#include <vector>\n",
+      "filename": "iostream-vector-275dc3b85de9f4a8.pch.bin",
+      "sha256": "275dc3b85de9f4a860fb4742fce16fe1855d979bd998fd143b9b6c14f420ddb9",
+      "bytes": 12437716,
+      "compressedBytes": 7185068,
+      "compressedSha256": "06dadb437cd7570d288a9eaea29e26172d48fb4b01d8c4b64e186f4e2ef7ed77"
+    }
+  ],
+  "schemaVersion": 1,
+  "backend": "upstream",
+  "engineSource": "e7a53c8d02e7e611a8312e6e734d5c86094c88e6",
+  "toolchain": {
+    "upstream": {
+      "repository": "https://github.com/llvm/llvm-project",
+      "revision": "392dfff97d29b59d77e5cac6d4b6ef2585fe7117"
+    },
+    "fork": {
+      "repository": "https://github.com/debugger-sh/llvm",
+      "release": "https://github.com/debugger-sh/llvm/releases/tag/0.3.15"
+    },
+    "artifacts": {
+      "llvm": "https://justinvassantachart.github.io/engine/toolchains/sha256/8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6/llvm.wasm",
+      "sysroot": "https://justinvassantachart.github.io/engine/toolchains/sha256/c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b/sysroot.tar.zst"
+    },
+    "sha256": {
+      "llvm": "8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6",
+      "sysroot": "c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b"
+    },
+    "originArtifacts": {
+      "llvm": "https://debugger-sh.github.io/llvm/0.3.15/llvm.wasm",
+      "sysroot": "https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.zst"
+    }
+  },
+  "pchFlags": [
+    "-emit-pch",
+    "-fno-pch-timestamp",
+    "-fvalidate-ast-input-files-content",
+    "-x",
+    "c++-header"
+  ],
+  "requiredToolchain": {
+    "compilerSha256": "8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6",
+    "sysrootSha256": "c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b",
+    "exceptionsSha256": "c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b"
+  },
+  "recipeSha256": "60ef186eec6bc4b64ed5d3b18d2aaf6bdd74d32239977e8c94bfefed03336707",
+  "environment": {
+    "env": {},
+    "argv0": "clang",
+    "cwd": "/",
+    "target": "wasm32-wasip1"
+  }
+}

@@ -1,42 +1,52 @@
 # C++ compilation and precompiled headers
 
-The site consumes Web IDE 0.10.1, which pins `debugger-sh` to the public fork
-release [`0.3.15-webide.0.9.0.1`](https://github.com/justinvassantachart/engine/releases/tag/debugger-sh-v0.3.15-webide.0.9.0.1).
-`package-lock.json` records both release archives' exact integrity. Nova retains the legacy compiler profile and explicit PCH rejection
-fallback, while enabling scoped worker and compiled-module reuse. The
-course-specific object cache is not enabled here. The 0.10.1 graph and build
-progress updates retain the compiler-warming configuration measured below.
+The site consumes Web IDE 0.12.0-upstream.0 with the immutable Engine
+`0.3.16-upstream.e7a53c8d02e7` release. `package-lock.json` records both archives'
+exact integrity. `VITE_ENGINE_BACKEND` defaults to `upstream`; a build with
+`VITE_ENGINE_BACKEND=legacy` selects the retained legacy Engine and legacy PCH
+profiles together. Unknown values fail configuration rather than selecting an
+unintended compiler.
 
-The PCH profiles were regenerated for this engine. Its standard compiler flags,
-compiler SHA-256, and sysroot SHA-256 match the prior pin, so the generated PCH
-bytes and content-addressed filenames remain unchanged.
-
-The CS106B course uses a shared precompiled Stanford support library. This site
-instead ships two smaller, standard-library-only PCH profiles: `<iostream>` and
-`<iostream>` followed by `<vector>`. No Stanford support archive is needed.
-The assets are built with the exact compiler/sysroot SHA-256 identities and
-compiler flags recorded in [the manifest](../public/compiler/manifest.json).
+Nova ships two standard-library-only PCH profiles: `<iostream>` and `<iostream>`
+followed by `<vector>`. No Stanford support archive is needed. The upstream
+profiles were rebuilt with the compiler/sysroot identities and complete flags
+in [the upstream manifest](../public/compiler/upstream/manifest.json). Their
+compiler SHA-256 is `8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6`
+and sysroot SHA-256 is `c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b`.
+The runtime passes this required tuple to the public Web IDE provider before any
+PCH is compiled. The exception libraries are part of that same verified sysroot.
+The unchanged [legacy manifest](../public/compiler/manifest.json) and assets
+remain available for rollback. The two sets have separate paths and hashes.
 
 ## Initial warming and repeat runs
 
 Every editable IDE mount (including the landing embed, standalone IDE, guided
 demo, lessons, and assignments) creates its own account/workspace-scoped C++
 provider. After the workspace has loaded, one low-priority callback prepares the
-compiler. It does not run student code, link a program, clear the terminal, or
-repeat on edits. An explicit Run/Debug/Tests request takes priority. Navigation
+compiler. It does not execute student constructors or main, clear the terminal, or
+repeat on edits. Upstream preparation can compile and link through a private
+debugger initialization barrier before guest execution. An explicit Run/Debug/Tests request takes priority. Navigation
 and cancellation fence pending PCH downloads before they can submit engine work.
-A host runtime adapter supplies a missing exit notification when Web IDE 0.10.0
+A host runtime adapter supplies a missing exit notification if the runtime
 settles Stop during engine initialization, so the toolbar can run again. Actual
 engine exits are forwarded unchanged and are never duplicated.
 Read-only views do not schedule preparation.
 
-The provider retains the compiler worker for up to 30 idle seconds and reuses
-its verified compiled WebAssembly module. Hidden tabs cancel background work
+The legacy rollback provider retains the compiler worker for up to 30 idle
+seconds and reuses its verified compiled WebAssembly module. The upstream
+provider uses the pinned adapter’s per-session compiler and object reuse. Hidden tabs cancel background work
 and release idle compiler resources; unmount disposes the session. The public
 engine keeps every Run's program state fresh. Stop preserves only permitted
 compiler resources. Account/workspace changes create a fresh mount and engine.
-This retains roughly 148 MiB of compiler/toolchain identity buffers while active,
-in addition to browser-managed compiled code and worker memory.
+The historical legacy measurement retained roughly 148 MiB of compiler/toolchain
+identity buffers while active, in addition to browser-managed compiled code and
+worker memory; this is not a measurement of the upstream backend.
+
+The upstream adapter keys its compilation cache by the immutable toolchain and
+actual PCH bytes, and the Engine invalidates objects when source/header contents
+or flags change. An unchanged Run can reuse compiled objects while linking and
+executing a fresh program. Cache lifetime is confined to the account/workspace
+provider; a new provider starts with a fresh Engine.
 
 Nova's legacy standard-library PCH profile is not certified for translation-unit
 object caching. `objectCache` is explicitly disabled: every Run still compiles
@@ -51,7 +61,7 @@ npm run dev -- --host 127.0.0.1
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/compiler/warmup-benchmark.mjs
 ```
 
-On 2026-11-05, Chromium 151.0.7922.34 on an Apple M1 Max measured the linked-list
+Historical legacy results (before this migration): on 2026-11-05, Chromium 151.0.7922.34 on an Apple M1 Max measured the linked-list
 example in three isolated browser contexts. These are local development-harness
 measurements of prepare + Run + settlement, not universal production timings.
 All nine runs printed `10 + 20 + 30 = 60` and completed successfully.
@@ -87,14 +97,15 @@ prefixes intentionally compile normally. A legacy test-header bridge is added
 only when needed, so plain programs do not compile the testing framework.
 
 The PCH downloads only when a matching program is prepared to run or debug.
-The compressed assets are about 7.3 MB and 7.8 MB, respectively; they use
+The upstream compressed assets are about 6.6 MB and 7.2 MB, respectively
+(the rollback assets are 7.3 MB and 7.8 MB); they use
 content-addressed URLs, HTTP caching and a shared in-session promise cache.
 The `.pch.bin` suffix contains gzip data and avoids static servers that
 transparently decode `.gz` responses. After decompression, size and SHA-256 are
 checked before any bytes reach the compiler. Missing, corrupt or timed-out
 (download deadline: eight seconds) assets fall back to ordinary compilation.
-Restricted browser crypto support also falls back. PCHs are not fetched on the
-landing page. They do not remove the engine/compiler/sysroot first-use download.
+Restricted browser crypto support also falls back. The editable landing embed can fetch PCHs during preparation; a landing
+layout without an IDE embed does not. They do not remove the engine/compiler/sysroot first-use download.
 
 The runtime copies binary inputs during preparation, rejects file collisions,
 and clears artifacts before a later ordinary run. Clang additionally validates
@@ -106,33 +117,56 @@ these artifacts; this site does not claim arbitrary engine compatibility.
 After `npm ci`:
 
 ```sh
-node tools/compiler/build-pch.mjs
-npm run dev -- --host 127.0.0.1
-PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/compiler/benchmark.mjs
+node tools/compiler/build-pch.mjs --backend=upstream
+# Only when intentionally regenerating the rollback profile:
+# node tools/compiler/build-pch.mjs --backend=legacy
+npm run dev -- --host 127.0.0.1 --port 4187
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/compiler/pch-compatibility.mjs
 ```
 
 The build downloads and verifies the pinned compiler and sysroot into
-`node_modules/.cache/web-ide-toolchain`, runs the compiler through Node WASI, and
+`node_modules/.cache/web-ide-toolchain-upstream` (or the separate legacy cache), runs the compiler through Node WASI, and
 writes the compressed PCHs plus generated selection metadata. Node may print
 its standard experimental-WASI warning. Runtime license notices are retained in
 [`public/compiler/`](../public/compiler/NOTICE.txt) and the engine's unmodified
 exception-runtime notices in [`public/third-party/debugger-sh/`](../public/third-party/debugger-sh/).
 
-The benchmark creates its own headless Chromium instance. It alternates normal
-and PCH builds of the same `iostream` and `iostream`/`vector` programs, and records
-stdout, stderr, exit status, engine build time and total elapsed time. Set
-`BENCHMARK_URL` to override the default localhost port 5173 and
-`BENCHMARK_OUTPUT` to choose the JSON report path. First-use network and Wasm
-initialization costs must be distinguished from subsequent build costs.
+The compatibility runner creates fresh Chromium and WebKit contexts for both
+backends. It uses Nova's actual provider to warm each PCH profile, Run, repeat
+unchanged, edit one source, then Debug through a breakpoint, Step Over and
+Continue. It records stdout, stderr, settlement, source locations and actual
+upstream clang worker commands. The upstream edit must compile exactly one
+source using `-include-pch`; completed warmup and unchanged runs must compile
+zero sources. This distinguishes working PCH/object reuse from silent source
+fallback. Set `BENCHMARK_URL` to the dev-server URL ending in
+`/tools/compiler/pch-compatibility.html` (default port 4187), and
+`BENCHMARK_OUTPUT` to choose the JSON report path.
+
+The older `benchmark.mjs` and `debug-smoke.mjs` are explicitly legacy Engine
+harnesses for the historical measurements below; they do not select the current
+upstream provider. First-use network and Wasm initialization costs must always
+be distinguished from subsequent build costs.
 
 ## Validation
+
+On 2026-11-16, both profiles passed the actual Nova provider compatibility check
+in Chromium 151.0.7922.34 and WebKit 26.5, with both upstream and legacy backends:
+eight successful warmups, 32 successful foreground operations, and breakpoint,
+Step Over and Continue at the expected source lines. Every operation completed
+with exit zero and empty stderr. The upstream worker trace showed zero clang
+jobs for the first post-warmup Run and the unchanged Run, exactly one PCH-backed
+clang job for the one-source edit, and one PCH-backed job for Debug after
+restoring the original source. Both PCH files also rebuilt byte-for-byte with
+fresh sysroot extraction, and the retained legacy files were unchanged. These
+checks establish compatibility and cache behavior, not a timing guarantee.
+
 
 Focused tests cover shared-prefix selection, missing includes, macros,
 conditionals, multiple source files, binary path collisions, missing artifacts,
 immutable byte snapshots, clearing artifacts, corrupt/download-failure fallback,
 and the existing C++/Python session lifecycle. Browser results are recorded below.
 
-On 2026-09-24, Chromium headless 151.0.7922.34 on an Intel i7-8850H Mac
+Historical legacy results: on 2026-09-24, Chromium headless 151.0.7922.34 on an Intel i7-8850H Mac
 completed twelve real browser runs, with identical expected stdout, empty stderr
 and exit code zero for both compilation paths. These are local measurements,
 not a browser/device performance guarantee; concurrent development work caused
@@ -152,8 +186,10 @@ respectively. The initial ordinary `iostream` run took 34.06 s after
 `Engine.create`; engine module download/initialization itself is outside these
 samples. Cold network cost still matters.
 
-If the upstream compiler/sysroot changes behind its URL, Clang may reject an
-otherwise intact cached PCH. Demo inputs explicitly opt into one Debug source retry
+For the legacy rollback profile, a compiler/sysroot change behind its old URL
+can make Clang reject an otherwise intact cached PCH. The new upstream profile
+uses checksum-addressed immutable compiler/sysroot URLs and explicit tuple
+validation; mismatch is an error that requires a reviewed rebuild. Demo inputs explicitly opt into one Debug source retry
 for a compiler PCH/AST rejection before the authoritative DAP `initialized`
 event. Debug retains a single session and exit; Stop/dispose still cancels
 recovery. Ordinary Run has no explicit compilation-phase event, so compiler

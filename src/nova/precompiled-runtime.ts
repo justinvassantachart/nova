@@ -1,11 +1,13 @@
 import { gunzipSync } from 'fflate'
 import type { IDEPlugin, RuntimeExecutionPlan, RuntimeProvider } from 'web-ide'
-import { cppRuntimeProvider, createCppRuntimeProvider } from 'web-ide/runtimes'
+import { createCppRuntimeProvider } from 'web-ide/runtimes'
 import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
 import { settleStartupStop } from './runtime-settlement'
 import { pchProfiles } from './generated/pch-profiles'
+import { upstreamPchProfiles, upstreamRequiredToolchain } from './generated/upstream-pch-profiles'
+import { engineBackend, type EngineBackend } from './engine-backend'
 
-type PchProfile = typeof pchProfiles[number]
+type PchProfile = typeof pchProfiles[number] | typeof upstreamPchProfiles[number]
 type Artifacts = Pick<RuntimeExecutionPlan, 'binaryFiles' | 'cppArtifacts'>
 const pending = new Map<string, Promise<Artifacts | undefined>>()
 
@@ -27,7 +29,7 @@ export function leadingStandardIncludes(source: string): string[] {
   return result
 }
 
-export function selectPchProfile(files: RuntimeExecutionPlan['files']): PchProfile | undefined {
+export function selectPchProfile(files: RuntimeExecutionPlan['files'], backend: EngineBackend = engineBackend): PchProfile | undefined {
   const sources = Object.entries(files).filter(([path]) => /\.(?:c|cc|cp|cpp|cxx|c\+\+)$/i.test(path))
   if (!sources.length) return undefined
   // Engine flattens /workspace and /sysroot into /. Never shadow user files.
@@ -39,15 +41,16 @@ export function selectPchProfile(files: RuntimeExecutionPlan['files']): PchProfi
     path !== CPP_TEST_IMPL_PATH || source !== CPP_TEST_SUPPORT_FILES[CPP_TEST_IMPL_PATH])
   if (!userSources.length) return undefined
   const prefixes = userSources.map(([, source]) => leadingStandardIncludes(source))
-  return [...pchProfiles].reverse().find(profile => prefixes.every(headers =>
+  return [...(backend === 'upstream' ? upstreamPchProfiles : pchProfiles)].reverse().find(profile => prefixes.every(headers =>
     profile.headers.every((header, index) => headers[index] === header)))
 }
 
-async function loadProfile(profile: PchProfile): Promise<Artifacts | undefined> {
-  let loading = pending.get(profile.sha256)
+async function loadProfile(profile: PchProfile, backend: EngineBackend): Promise<Artifacts | undefined> {
+  const key = `${backend}:${profile.sha256}`
+  let loading = pending.get(key)
   if (!loading) {
     loading = (async () => {
-      const response = await fetch(`${import.meta.env.BASE_URL}compiler/${profile.filename}`, {
+      const response = await fetch(`${import.meta.env.BASE_URL}compiler/${backend === 'upstream' ? 'upstream/' : ''}${profile.filename}`, {
         cache: 'force-cache', signal: AbortSignal.timeout(8_000),
       })
       if (!response.ok) throw new Error(`PCH HTTP ${response.status}`)
@@ -61,21 +64,22 @@ async function loadProfile(profile: PchProfile): Promise<Artifacts | undefined> 
           '/sysroot/__web_ide_pch.pch': bytes,
           '/sysroot/__web_ide_pch.h': new TextEncoder().encode(profile.prelude),
         },
-        cppArtifacts: { precompiledHeader: '/sysroot/__web_ide_pch.pch', fallbackToSource: true },
+        cppArtifacts: { precompiledHeader: '/sysroot/__web_ide_pch.pch', fallbackToSource: true,
+          ...(backend === 'upstream' ? { requiredToolchain: upstreamRequiredToolchain } : {}) },
       }
     })().catch(() => {
       // Optimization only: missing/corrupt assets, offline access, restricted
       // storage/crypto or a timeout all retain the ordinary source compiler.
-      pending.delete(profile.sha256)
+      pending.delete(key)
       return undefined
     })
-    pending.set(profile.sha256, loading)
+    pending.set(key, loading)
   }
   return loading
 }
 
 /** Both foreground and background preparation use the same owned PCH plan. */
-export function withPrecompiledHeaders(provider: RuntimeProvider): RuntimeProvider {
+export function withPrecompiledHeaders(provider: RuntimeProvider, backend: EngineBackend = engineBackend): RuntimeProvider {
   return {
     ...provider,
     createSession() {
@@ -102,8 +106,8 @@ export function withPrecompiledHeaders(provider: RuntimeProvider): RuntimeProvid
       async function transform(plan: RuntimeExecutionPlan): Promise<RuntimeExecutionPlan> {
         if (plan.cppArtifacts || plan.binaryFiles) return plan
         const snapshot = { ...plan, files: { ...plan.files } }
-        const profile = selectPchProfile(snapshot.files)
-        const artifacts = profile ? await loadProfile(profile) : undefined
+        const profile = selectPchProfile(snapshot.files, backend)
+        const artifacts = profile ? await loadProfile(profile, backend) : undefined
         return { ...snapshot, ...artifacts }
       }
       session.prepare = async plan => {
@@ -124,11 +128,14 @@ export function withPrecompiledHeaders(provider: RuntimeProvider): RuntimeProvid
   }
 }
 
-export function createFastCppRuntimePlugin(scope: { projectId: string; accountId: string }): IDEPlugin {
+export function createFastCppRuntimePlugin(scope: { projectId: string; accountId: string }, backend: EngineBackend = engineBackend): IDEPlugin {
   return {
     id: 'web-ide.runtime.cpp.plugin',
     contributes: { runtimeProviders: [withPrecompiledHeaders(createCppRuntimeProvider({
-      cpp: {
+      backend,
+      // Each account/workspace owns this provider and a separate Engine/cache.
+      // Upstream manages object reuse using verified toolchain and PCH identities.
+      ...(backend === 'legacy' ? { cpp: {
         scope,
         // Nova's standard-library PCH uses the legacy toolchain. Object caching
         // requires a separately certified profile; do not claim TU cache hits.
@@ -137,13 +144,13 @@ export function createFastCppRuntimePlugin(scope: { projectId: string; accountId
         cacheCompilerModule: true,
         retainWorker: true,
         idleTimeoutMs: 30_000,
-      },
+      } } : {}),
       preserveCompilerOnCancel: true,
-    }))] },
+    }), backend)] },
   }
 }
 
-export const precompiledCppRuntimeProvider = withPrecompiledHeaders(cppRuntimeProvider)
+export const precompiledCppRuntimeProvider = withPrecompiledHeaders(createCppRuntimeProvider({ backend: engineBackend }))
 export const precompiledCppRuntimePlugin: IDEPlugin = {
   id: 'web-ide.runtime.cpp.plugin',
   contributes: { runtimeProviders: [precompiledCppRuntimeProvider] },

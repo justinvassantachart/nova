@@ -41,12 +41,24 @@ After deployment, open `/`, `/ide?example=linked-list`, `/learn`, and a direct
 the linked-list workspace on the landing page can also run.
 
 Check `/build-info.json` to identify the deployed Git commit and debugger engine.
-The site consumes the immutable public Web IDE 0.10.1 package with debugger-sh
-0.3.15-webide.0.9.0.1. Verify the landing embed, linked-list Run/Debug, guided
+The site consumes immutable Web IDE `0.12.0-upstream.0` with upstream Engine
+`0.3.16-upstream.e7a53c8d02e7` by default. `/build-info.json` identifies the
+selected backend and records both package integrities and the matching compiler,
+sysroot, and PCH digests. Verify the landing embed, linked-list Run/Debug, guided
 demo tests and initial breakpoint, lessons, and PCH fallback when upgrading.
 The graph shows observed referenced objects; it does not establish allocation
-ownership, size, or liveness. Check both Pretty and Raw after linking the nodes.
+ownership, size, or liveness. Check the observed objects and pointer connections
+after linking the nodes. Matching formatters now apply automatically; the shared
+Web IDE debugger cleanup removed the redundant Pretty/Raw toggle.
 License notices are published under `/licenses/`.
+
+To roll the runtime back, build the same source with `VITE_ENGINE_BACKEND=legacy`
+and redeploy `dist/`. This selects the retained legacy Engine and its original
+PCH profiles. Rebuild with `VITE_ENGINE_BACKEND=upstream` (the default) to restore
+the candidate. Verify the backend in `/build-info.json` and reload the browser
+after either deployment. No Firebase, lesson progress, submission, or workspace
+data migration is required. The prior whole-site production source is
+`5d37467fde13da2ba0a2cca1eb7161f90744f120` if an entire-site rollback is needed.
 
 ## Other static hosts
 
