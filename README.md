@@ -5,13 +5,12 @@ step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
 This repository contains the deployed site. It imports the independently
-released Web IDE 0.10.1 component from an immutable public GitHub package, with
-an exact integrity recorded in `package-lock.json`. This release updates the
-build progress display and restores separate observed pointer targets in the
-memory graph while retaining Pretty/Raw formatters, Testing V2, workspace
-isolation, and the public host/runtime contracts. The site
-prepares the compiler once after opening an editable workspace and reuses its
-worker and compiled module for faster subsequent runs.
+released Web IDE 0.12.0-upstream.0 component from an immutable public GitHub
+package, with exact integrities recorded in `package-lock.json`. It selects the
+verified upstream Engine build `0.3.16-upstream.e7a53c8d02e7`, preserving the
+editor, Pretty/Raw formatters, memory graph, Testing V2, and workspace isolation.
+The site prepares the compiler once after opening an editable workspace and
+uses standard-library precompiled headers built for the selected toolchain.
 See [compiler performance](docs/compiler-performance.md) for measurements,
 asset provenance, and regeneration instructions.
 
@@ -203,7 +202,10 @@ need isolation for SharedArrayBuffer. Set the same `VITE_FIREBASE_*` variables i
 hosting environment when deploying the teaching features.
 
 The build publishes `/build-info.json` with the site commit, exact workbench
-package version and integrity, and pinned debugger engine. License notices are
+package version and integrity, selected Engine backend, pinned debugger engine,
+and compiler/PCH digests. Set `VITE_ENGINE_BACKEND=legacy` at build time to
+restore the legacy runtime and matching PCH without changing saved projects.
+License notices are
 published under `/licenses/`. The package is MIT licensed and distributed through
 public GitHub releases; no private release authentication is needed.
 

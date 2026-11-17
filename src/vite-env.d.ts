@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+    /** Build-time runtime selection; defaults to the verified upstream build. */
+    readonly VITE_ENGINE_BACKEND?: 'upstream' | 'legacy'
     readonly VITE_FIREBASE_API_KEY?: string
     readonly VITE_FIREBASE_AUTH_DOMAIN?: string
     readonly VITE_FIREBASE_PROJECT_ID?: string

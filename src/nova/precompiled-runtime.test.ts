@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createCppRuntimeProvider } from 'web-ide/runtimes'
 import { CPP_TEST_IMPL_PATH, CPP_TEST_SUPPORT_FILES } from 'web-ide/testing'
 
 const { prepare, warmup, cancelWarmupAndWait } = vi.hoisted(() => ({
@@ -7,11 +8,27 @@ const { prepare, warmup, cancelWarmupAndWait } = vi.hoisted(() => ({
   cancelWarmupAndWait: vi.fn(async () => {}),
 }))
 vi.mock('web-ide/runtimes', () => ({
-  cppRuntimeProvider: { createSession: () => ({ prepare, warmup, cancelWarmupAndWait, start: vi.fn(), events: { exit: { subscribe: vi.fn() } } }), id: 'cpp' },
+  createCppRuntimeProvider: vi.fn(() => ({ createSession: () => ({ prepare, warmup, cancelWarmupAndWait, start: vi.fn(), events: { exit: { subscribe: vi.fn() } } }), id: 'cpp' })),
 }))
-import { leadingStandardIncludes, selectPchProfile, precompiledCppRuntimeProvider } from './precompiled-runtime'
+import { leadingStandardIncludes, selectPchProfile, precompiledCppRuntimeProvider, createFastCppRuntimePlugin } from './precompiled-runtime'
 
 describe('standard-library PCH selection', () => {
+  it('selects separate artifact bytes for the upstream and rollback backends', () => {
+    const files = { '/workspace/main.cpp': '#include <iostream>\n#include <vector>\nint main() {}' }
+    const upstream = selectPchProfile(files, 'upstream')!
+    const legacy = selectPchProfile(files, 'legacy')!
+    expect(upstream.headers).toEqual(legacy.headers)
+    expect(upstream.sha256).not.toBe(legacy.sha256)
+    expect(legacy.sha256).toBe('893905b26e3604265486b6f225c937e33d3e8a4361de8eb02c569eb67c46fd00')
+  })
+  it('selects the matching provider and preserves rollback compiler settings', () => {
+    const scope = { projectId: 'lesson', accountId: 'synthetic' }
+    createFastCppRuntimePlugin(scope, 'upstream')
+    expect(createCppRuntimeProvider).toHaveBeenLastCalledWith({ backend: 'upstream', preserveCompilerOnCancel: true })
+    createFastCppRuntimePlugin(scope, 'legacy')
+    expect(createCppRuntimeProvider).toHaveBeenLastCalledWith({ backend: 'legacy', preserveCompilerOnCancel: true,
+      cpp: { scope, toolchainProfile: 'legacy', objectCache: false, cacheCompilerModule: true, retainWorker: true, idleTimeoutMs: 30_000 } })
+  })
   it('allows only the exact Testing V2 implementation beside eligible lesson sources', () => {
     const files: Record<string, string> = {
       '/workspace/main.cpp': '#include <iostream>\n#include "webide_test.h"\nint main() {}',
@@ -107,5 +124,30 @@ describe('PCH warmup lifecycle', () => {
     expect(await warming).toMatchObject({ status: 'cancelled' })
     expect(warmup).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
+  })
+})
+
+describe('verified PCH bytes', () => {
+  it('mounts each backend’s real asset and pins upstream inputs before compilation', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const { withPrecompiledHeaders } = await import('./precompiled-runtime')
+    const { upstreamRequiredToolchain } = await import('./generated/upstream-pch-profiles')
+    const plan = { files: { '/workspace/main.cpp': '#include <iostream>\nint main() {}' }, mode: 'run' as const }
+    try {
+      for (const backend of ['upstream', 'legacy'] as const) {
+        const profile = selectPchProfile(plan.files, backend)!
+        const assetPath = `compiler/${backend === 'upstream' ? 'upstream/' : ''}${profile.filename}`
+        const compressed = await readFile(new URL(`../../public/${assetPath}`, import.meta.url))
+        const fetch = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => Uint8Array.from(compressed).buffer })
+        vi.stubGlobal('fetch', fetch)
+        const provider = withPrecompiledHeaders(createCppRuntimeProvider({ backend }), backend)
+        await provider.createSession().prepare(plan)
+        expect(fetch.mock.calls[0]![0]).toBe(`/${assetPath}`)
+        const prepared = vi.mocked(prepare).mock.calls.at(-1) as unknown as [import('web-ide').RuntimeExecutionPlan]
+        expect(prepared[0].binaryFiles!['/sysroot/__web_ide_pch.pch'].byteLength).toBe(profile.bytes)
+        expect(prepared[0].cppArtifacts).toEqual({ precompiledHeader: '/sysroot/__web_ide_pch.pch', fallbackToSource: true,
+          ...(backend === 'upstream' ? { requiredToolchain: upstreamRequiredToolchain } : {}) })
+      }
+    } finally { vi.unstubAllGlobals() }
   })
 })
