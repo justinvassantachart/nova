@@ -47,7 +47,9 @@ selected backend and records both package integrities and the matching compiler,
 sysroot, and PCH digests. Verify the landing embed, linked-list Run/Debug, guided
 demo tests and initial breakpoint, lessons, and PCH fallback when upgrading.
 The graph shows observed referenced objects; it does not establish allocation
-ownership, size, or liveness. Check both Pretty and Raw after linking the nodes.
+ownership, size, or liveness. Check the observed objects and pointer connections
+after linking the nodes. Matching formatters now apply automatically; the shared
+Web IDE debugger cleanup removed the redundant Pretty/Raw toggle.
 License notices are published under `/licenses/`.
 
 To roll the runtime back, build the same source with `VITE_ENGINE_BACKEND=legacy`

@@ -8,7 +8,9 @@ This repository contains the deployed site. It imports the independently
 released Web IDE 0.12.0-upstream.0 component from an immutable public GitHub
 package, with exact integrities recorded in `package-lock.json`. It selects the
 verified upstream Engine build `0.3.16-upstream.e7a53c8d02e7`, preserving the
-editor, Pretty/Raw formatters, memory graph, Testing V2, and workspace isolation.
+editor, formatted debugger values, memory graph, Testing V2, and workspace isolation.
+This package includes the shared debugger cleanup: matching formatters apply
+automatically, and the redundant Pretty/Raw toggle has been removed.
 The site prepares the compiler once after opening an editable workspace and
 uses standard-library precompiled headers built for the selected toolchain.
 See [compiler performance](docs/compiler-performance.md) for measurements,
