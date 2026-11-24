@@ -15,10 +15,11 @@ const cache = join(root, `node_modules/.cache/web-ide-toolchain${upstream ? '-up
 const sysroot = join(cache, 'sysroot')
 const output = join(root, 'public/compiler', upstream ? 'upstream' : '')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const engineVersion = upstream ? '0.3.16-upstream.e7a53c8d02e7' : '0.3.15-webide.0.9.0.1'
+const engine = upstream ? JSON.parse(await readFile(new URL(import.meta.resolve('web-ide/upstream-engine.json')))) : undefined
+const engineVersion = engine?.version ?? '0.3.15-webide.0.9.0.1'
 const compilerDigest = upstream ? '8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6' : '24fbed474c7b5b4968fd73fc4827440b93fb351c1b6264516130300eff3e7bf5'
 const sysrootDigest = upstream ? 'c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b' : '8745c6af23fd841fa507d0c73f6b6b8e8da1b4ec216a6339739a28b38ff7227b'
-// Pin both the compiler identity and its owned, checksum-addressed download URLs.
+// Verify compiler bytes against the pinned tuple before generating any PCH.
 const toolchain = upstream ? JSON.parse(await readFile(new URL(import.meta.resolve('web-ide/upstream-toolchains.json')))).toolchains.cpp : undefined
 if (upstream && (toolchain.sha256.llvm !== compilerDigest || toolchain.sha256.sysroot !== sysrootDigest)) {
   throw new Error('Installed upstream toolchain changed; review and rebuild the PCH tuple explicitly')
@@ -75,7 +76,7 @@ const requiredToolchain = { compilerSha256: compilerDigest, sysrootSha256: sysro
   // The upstream exception runtime lives in this same verified sysroot container.
   exceptionsSha256: sysrootDigest }
 const manifest = { engineVersion, compilerDigest, sysrootDigest, flags, profiles,
-  ...(upstream ? { schemaVersion: 1, backend: 'upstream', engineSource: 'e7a53c8d02e7e611a8312e6e734d5c86094c88e6',
+  ...(upstream ? { schemaVersion: 1, backend: 'upstream', engineSource: engine.gitHead,
     toolchain, pchFlags, requiredToolchain, recipeSha256: hash(await readFile(import.meta.filename)),
     environment: { env: {}, argv0: 'clang', cwd: '/', target: 'wasm32-wasip1' } } : {}) }
 await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')

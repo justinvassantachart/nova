@@ -1,7 +1,7 @@
 # C++ compilation and precompiled headers
 
-The site consumes Web IDE 0.12.0-upstream.0 with the immutable Engine
-`0.3.16-upstream.e7a53c8d02e7` release. `package-lock.json` records both archives'
+The site consumes Web IDE 0.12.0-upstream.1 with the unmodified official npm Engine
+`0.4.2` release. `package-lock.json` records both archives'
 exact integrity. `VITE_ENGINE_BACKEND` defaults to `upstream`; a build with
 `VITE_ENGINE_BACKEND=legacy` selects the retained legacy Engine and legacy PCH
 profiles together. Unknown values fail configuration rather than selecting an
@@ -10,7 +10,9 @@ unintended compiler.
 Nova ships two standard-library-only PCH profiles: `<iostream>` and `<iostream>`
 followed by `<vector>`. No Stanford support archive is needed. The upstream
 profiles were rebuilt with the compiler/sysroot identities and complete flags
-in [the upstream manifest](../public/compiler/upstream/manifest.json). Their
+in [the upstream manifest](../public/compiler/upstream/manifest.json). That
+manifest preserves their original e7 build provenance. Engine 0.4.2 uses the
+same compiler and sysroot bytes, so these PCH files are reused unchanged. Their
 compiler SHA-256 is `8da7e06bf24341e85e0261bc727c65f0ff4b1f191a71f2af431e44f345bc6bd6`
 and sysroot SHA-256 is `c549ba2c715645298ddec4609859b6982188ab4662326ad023a4568a289f3a7b`.
 The runtime passes this required tuple to the public Web IDE provider before any
@@ -44,8 +46,11 @@ worker memory; this is not a measurement of the upstream backend.
 
 The upstream adapter keys its compilation cache by the immutable toolchain and
 actual PCH bytes, and the Engine invalidates objects when source/header contents
-or flags change. An unchanged Run can reuse compiled objects while linking and
-executing a fresh program. Cache lifetime is confined to the account/workspace
+or flags change. Engine 0.4.2 also reuses the linked executable for unchanged
+inputs. The Web IDE adapter invalidates that executable when source selection,
+mounted source/header/archive bytes, or build flags change, preserving object
+reuse while preventing stale links. Each Run still starts fresh guest state.
+Cache lifetime is confined to the account/workspace
 provider; a new provider starts with a fresh Engine.
 
 Nova's legacy standard-library PCH profile is not certified for translation-unit
@@ -149,6 +154,14 @@ be distinguished from subsequent build costs.
 
 ## Validation
 
+The 2026-11-23 official Engine 0.4.2 refresh repeated the Nova provider check in
+Chromium 151.0.7922.34 and WebKit 26.5 for both upstream and legacy backends.
+Both PCH profiles passed warmup, Run, unchanged Run, one-source edit, breakpoint,
+Step Over, and Continue. Upstream warm/unchanged runs compiled zero sources;
+edits and restored-source Debug compiled one source with the actual PCH flag.
+The existing compressed and raw PCH hashes remain unchanged. These functional
+checks were performed during other development work and are not benchmarks.
+
 On 2026-11-16, both profiles passed the actual Nova provider compatibility check
 in Chromium 151.0.7922.34 and WebKit 26.5, with both upstream and legacy backends:
 eight successful warmups, 32 successful foreground operations, and breakpoint,
@@ -187,9 +200,14 @@ respectively. The initial ordinary `iostream` run took 34.06 s after
 samples. Cold network cost still matters.
 
 For the legacy rollback profile, a compiler/sysroot change behind its old URL
-can make Clang reject an otherwise intact cached PCH. The new upstream profile
-uses checksum-addressed immutable compiler/sysroot URLs and explicit tuple
-validation; mismatch is an error that requires a reviewed rebuild. Demo inputs explicitly opt into one Debug source retry
+can make Clang reject an otherwise intact cached PCH. The upstream PCH profile
+uses explicit compiler/sysroot tuple validation;
+mismatch requires a reviewed rebuild. Official Engine 0.4.2 fetches versioned
+upstream toolchain URLs without checking their bytes at runtime. The release
+audit verified that those bytes match the pinned tuple; the build recipe checks
+download hashes before regenerating PCH. That verification does not make the
+upstream URLs immutable or protect against future runtime asset drift.
+Demo inputs explicitly opt into one Debug source retry
 for a compiler PCH/AST rejection before the authoritative DAP `initialized`
 event. Debug retains a single session and exit; Stop/dispose still cancels
 recovery. Ordinary Run has no explicit compilation-phase event, so compiler
