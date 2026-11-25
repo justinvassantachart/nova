@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import { loadEnv } from 'vite'
 
 const root = new URL('../', import.meta.url)
@@ -37,9 +38,30 @@ if (!engine?.version || !engine.resolved || !engine.integrity) {
 const pchManifest = JSON.parse(await readFile(new URL(
   backend === 'upstream' ? 'public/compiler/upstream/manifest.json' : 'public/compiler/manifest.json', root,
 ), 'utf8'))
+const officialEngine = JSON.parse(await readFile(new URL(import.meta.resolve('web-ide/upstream-engine.json')), 'utf8'))
+const toolchains = JSON.parse(await readFile(new URL(import.meta.resolve('web-ide/upstream-toolchains.json')), 'utf8'))
+const upstreamRecord = lock.packages['node_modules/debugger-sh-upstream']
+if (workbench.dependencies['debugger-sh-upstream'] !== `npm:debugger-sh@${officialEngine.version}`
+  || upstreamRecord?.name !== officialEngine.packageName
+  || upstreamRecord.version !== officialEngine.version
+  || upstreamRecord.resolved !== officialEngine.tarball
+  || upstreamRecord.integrity !== officialEngine.integrity) {
+  throw new Error('Installed upstream Engine must match the official package pinned by Web IDE')
+}
+for (const file of officialEngine.files) {
+  const bytes = await readFile(new URL(`node_modules/debugger-sh-upstream/${file.path}`, root))
+  if (bytes.length !== file.bytes || createHash('sha256').update(bytes).digest('hex') !== file.sha256) {
+    throw new Error(`Installed upstream Engine file differs from its pinned package: ${file.path}`)
+  }
+}
+const upstreamPch = JSON.parse(await readFile(new URL('public/compiler/upstream/manifest.json', root), 'utf8'))
+if (upstreamPch.compilerDigest !== toolchains.toolchains.cpp.sha256.llvm
+  || upstreamPch.sysrootDigest !== toolchains.toolchains.cpp.sha256.sysroot) {
+  throw new Error('Nova precompiled headers require a different upstream compiler or sysroot')
+}
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
 const buildInfo = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   application: 'web-ide',
   sourceCommit: git('rev-parse', 'HEAD'),
   sourceDirty: git('status', '--porcelain', '--untracked-files=no') !== '',
@@ -49,7 +71,10 @@ const buildInfo = {
     url: packageRecord.resolved,
     integrity: packageRecord.integrity,
   },
-  engine: { version: engine.version, url: engine.resolved, integrity: engine.integrity },
+  engine: { version: engine.version, url: engine.resolved, integrity: engine.integrity,
+    ...(backend === 'upstream' ? { sourceCommit: officialEngine.gitHead,
+      sha256: officialEngine.sha256, wasmUrl: officialEngine.wasmUrl, workerMode: officialEngine.workerMode } : {}),
+  },
   compiler: {
     compilerDigest: pchManifest.compilerDigest,
     sysrootDigest: pchManifest.sysrootDigest,

@@ -41,10 +41,14 @@ After deployment, open `/`, `/ide?example=linked-list`, `/learn`, and a direct
 the linked-list workspace on the landing page can also run.
 
 Check `/build-info.json` to identify the deployed Git commit and debugger engine.
-The site consumes immutable Web IDE `0.12.0-upstream.0` with upstream Engine
-`0.3.16-upstream.e7a53c8d02e7` by default. `/build-info.json` identifies the
+The site consumes immutable Web IDE `0.12.0-upstream.1` with official npm Engine
+`0.4.2` by default. `/build-info.json` identifies the
 selected backend and records both package integrities and the matching compiler,
-sysroot, and PCH digests. Verify the landing embed, linked-list Run/Debug, guided
+sysroot, and PCH digests. Schema 4 also records the official Engine source,
+archive SHA-256, CDN WASM URL, and inline Blob worker mode. The build checks every
+installed upstream Engine file against the metadata shipped with Web IDE, and
+rejects a PCH/compiler tuple mismatch. Verify the landing embed, linked-list
+Run/Debug, guided
 demo tests and initial breakpoint, lessons, and PCH fallback when upgrading.
 The graph shows observed referenced objects; it does not establish allocation
 ownership, size, or liveness. Check the observed objects and pointer connections
@@ -77,6 +81,12 @@ Reproduce the rules in `netlify.toml`:
 - Revalidate HTML, service workers, and runtime assets with stable filenames.
   Fingerprinted files in `/assets/` can use immutable caching.
 - Serve `.wasm` as `application/wasm`. Permit the runtime's asset downloads.
+  Official Engine 0.4.2 loads its WASM from
+  `https://cdn.jsdelivr.net/npm/debugger-sh@0.4.2/dist/engine_bg.wasm`, creates
+  Blob workers, and loads LLVM from `https://debugger-sh.github.io/llvm/0.3.15/`.
+  A host CSP must permit those exact fetch paths and `blob:` workers. Engine
+  0.4.2 has no public WASM URL override; deploying the site alone does not make
+  these downloads self-hosted.
 
 Keep `public/coep-sw.js` at `/coep-sw.js`. The workspace bootstrap registers it
 before Firebase requests on isolated pages; it handles the cross-origin responses

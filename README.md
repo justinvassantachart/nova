@@ -5,9 +5,9 @@ step-through debugging, tests, a terminal, and memory visualization. The live
 site is [webide.org](https://webide.org).
 
 This repository contains the deployed site. It imports the independently
-released Web IDE 0.12.0-upstream.0 component from an immutable public GitHub
+released Web IDE 0.12.0-upstream.1 component from an immutable public GitHub
 package, with exact integrities recorded in `package-lock.json`. It selects the
-verified upstream Engine build `0.3.16-upstream.e7a53c8d02e7`, preserving the
+unmodified official npm Engine release `0.4.2`, preserving the
 editor, formatted debugger values, memory graph, Testing V2, and workspace isolation.
 This package includes the shared debugger cleanup: matching formatters apply
 automatically, and the redundant Pretty/Raw toggle has been removed.
