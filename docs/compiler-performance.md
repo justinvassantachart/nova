@@ -1,6 +1,6 @@
 # C++ compilation and precompiled headers
 
-The site consumes Web IDE 0.12.0-upstream.1 with the unmodified official npm Engine
+The site consumes Web IDE 0.12.0-upstream.2 with the unmodified official npm Engine
 `0.4.2` release. `package-lock.json` records both archives'
 exact integrity. `VITE_ENGINE_BACKEND` defaults to `upstream`; a build with
 `VITE_ENGINE_BACKEND=legacy` selects the retained legacy Engine and legacy PCH

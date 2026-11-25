@@ -41,7 +41,7 @@ After deployment, open `/`, `/ide?example=linked-list`, `/learn`, and a direct
 the linked-list workspace on the landing page can also run.
 
 Check `/build-info.json` to identify the deployed Git commit and debugger engine.
-The site consumes immutable Web IDE `0.12.0-upstream.1` with official npm Engine
+The site consumes immutable Web IDE `0.12.0-upstream.2` with official npm Engine
 `0.4.2` by default. `/build-info.json` identifies the
 selected backend and records both package integrities and the matching compiler,
 sysroot, and PCH digests. Schema 4 also records the official Engine source,
